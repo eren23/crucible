@@ -4,6 +4,59 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 
+# ---------------------------------------------------------------------------
+# Version store types
+# ---------------------------------------------------------------------------
+
+class VersionMeta(TypedDict, total=False):
+    """Metadata for a single version of any versioned resource."""
+    resource_type: str      # "experiment_design" | "research_context"
+    resource_name: str      # Slug-style unique name within type
+    version: int            # Monotonically increasing per resource_name
+    version_id: str         # "{resource_type}/{resource_name}@v{version}"
+    created_at: str         # ISO 8601 UTC
+    created_by: str         # Agent identity string
+    parent_version_id: str | None
+    git_sha: str | None
+    git_committed: bool
+    summary: str
+    tags: list[str]
+    checksum: str           # SHA-256 of YAML content
+
+
+class ExperimentDesign(TypedDict, total=False):
+    """A versioned experiment design — config that can be iterated before execution."""
+    name: str
+    description: str
+    hypothesis: str
+    config: dict[str, str]  # env var overrides
+    base_preset: str        # smoke | proxy | medium | promotion
+    backend: str
+    tags: list[str]
+    family: str
+    status: str             # draft | ready | running | completed | archived
+    linked_run_ids: list[str]
+    parent_design: str | None
+    rationale: str
+
+
+class ResearchContextEntry(TypedDict, total=False):
+    """A versioned research context entry — knowledge artifacts."""
+    name: str
+    entry_type: str         # paper | idea | reference | finding | constraint
+    title: str
+    content: str            # markdown
+    source: str             # URL or "agent-generated"
+    relevance: str
+    tags: list[str]
+    status: str             # active | superseded | archived
+
+
+# ---------------------------------------------------------------------------
+# Experiment types
+# ---------------------------------------------------------------------------
+
+
 class ExperimentConfig(TypedDict, total=False):
     """Configuration for a single experiment to run."""
     name: str

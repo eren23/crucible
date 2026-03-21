@@ -122,6 +122,21 @@ def _main() -> None:
     data_sub.add_parser("sync", help="Push data to fleet nodes")
     data_sub.add_parser("status", help="Show local data availability")
 
+    # ── store ──
+    store_parser = subparsers.add_parser("store", help="Version store management")
+    store_sub = store_parser.add_subparsers(dest="store_command")
+
+    store_list = store_sub.add_parser("list", help="List versioned resources")
+    store_list.add_argument("resource_type", choices=["designs", "context"], help="Resource type to list")
+
+    store_show = store_sub.add_parser("show", help="Show current version of a resource")
+    store_show.add_argument("resource_path", help="Resource path: {type}/{name}")
+
+    store_history = store_sub.add_parser("history", help="Show version history")
+    store_history.add_argument("resource_path", help="Resource path: {type}/{name}")
+
+    store_sub.add_parser("commit", help="Git commit all uncommitted versions")
+
     # ── mcp ──
     mcp_parser = subparsers.add_parser("mcp", help="MCP server")
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
@@ -167,6 +182,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.data_commands import handle_data
 
         handle_data(args)
+    elif args.command == "store":
+        from crucible.cli.store_commands import handle_store
+
+        handle_store(args)
     elif args.command == "mcp":
         from crucible.cli.mcp_commands import handle_mcp
 

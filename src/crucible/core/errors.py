@@ -15,3 +15,6 @@ class ResearcherError(CrucibleError):
 
 class DataError(CrucibleError):
     """Data download, manifest, sync failures."""
+
+class StoreError(CrucibleError):
+    """Version store read/write/integrity failures."""
