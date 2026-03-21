@@ -32,12 +32,13 @@ class ConvLoopedTransformerLM(TiedEmbeddingLM):
         residual_variant: str = "standard",
         embed_bottleneck_dim: int = 0,
         spectral_embed_init: bool = False,
+        activation: str = "relu_sq",
     ):
         super().__init__(vocab_size, embed_dim, tie_embeddings, tied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
         self.compress = FeatureConvBottleneck(embed_dim, core_dim)
         self.expand = CastedLinear(core_dim, embed_dim, bias=False)
         self.blocks = nn.ModuleList([
-            Block(core_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init, attention_variant, residual_variant)
+            Block(core_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init, attention_variant, residual_variant, activation=activation)
             for _ in range(unique_blocks)
         ])
         self.logical_steps = logical_steps
@@ -79,6 +80,7 @@ def _build_convloop(args: Any) -> ConvLoopedTransformerLM:
         qk_gain_init=args.qk_gain_init,
         attention_variant=args.attention_variant,
         residual_variant=args.residual_variant,
+        activation=getattr(args, 'activation', 'relu_sq'),
     )
 
 

@@ -29,11 +29,12 @@ class LoopedTransformerLM(TiedEmbeddingLM):
         residual_variant: str = "standard",
         embed_bottleneck_dim: int = 0,
         spectral_embed_init: bool = False,
+        activation: str = "relu_sq",
     ):
         super().__init__(vocab_size, model_dim, tie_embeddings, tied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
         self.logical_steps = logical_steps
         self.blocks = nn.ModuleList([
-            Block(model_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init, attention_variant, residual_variant)
+            Block(model_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init, attention_variant, residual_variant, activation=activation)
             for _ in range(unique_blocks)
         ])
         self.step_scales = nn.Parameter(torch.ones(logical_steps, model_dim, dtype=torch.float32))
@@ -69,6 +70,7 @@ def _build_looped(args: Any) -> LoopedTransformerLM:
         qk_gain_init=args.qk_gain_init,
         attention_variant=args.attention_variant,
         residual_variant=args.residual_variant,
+        activation=getattr(args, 'activation', 'relu_sq'),
     )
 
 

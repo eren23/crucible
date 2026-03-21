@@ -14,9 +14,10 @@ iterations = int(os.environ.get("ITERATIONS", "100"))
 max_wallclock = int(os.environ.get("MAX_WALLCLOCK_SECONDS", "30"))
 val_every = int(os.environ.get("VAL_LOSS_EVERY", "20"))
 model_family = os.environ.get("MODEL_FAMILY", "baseline")
+activation = os.environ.get("ACTIVATION", "relu_sq")
 run_id = os.environ.get("RUN_ID", "unknown")
 
-print(f"[dummy_train] Starting: family={model_family} iters={iterations} wallclock={max_wallclock}s")
+print(f"[dummy_train] Starting: family={model_family} activation={activation} iters={iterations} wallclock={max_wallclock}s")
 print(f"[dummy_train] run_id={run_id}")
 
 start_time = time.time()
