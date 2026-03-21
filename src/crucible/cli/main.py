@@ -122,6 +122,9 @@ def _main() -> None:
     data_sub.add_parser("sync", help="Push data to fleet nodes")
     data_sub.add_parser("status", help="Show local data availability")
 
+    # ── tui ──
+    subparsers.add_parser("tui", help="Interactive experiment design browser")
+
     # ── store ──
     store_parser = subparsers.add_parser("store", help="Version store management")
     store_sub = store_parser.add_subparsers(dest="store_command")
@@ -182,6 +185,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.data_commands import handle_data
 
         handle_data(args)
+    elif args.command == "tui":
+        from crucible.tui.app import main as tui_main
+
+        tui_main()
     elif args.command == "store":
         from crucible.cli.store_commands import handle_store
 
