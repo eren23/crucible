@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from crucible.core.errors import ConfigError
 from crucible.core.io import read_jsonl, write_jsonl
 from crucible.core.log import utc_now_iso, utc_stamp
 
@@ -187,23 +188,23 @@ def load_wave_spec(path: Path, *, default_backend: str = "torch") -> list[dict[s
     Optional fields: ``tags``, ``priority``, ``tier``, ``backend``, ``wave``.
     """
     if not path.exists():
-        raise SystemExit(f"Spec file not found: {path}")
+        raise ConfigError(f"Spec file not found: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
-        raise SystemExit(f"Spec file must contain a JSON array: {path}")
+        raise ConfigError(f"Spec file must contain a JSON array: {path}")
     normalized: list[dict[str, Any]] = []
     inferred_wave = path.stem
     for idx, entry in enumerate(payload, 1):
         if not isinstance(entry, dict):
-            raise SystemExit(f"Spec entry #{idx} in {path} must be a JSON object.")
+            raise ConfigError(f"Spec entry #{idx} in {path} must be a JSON object.")
         if not entry.get("name") or not isinstance(entry.get("name"), str):
-            raise SystemExit(f"Spec entry #{idx} in {path} is missing string field 'name'.")
+            raise ConfigError(f"Spec entry #{idx} in {path} is missing string field 'name'.")
         config = entry.get("config")
         if not isinstance(config, dict):
-            raise SystemExit(f"Spec entry #{idx} in {path} is missing object field 'config'.")
+            raise ConfigError(f"Spec entry #{idx} in {path} is missing object field 'config'.")
         tags = entry.get("tags", [])
         if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
-            raise SystemExit(f"Spec entry #{idx} in {path} has invalid 'tags'; expected string array.")
+            raise ConfigError(f"Spec entry #{idx} in {path} has invalid 'tags'; expected string array.")
         normalized.append(
             {
                 "name": entry["name"],

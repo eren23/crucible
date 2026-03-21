@@ -14,7 +14,14 @@ from crucible.analysis.results import completed_results
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_DEFAULT_METRIC = "val_bpb"
+
+def _resolve_metric(metric: str | None, cfg: ProjectConfig | None) -> str:
+    """Return an explicit metric name, falling back to config or 'val_loss'."""
+    if metric is not None:
+        return metric
+    if cfg is not None:
+        return cfg.metrics.primary
+    return "val_loss"
 
 
 def _metric_value(result: ExperimentResult, metric: str) -> float:
@@ -31,17 +38,29 @@ def _metric_value(result: ExperimentResult, metric: str) -> float:
 
 
 def leaderboard(
+    results: list[ExperimentResult] | None = None,
     top_n: int = 50,
     *,
-    metric: str = _DEFAULT_METRIC,
+    metric: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> list[ExperimentResult]:
     """Return the *top_n* completed experiments ranked by *metric* (ascending).
 
     Lower values are better (e.g. loss, BPB).  Pass ``metric`` to rank by a
     different key inside the ``result`` dict.
+
+    Parameters
+    ----------
+    results:
+        Pre-loaded list of completed experiment results.  When *None*
+        (default), results are loaded via :func:`completed_results`.
+    metric:
+        Result key to rank by.  When *None* (default), resolved from
+        ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
     """
-    results = completed_results(cfg)
+    metric = _resolve_metric(metric, cfg)
+    if results is None:
+        results = completed_results(cfg)
     if not results:
         return []
 
@@ -57,8 +76,9 @@ def leaderboard(
 
 
 def sensitivity_analysis(
+    results: list[ExperimentResult] | None = None,
     *,
-    metric: str = _DEFAULT_METRIC,
+    metric: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> dict[str, list[tuple[Any, float]]]:
     """For each config key with >1 unique value, return ``(value, metric)`` pairs.
@@ -66,12 +86,23 @@ def sensitivity_analysis(
     Pairs are sorted by metric ascending so the first entry is the best
     observed value for that key.
 
+    Parameters
+    ----------
+    results:
+        Pre-loaded list of completed experiment results.  When *None*
+        (default), results are loaded via :func:`completed_results`.
+    metric:
+        Result key to rank by.  When *None* (default), resolved from
+        ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
+
     Returns
     -------
     dict mapping config-key names to sorted lists of ``(config_value, metric_value)``
     tuples.  Only keys whose values actually vary across experiments are included.
     """
-    results = completed_results(cfg)
+    metric = _resolve_metric(metric, cfg)
+    if results is None:
+        results = completed_results(cfg)
     if not results:
         return {}
 
@@ -96,8 +127,8 @@ def sensitivity_analysis(
 
 def pareto_frontier(
     *,
-    metric: str = _DEFAULT_METRIC,
-    size_key: str = "model_bytes",
+    metric: str | None = None,
+    size_key: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> list[ExperimentResult]:
     """Return Pareto-optimal experiments on two dimensions.
@@ -111,13 +142,18 @@ def pareto_frontier(
     Parameters
     ----------
     metric:
-        Key inside ``result`` dict for the quality axis (default ``val_bpb``).
+        Key inside ``result`` dict for the quality axis.  When *None*,
+        resolved from ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
     size_key:
-        Key on the top-level result record for the cost/size axis (default
-        ``model_bytes``).
+        Key on the top-level result record for the cost/size axis.  When
+        *None*, resolved from ``cfg.metrics.size`` or falls back to
+        ``"model_bytes"``.
     cfg:
         Project configuration.
     """
+    metric = _resolve_metric(metric, cfg)
+    if size_key is None:
+        size_key = cfg.metrics.size if cfg is not None else "model_bytes"
     results = [
         r for r in completed_results(cfg)
         if r.get(size_key) and metric in (r.get("result") or {})

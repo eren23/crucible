@@ -99,39 +99,45 @@ def record_day_progress(
 # Leaderboard
 # ---------------------------------------------------------------------------
 
-def write_day_leaderboard(day_dir: Path, rows: list[dict[str, Any]]) -> None:
-    """Generate a markdown leaderboard ranked by val_bpb."""
+def write_day_leaderboard(
+    day_dir: Path,
+    rows: list[dict[str, Any]],
+    metric_key: str = "val_loss",
+) -> None:
+    """Generate a markdown leaderboard ranked by *metric_key*."""
     ranked = [
         row
         for row in rows
-        if row.get("status") == "completed" and row.get("result") and "val_bpb" in row["result"]
+        if row.get("status") == "completed" and row.get("result") and metric_key in row["result"]
     ]
-    ranked.sort(key=lambda row: row["result"]["val_bpb"])
+    ranked.sort(key=lambda row: row["result"][metric_key])
     lines = [
         "# Day Leaderboard", "",
-        "| Rank | Name | val_bpb | val_loss | Steps |",
-        "|---:|---|---:|---:|---:|",
+        f"| Rank | Name | {metric_key} | Steps |",
+        "|---:|---|---:|---:|",
     ]
     for idx, row in enumerate(ranked, 1):
         res = row["result"]
-        lines.append(
-            f"| {idx} | {row['name']} | {res['val_bpb']:.4f} "
-            f"| {res['val_loss']:.4f} | {res.get('steps_completed', 0)} |"
-        )
+        lines.append(f"| {idx} | {row['name']} | {res[metric_key]:.4f} | {res.get('steps_completed', 0)} |")
     (day_dir / "leaderboard.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def leaderboard_snippet(rows: list[dict[str, Any]], *, limit: int = 3) -> list[str]:
+def leaderboard_snippet(
+    rows: list[dict[str, Any]],
+    *,
+    limit: int = 3,
+    metric_key: str = "val_loss",
+) -> list[str]:
     """Return the top *limit* results as short summary strings."""
     ranked = [
         row
         for row in rows
-        if row.get("status") == "completed" and row.get("result") and "val_bpb" in row["result"]
+        if row.get("status") == "completed" and row.get("result") and metric_key in row["result"]
     ]
-    ranked.sort(key=lambda row: row["result"]["val_bpb"])
+    ranked.sort(key=lambda row: row["result"][metric_key])
     out: list[str] = []
     for idx, row in enumerate(ranked[:limit], 1):
-        out.append(f"{idx}. {row['name']} val_bpb={row['result']['val_bpb']:.4f}")
+        out.append(f"{idx}. {row['name']} {metric_key}={row['result'][metric_key]:.4f}")
     return out
 
 

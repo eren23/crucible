@@ -5,9 +5,18 @@ import argparse
 import sys
 
 from crucible.core.config import load_config
+from crucible.core.errors import CrucibleError
 
 
 def handle_research(args: argparse.Namespace) -> None:
+    try:
+        _handle_research(args)
+    except CrucibleError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _handle_research(args: argparse.Namespace) -> None:
     config = load_config()
     cmd = getattr(args, "research_command", None)
 

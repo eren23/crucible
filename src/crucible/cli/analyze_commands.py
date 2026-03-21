@@ -15,27 +15,35 @@ def handle_analyze(args: argparse.Namespace) -> None:
         from crucible.analysis.leaderboard import leaderboard
         from crucible.analysis.results import completed_results
 
+        primary = config.metrics.primary
+        secondary = config.metrics.secondary or ""
         results = completed_results(config)
-        top = leaderboard(results, top_n=getattr(args, "top", 20))
+        top = leaderboard(results, top_n=getattr(args, "top", 20), cfg=config)
         if not top:
             print("No completed experiments.")
             return
-        print(f"{'Rank':>4}  {'Name':<40}  {'val_bpb':>8}  {'val_loss':>8}  {'bytes':>10}")
+        if secondary:
+            print(f"{'Rank':>4}  {'Name':<40}  {primary:>8}  {secondary:>8}  {'bytes':>10}")
+        else:
+            print(f"{'Rank':>4}  {'Name':<40}  {primary:>8}  {'bytes':>10}")
         print("-" * 80)
         for i, r in enumerate(top, 1):
             res = r.get("result", {})
-            bpb = res.get("val_bpb", "N/A")
-            loss = res.get("val_loss", "N/A")
-            bpb_str = f"{bpb:.4f}" if isinstance(bpb, (int, float)) else str(bpb)
-            loss_str = f"{loss:.4f}" if isinstance(loss, (int, float)) else str(loss)
-            print(f"{i:>4}  {r.get('name', '?'):<40}  {bpb_str:>8}  {loss_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
+            pri = res.get(primary, "N/A")
+            pri_str = f"{pri:.4f}" if isinstance(pri, (int, float)) else str(pri)
+            if secondary:
+                sec = res.get(secondary, "N/A")
+                sec_str = f"{sec:.4f}" if isinstance(sec, (int, float)) else str(sec)
+                print(f"{i:>4}  {r.get('name', '?'):<40}  {pri_str:>8}  {sec_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
+            else:
+                print(f"{i:>4}  {r.get('name', '?'):<40}  {pri_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
 
     elif cmd == "sensitivity":
         from crucible.analysis.leaderboard import sensitivity_analysis
         from crucible.analysis.results import completed_results
 
         results = completed_results(config)
-        sens = sensitivity_analysis(results)
+        sens = sensitivity_analysis(results, cfg=config)
         if not sens:
             print("Not enough data for sensitivity analysis.")
             return
@@ -48,36 +56,30 @@ def handle_analyze(args: argparse.Namespace) -> None:
 
     elif cmd == "pareto":
         from crucible.analysis.leaderboard import pareto_frontier
-        from crucible.analysis.results import completed_results
 
-        results = completed_results(config)
-        frontier = pareto_frontier(results)
+        primary = config.metrics.primary
+        frontier = pareto_frontier(cfg=config)
         if not frontier:
             print("No data for Pareto frontier.")
             return
-        print(f"{'Name':<40}  {'val_bpb':>8}  {'bytes':>10}")
+        print(f"{'Name':<40}  {primary:>8}  {'bytes':>10}")
         print("-" * 60)
         for r in frontier:
             res = r.get("result", {})
-            bpb = res.get("val_bpb", "N/A")
-            bpb_str = f"{bpb:.4f}" if isinstance(bpb, (int, float)) else str(bpb)
-            print(f"{r.get('name', '?'):<40}  {bpb_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
+            pri = res.get(primary, "N/A")
+            pri_str = f"{pri:.4f}" if isinstance(pri, (int, float)) else str(pri)
+            print(f"{r.get('name', '?'):<40}  {pri_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
 
     elif cmd == "export":
         from crucible.analysis.export import export_top_configs
-        from crucible.analysis.results import completed_results
 
-        results = completed_results(config)
         out_dir = getattr(args, "out", "exported_configs")
-        exported = export_top_configs(results, top_n=getattr(args, "top", 5), out_dir=out_dir)
-        print(f"Exported {exported} configs to {out_dir}/")
+        export_top_configs(n=getattr(args, "top", 5), out_dir=out_dir, cfg=config)
 
     elif cmd == "summary":
         from crucible.analysis.export import generate_summary
-        from crucible.analysis.results import completed_results
 
-        results = completed_results(config)
-        print(generate_summary(results))
+        print(generate_summary(cfg=config))
 
     else:
         print("Usage: crucible analyze {rank|sensitivity|pareto|export|summary}", file=sys.stderr)

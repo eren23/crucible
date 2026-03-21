@@ -10,8 +10,16 @@ from crucible.researcher.state import ResearchState
 def reflect_and_update(
     state: ResearchState,
     llm: LLMClient,
+    metric_key: str = "val_loss",
 ) -> tuple[list[str], list[str]]:
-    """Post-experiment reflection. Returns (promote_names, kill_names)."""
+    """Post-experiment reflection. Returns (promote_names, kill_names).
+
+    Parameters
+    ----------
+    metric_key:
+        Primary metric key to extract from result dicts.  Callers with
+        access to a ``ProjectConfig`` should pass ``config.metrics.primary``.
+    """
     recent_results = state.history[-10:]
     if not recent_results:
         return [], []
@@ -21,10 +29,10 @@ def reflect_and_update(
         exp = rec.get("experiment", {})
         res = rec.get("result", {})
         name = exp.get("name", "unknown")
-        primary_metric = res.get("val_bpb", res.get("result", {}).get("val_bpb"))
+        primary_metric = res.get(metric_key, res.get("result", {}).get(metric_key))
         status = res.get("status", "unknown")
         metric_str = f"{primary_metric:.4f}" if isinstance(primary_metric, (int, float)) else "N/A"
-        context_lines.append(f"  {name}: primary_metric={metric_str} status={status}")
+        context_lines.append(f"  {name}: {metric_key}={metric_str} status={status}")
 
     if state.beliefs:
         context_lines.append("\nCurrent beliefs:")
@@ -43,7 +51,7 @@ def reflect_and_update(
             )
             if actual_rec:
                 actual_metric = actual_rec.get("result", {}).get(
-                    "val_bpb", actual_rec.get("result", {}).get("result", {}).get("val_bpb")
+                    metric_key, actual_rec.get("result", {}).get("result", {}).get(metric_key)
                 )
                 expected = h.get("expected_impact", h.get("expected_bpb_impact", 0))
                 context_lines.append(

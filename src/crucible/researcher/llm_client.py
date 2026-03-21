@@ -9,6 +9,8 @@ import os
 import re
 from typing import Any, Protocol
 
+from crucible.core.errors import ResearcherError
+
 
 class LLMClient(Protocol):
     """Protocol for LLM backends used by the autonomous researcher."""
@@ -44,9 +46,10 @@ class AnthropicClient:
             if response.content and len(response.content) > 0:
                 return response.content[0].text
             return None
+        except KeyboardInterrupt:
+            raise
         except Exception as exc:
-            print(f"  LLM call failed: {exc}")
-            return None
+            raise ResearcherError(f"LLM call failed (model={self.model}): {exc}") from exc
 
 
 def parse_json_from_text(text: str) -> dict[str, Any] | None:

@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from crucible.core.config import ProjectConfig, load_config
+from crucible.core.errors import CrucibleError
 from crucible.core.io import read_jsonl
 from crucible.core.log import utc_now_iso
 
@@ -34,36 +35,43 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
             for n in nodes
         ]
         return {"summary": summary, "nodes": node_details}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}", "nodes": []}
     except Exception as exc:
-        return {"error": str(exc), "nodes": []}
+        return {"error": f"[unexpected] {exc}", "nodes": []}
 
 
 def get_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
     """Top N experiment results sorted by primary metric."""
     config = _get_config()
     top_n = args.get("top_n", 20)
+    primary = config.metrics.primary
+    secondary = config.metrics.secondary or ""
     try:
         from crucible.analysis.leaderboard import leaderboard
         from crucible.analysis.results import completed_results
 
         results = completed_results(config)
-        top = leaderboard(results, top_n=top_n)
+        top = leaderboard(results, top_n=top_n, cfg=config)
         entries = []
         for i, r in enumerate(top, 1):
             res = r.get("result", {})
-            entries.append(
-                {
-                    "rank": i,
-                    "name": r.get("name", ""),
-                    "val_bpb": res.get("val_bpb"),
-                    "val_loss": res.get("val_loss"),
-                    "steps_completed": res.get("steps_completed"),
-                    "model_bytes": r.get("model_bytes"),
-                }
-            )
-        return {"total_completed": len(results), "top": entries}
+            entry: dict[str, Any] = {
+                "rank": i,
+                "name": r.get("name", ""),
+                "primary_metric": primary,
+                primary: res.get(primary),
+                "steps_completed": res.get("steps_completed"),
+                "model_bytes": r.get("model_bytes"),
+            }
+            if secondary:
+                entry[secondary] = res.get(secondary)
+            entries.append(entry)
+        return {"total_completed": len(results), "primary_metric": primary, "top": entries}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}", "top": []}
     except Exception as exc:
-        return {"error": str(exc), "top": []}
+        return {"error": f"[unexpected] {exc}", "top": []}
 
 
 def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
@@ -75,8 +83,10 @@ def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
         rows = load_queue(config.project_root / config.fleet_results_file)
         summary = summarize_queue(rows)
         return {"total": len(rows), "summary": summary}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
@@ -100,8 +110,10 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
         if added:
             return {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
         return {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
@@ -109,14 +121,16 @@ def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     run_id = args["run_id"]
     try:
-        from crucible.analysis.results import load_all_results
+        from crucible.analysis.results import merged_results
 
-        for row in load_all_results(config):
+        for row in merged_results(config):
             if row.get("id") == run_id or row.get("run_id") == run_id:
                 return {"found": True, "result": row}
         return {"found": False, "run_id": run_id}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -134,8 +148,10 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
             "created": len(new_nodes),
             "new_nodes": [{"name": n.get("name"), "node_id": n.get("node_id")} for n in new_nodes],
         }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -148,8 +164,10 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
         node_names = args.get("node_names") or None
         fleet.destroy(node_names=node_names)
         return {"destroyed": node_names or "all", "status": "ok"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def sync_code(args: dict[str, Any]) -> dict[str, Any]:
@@ -177,8 +195,10 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
             except Exception as exc:
                 errors.append({"node": node["name"], "error": str(exc)})
         return {"synced": synced, "errors": errors}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def get_research_state(args: dict[str, Any]) -> dict[str, Any]:
@@ -198,8 +218,10 @@ def get_research_state(args: dict[str, Any]) -> dict[str, Any]:
             "beliefs": state.beliefs,
             "budget_remaining": state.budget_remaining,
         }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 def get_sensitivity(args: dict[str, Any]) -> dict[str, Any]:
@@ -210,10 +232,12 @@ def get_sensitivity(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.analysis.results import completed_results
 
         results = completed_results(config)
-        sens = sensitivity_analysis(results)
+        sens = sensitivity_analysis(results, cfg=config)
         return {"parameters": {k: v for k, v in list(sens.items())[:20]}}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
-        return {"error": str(exc)}
+        return {"error": f"[unexpected] {exc}"}
 
 
 # Dispatch table

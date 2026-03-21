@@ -37,6 +37,7 @@ def ssh_base(node: dict[str, Any]) -> list[str]:
     return [
         "ssh",
         "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
         "-i", ssh_key,
         f"{node.get('user', 'root')}@{node['ssh_host']}",
@@ -147,6 +148,8 @@ def sync_env_file(
     source = project_root / env_source
     if not source.exists():
         source = project_root / ".env.local"
+    if not source.exists():
+        source = project_root / ".env"
     if not source.exists():
         return
     workspace = node.get("workspace_path", "/workspace/project")

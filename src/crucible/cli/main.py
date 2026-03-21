@@ -7,6 +7,16 @@ from pathlib import Path
 
 
 def main() -> None:
+    from crucible.core.errors import CrucibleError
+
+    try:
+        _main()
+    except CrucibleError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _main() -> None:
     parser = argparse.ArgumentParser(
         prog="crucible",
         description="Crucible — ML research platform for fleet orchestration, autonomous experimentation, and model development.",
@@ -31,7 +41,10 @@ def main() -> None:
     fleet_sub.add_parser("destroy", help="Tear down nodes").add_argument(
         "--node", type=str, action="append", dest="nodes", help="Node names to destroy"
     )
-    fleet_sub.add_parser("bootstrap", help="Bootstrap nodes (sync code + data)")
+    boot = fleet_sub.add_parser("bootstrap", help="Bootstrap nodes (sync code + data)")
+    boot.add_argument("--train-shards", type=int, default=1, help="Number of training data shards to download")
+    boot.add_argument("--skip-install", action="store_true", help="Skip pip install step")
+    boot.add_argument("--skip-data", action="store_true", help="Skip data download step")
     fleet_sub.add_parser("sync", help="Push local code to nodes")
     mon = fleet_sub.add_parser("monitor", help="Live node status")
     mon.add_argument("--watch", type=int, default=0, help="Refresh interval in seconds")

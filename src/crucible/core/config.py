@@ -34,6 +34,14 @@ class TrainingConfig:
 
 
 @dataclass
+class MetricsConfig:
+    primary: str = "val_loss"        # metric to rank by (from result dict)
+    secondary: str = ""              # optional secondary display metric
+    size: str = "model_bytes"        # for Pareto frontier
+    direction: str = "minimize"      # "minimize" | "maximize"
+
+
+@dataclass
 class ResearcherConfig:
     model: str = "claude-sonnet-4-6-20250514"
     max_tokens: int = 4096
@@ -51,6 +59,7 @@ class ProjectConfig:
     data: DataConfig = field(default_factory=DataConfig)
     training: list[TrainingConfig] = field(default_factory=list)
     presets: dict[str, dict[str, str]] = field(default_factory=dict)
+    metrics: MetricsConfig = field(default_factory=MetricsConfig)
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     sync_excludes: list[str] = field(default_factory=lambda: [
         ".git", ".venv", "__pycache__", "logs", "data/datasets", "data/tokenizers",
@@ -59,6 +68,12 @@ class ProjectConfig:
     fleet_results_file: str = "experiments_fleet.jsonl"
     logs_dir: str = "logs"
     nodes_file: str = "nodes.json"
+    runner_script: str = "autoresearch/run_experiment.py"
+    remote_results_file: str = "experiments.jsonl"
+    timeout_map: dict[str, dict[str, int]] = field(default_factory=lambda: {
+        "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},
+        "mlx": {"smoke": 180, "proxy": 3600, "medium": 7200, "promotion": 14400, "overnight": 7200},
+    })
 
 
 def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
@@ -92,6 +107,15 @@ def _build_training(raw: list[dict[str, Any]]) -> list[TrainingConfig]:
     ]
 
 
+def _build_metrics(raw: dict[str, Any]) -> MetricsConfig:
+    return MetricsConfig(
+        primary=raw.get("primary", "val_loss"),
+        secondary=raw.get("secondary", ""),
+        size=raw.get("size", "model_bytes"),
+        direction=raw.get("direction", "minimize"),
+    )
+
+
 def _build_researcher(raw: dict[str, Any]) -> ResearcherConfig:
     return ResearcherConfig(
         model=raw.get("model", "claude-sonnet-4-6-20250514"),
@@ -120,6 +144,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         data=_build_data(raw.get("data", {})),
         training=_build_training(raw.get("training", [])),
         presets=raw.get("presets", {}),
+        metrics=_build_metrics(raw.get("metrics", {})),
         researcher=_build_researcher(raw.get("researcher", {})),
         sync_excludes=raw.get("sync_excludes", [
             ".git", ".venv", "__pycache__", "logs", "data/datasets", "data/tokenizers",
@@ -128,6 +153,12 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         fleet_results_file=raw.get("fleet_results_file", "experiments_fleet.jsonl"),
         logs_dir=raw.get("logs_dir", "logs"),
         nodes_file=raw.get("nodes_file", "nodes.json"),
+        runner_script=raw.get("runner_script", "autoresearch/run_experiment.py"),
+        remote_results_file=raw.get("remote_results_file", "experiments.jsonl"),
+        timeout_map=raw.get("timeout_map", {
+            "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},
+            "mlx": {"smoke": 180, "proxy": 3600, "medium": 7200, "promotion": 14400, "overnight": 7200},
+        }),
     )
 
 
@@ -166,6 +197,13 @@ data:
 training:
   - backend: torch
     script: train.py
+
+# Metrics configuration
+metrics:
+  primary: val_loss                        # metric to rank by
+  # secondary: ""                          # optional secondary display metric
+  # size: model_bytes                      # for Pareto frontier
+  # direction: minimize                    # "minimize" | "maximize"
 
 # Experiment presets
 presets:

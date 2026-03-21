@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from crucible.core.errors import RunnerError
 from crucible.core.io import append_jsonl, _json_ready
 from crucible.core.log import log_info, log_warn
 from crucible.core.config import ProjectConfig, load_config
@@ -128,7 +129,7 @@ def _update_tracker_from_line(
             step=parsed["step"],
             total_steps=parsed["total_steps"],
             latest_val_loss=parsed["val_loss"],
-            latest_val_bpb=parsed["val_bpb"],
+            latest_val_bpb=parsed.get("val_bpb"),  # kept for output_parser compat
             last_output_line=line.strip(),
         )
     elif line_type == "serializing":
@@ -181,7 +182,7 @@ def run_experiment(
     if project_config is None:
         try:
             project_config = load_config()
-        except Exception:
+        except (FileNotFoundError, ValueError, OSError):
             project_config = ProjectConfig()
 
     root = Path(project_root).resolve() if project_root else project_config.project_root
@@ -432,6 +433,20 @@ def run_experiment(
                 )
             break  # Done -- exit the while True loop
 
+    except KeyboardInterrupt:
+        result["status"] = "failed"
+        result["error"] = "Interrupted by user"
+        result["failure_class"] = "interrupted"
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+        tracker.finalize(
+            "failed",
+            phase="completed",
+            returncode=result["returncode"],
+            failure_class="interrupted",
+            error=result["error"],
+        )
+        raise
     except Exception as exc:
         result["status"] = "failed"
         result["error"] = str(exc)

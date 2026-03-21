@@ -10,6 +10,9 @@ training:
   - backend: torch
     script: train.py
 
+metrics:
+  primary: val_loss
+
 presets:
   smoke:
     MAX_WALLCLOCK_SECONDS: "60"

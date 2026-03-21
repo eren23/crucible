@@ -1,45 +1,68 @@
 # Crucible
 
-An ML research platform for fleet orchestration, autonomous experimentation, and model development.
+> **Alpha software.** Crucible works for the author's use case (autonomous ML research on RunPod). It may work for yours. APIs will change. Bug reports and PRs welcome.
+
+Autonomous ML research on rental GPUs. LLM-driven hypothesis generation + fleet orchestration on RunPod/SSH.
+
+You bring a training script. Crucible decides what experiments to run, provisions the compute, executes them across tiers, and learns from the results.
+
+## Why Crucible?
+
+No single existing tool combines fleet orchestration on rental GPUs with autonomous experiment design. The closest alternatives:
+
+- **SkyPilot** provisions GPUs across 20+ clouds but doesn't decide what experiments to run
+- **Optuna/Ax** optimize hyperparameters mathematically but don't provision compute or reason about architectures
+- **AI Scientist** generates hypotheses but runs single-machine with a 42% failure rate and no fleet management
+- **W&B/MLflow** track experiments but don't execute them autonomously
+
+Crucible connects these concerns into one loop: **analyze → hypothesize → provision → execute → reflect → promote or kill**.
 
 ## Origins
 
-Crucible was born from [parameter-golf](https://github.com/openai/parameter-golf), OpenAI's March–April 2026 competition to train the best language model fitting in 16MB on 8xH100s in under 10 minutes. During the competition, we built a full-stack autonomous research system far beyond what a simple training script needs:
+Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (March–April 2026), a competition to train the best 16MB language model on 8xH100s in 10 minutes. The autonomous research infrastructure we built for the competition turned out to be general-purpose. Crucible extracts and generalizes it.
 
-- **Multi-pod GPU fleet orchestration** on RunPod with wave-based scheduling
-- **Claude-driven autonomous hypothesis generation** and experiment design
-- **Tier-based experiment promotion** (smoke → proxy → medium → promotion)
-- **MCP agent integration** so Claude can directly control experiments
-- **A model zoo** with reusable transformer components
-- **Real-time analysis** with leaderboards, sensitivity analysis, and Pareto frontiers
+## What Works Today
 
-None of that infrastructure is competition-specific. Crucible extracts and generalizes it into a platform you can use for any ML research project — on RunPod, bare metal via SSH, or wherever you run experiments.
+- Fleet orchestration on RunPod (provision, bootstrap, dispatch, collect, destroy)
+- Generic SSH provider for any machine you can SSH into
+- Experiment execution with live output parsing, OOM retry, tier presets
+- Claude-driven autonomous research loop (hypothesis → batch → execute → reflect)
+- MCP server so Claude can control experiments via tool use
+- Model zoo with transformer components (RMSNorm, RoPE, GQA, SmearGate, etc.)
+- Analysis: leaderboard, sensitivity analysis, Pareto frontier
+- YAML project configuration (`crucible.yaml`)
+
+## What's Coming
+
+- SkyPilot provider (20+ cloud support)
+- Optuna/Ax integration (mathematical HPO alongside LLM-driven search)
+- Code-level search (LLM modifies training scripts, not just configs)
+- Research strategy plugins (custom loop phases)
+- PyPI release
 
 ## Quick Start
 
 ```bash
-# Install
+# Install from source
 pip install -e ".[all]"
 
-# Initialize a new project
+# Initialize a project
 crucible init
 
-# Edit crucible.yaml to point at your training script and compute
+# Edit crucible.yaml — point at your training script
 
-# Run a quick smoke test
-crucible run experiment --preset smoke --set MODEL_FAMILY=baseline
+# Run a smoke test
+crucible run experiment --preset smoke
 
-# Provision GPU nodes and run at scale
-crucible fleet provision --count 4
-crucible fleet bootstrap
-crucible run day --count 4
+# Or go autonomous
+crucible research start --budget-hours 10 --tier proxy
 ```
 
 ## Core Concepts
 
 ### crucible.yaml
 
-Like docker-compose for ML experiments. Defines your compute provider, training scripts, data sources, experiment presets, and autonomous research program.
+Like docker-compose for ML experiments:
 
 ```yaml
 name: my-project
@@ -59,32 +82,21 @@ researcher:
 
 ### Training Contract
 
-Crucible doesn't own your training code. Any script that reads environment variables and prints parseable output works:
+Crucible doesn't own your training code. Any script that reads env vars and prints parseable output works:
 
-**Input** (env vars set by Crucible):
-- Preset defaults: `ITERATIONS`, `MAX_WALLCLOCK_SECONDS`, `TRAIN_BATCH_TOKENS`
-- Config overrides: `MODEL_FAMILY`, `NUM_LAYERS`, `MODEL_DIM`, etc.
-- Metadata: `RUN_ID`, `RUN_BACKEND`, `RUN_PRESET`
+**Input** (env vars):
+- `ITERATIONS`, `MAX_WALLCLOCK_SECONDS`, `TRAIN_BATCH_TOKENS`
+- `MODEL_FAMILY`, `NUM_LAYERS`, `MODEL_DIM`, etc.
+- `RUN_ID`, `RUN_BACKEND`, `RUN_PRESET`
 
-**Output** (stdout patterns Crucible parses):
+**Output** (stdout patterns):
 - `step:{step}/{total} train_loss:{loss}`
 - `step:{step}/{total} val_loss:{loss} val_bpb:{bpb}`
 - `Serialized model ... {N} bytes`
 
-### Fleet Management
-
-Provision and manage GPU nodes across providers. Currently supports RunPod (API-driven) and generic SSH (manual host list).
-
-```bash
-crucible fleet provision --count 4 --name-prefix my-run
-crucible fleet bootstrap          # sync code + data to all nodes
-crucible fleet status             # check node health
-crucible fleet destroy            # tear down when done
-```
-
 ### Experiment Tiers
 
-Experiments progress through tiers of increasing cost:
+Experiments earn their way to expensive compute:
 
 | Tier | Duration | Use Case |
 |------|----------|----------|
@@ -93,38 +105,33 @@ Experiments progress through tiers of increasing cost:
 | medium | ~1 hr | Extended runs |
 | promotion | ~2 hrs | Best candidates |
 
-### Autonomous Researcher
-
-Claude-powered experiment loop: analyze results → generate hypotheses → design batches → execute → reflect → promote or kill.
+### Fleet Management
 
 ```bash
-crucible research start --budget-hours 10 --tier proxy
+crucible fleet provision --count 4
+crucible fleet bootstrap
+crucible fleet status
+crucible fleet destroy
 ```
 
-### Model Zoo
+### Autonomous Researcher
 
-Shipped transformer components and architectures, independently importable:
+Claude-powered: analyze results, generate hypotheses, design batches, execute, reflect, promote or kill.
 
-```python
-from crucible.models.registry import build_model, list_families
-from crucible.models.components.attention import CausalSelfAttention
-from crucible.models.components.rotary import Rotary
+```bash
+crucible research start --budget-hours 10 --tier proxy --dry-run
 ```
-
-Architectures: baseline, looped, convloop, prefix_memory. Extensible via `register_model()`.
 
 ### MCP Integration
 
-All fleet and research operations available as MCP tools for Claude agent workflows:
-
 ```bash
-crucible mcp serve  # starts stdio MCP server
+crucible mcp serve  # starts stdio MCP server for Claude
 ```
 
 ## CLI Reference
 
 ```
-crucible init                              # Create crucible.yaml
+crucible init
 crucible fleet {status|provision|destroy|bootstrap|sync|monitor}
 crucible run {experiment|queue|enqueue|dispatch|collect|day|night}
 crucible analyze {rank|sensitivity|pareto|export|summary}
@@ -137,19 +144,40 @@ crucible models list
 ## Installation
 
 ```bash
-# Full install
-pip install crucible-ml[all]
-
-# Minimal (just orchestration, no torch/models)
-pip install crucible-ml
-
-# With specific extras
-pip install crucible-ml[torch]       # model zoo
-pip install crucible-ml[anthropic]   # autonomous researcher
-pip install crucible-ml[mcp]         # MCP server
-pip install crucible-ml[data]        # HuggingFace data pipeline
-pip install crucible-ml[wandb]       # W&B logging
+pip install crucible-ml[all]        # everything
+pip install crucible-ml             # minimal (orchestration only)
+pip install crucible-ml[torch]      # model zoo
+pip install crucible-ml[anthropic]  # autonomous researcher
+pip install crucible-ml[mcp]        # MCP server
 ```
+
+## Validated Workflow (Tested 2026-03-21)
+
+This exact sequence was run and confirmed working on 2 RunPod pods:
+
+```bash
+cd /path/to/your-ml-project
+crucible fleet provision --count 2 --name-prefix crucible-test
+crucible fleet bootstrap --train-shards 1
+crucible run enqueue --spec experiments.json --limit 3
+crucible run dispatch
+crucible fleet monitor --watch 60
+crucible run collect
+crucible analyze rank --top 10
+crucible fleet destroy
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Highest-impact areas:
+- **Compute providers**: Modal, Lambda, SkyPilot backends
+- **Search strategies**: Optuna, Ax integration
+- **Training script examples**: Show Crucible working with your framework
+- **Bug reports**: File issues, we'll fix them
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the full plan — what works, what's next, what we won't build, and honest competitive assessment.
 
 ## Project Structure
 

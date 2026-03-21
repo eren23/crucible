@@ -112,7 +112,7 @@ class ResearchState:
         self.history.append(entry)
         self._hours_used += entry["pod_hours"]
 
-    def get_history_summary(self) -> str:
+    def get_history_summary(self, primary_metric: str = "val_loss") -> str:
         if not self.history:
             return "No experiments completed yet."
         lines = [f"Experiment history ({len(self.history)} runs, {self._hours_used:.2f} compute-hours used):"]
@@ -122,10 +122,10 @@ class ResearchState:
             res = rec.get("result", {})
             name = exp.get("name", "unknown")
             # Try to extract the primary metric from result
-            primary_metric = res.get("val_bpb", res.get("result", {}).get("val_bpb"))
+            metric_val = res.get(primary_metric, res.get("result", {}).get(primary_metric))
             status = res.get("status", "unknown")
-            metric_str = f"{primary_metric:.4f}" if isinstance(primary_metric, (int, float)) else str(primary_metric)
-            lines.append(f"  {name}: primary_metric={metric_str} status={status}")
+            metric_str = f"{metric_val:.4f}" if isinstance(metric_val, (int, float)) else str(metric_val)
+            lines.append(f"  {name}: {primary_metric}={metric_str} status={status}")
         if len(self.history) > 20:
             lines.append(f"  ... ({len(self.history) - 20} earlier runs omitted)")
         return "\n".join(lines)

@@ -1,0 +1,393 @@
+[
+  {
+    "name": "L12_smear_bigram_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "depth",
+      "smear_gate",
+      "bigram_hash"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "12",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "QUANT_MODE": "int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L10_smear_bigram_swa_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "depth",
+      "smear_gate",
+      "bigram_hash",
+      "swa"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "10",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "SWA_INTERVAL": "25",
+      "QUANT_MODE": "int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L10_smear_bigram_fp16emb_int6_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "depth",
+      "smear_gate",
+      "bigram_hash",
+      "int6"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "10",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "QUANT_MODE": "int6",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_swa_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "swa"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "SWA_INTERVAL": "25",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_wd02_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "weight_decay"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "MUON_WEIGHT_DECAY": "0.02",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_seq2048_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier1",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "long_seq"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "TRAIN_SEQ_LEN": "2048",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L12_smear_bigram_swa_wd02_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier2",
+      "depth",
+      "smear_gate",
+      "bigram_hash",
+      "swa",
+      "weight_decay"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "12",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "SWA_INTERVAL": "25",
+      "MUON_WEIGHT_DECAY": "0.02",
+      "QUANT_MODE": "int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L10_int5mlp_int6attn_smear_bigram_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier2",
+      "depth",
+      "smear_gate",
+      "bigram_hash",
+      "int5_int6"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "10",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "QUANT_MODE": "int5_int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_warmdown3000_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier2",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "warmdown"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "WARMDOWN_ITERS": "3000",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_cosine_wd01_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier2",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "cosine",
+      "weight_decay"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "LR_SCHEDULE": "cosine",
+      "MUON_WEIGHT_DECAY": "0.01",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L10_smear_bigram_bigramhash8192_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier2",
+      "depth",
+      "smear_gate",
+      "bigram_hash",
+      "large_hash"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "10",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "BIGRAM_HASH_BUCKETS": "8192",
+      "QUANT_MODE": "int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "L10_all_upstream_kitchen_sink_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier3",
+      "depth",
+      "kitchen_sink"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "10",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "BIGRAM_HASH_BUCKETS": "10240",
+      "ORTHO_INIT": "1",
+      "SWA_INTERVAL": "25",
+      "MUON_WEIGHT_DECAY": "0.02",
+      "QUANT_MODE": "int5_int6",
+      "INT6_QAT": "1",
+      "TRAIN_BATCH_TOKENS": "65536",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  },
+  {
+    "name": "baseline_smear_bigram_seq4096_1h",
+    "tier": "overnight",
+    "backend": "torch",
+    "wave": "combined",
+    "tags": [
+      "overnight",
+      "combined",
+      "tier3",
+      "baseline",
+      "smear_gate",
+      "bigram_hash",
+      "long_seq"
+    ],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "MODEL_DIM": "512",
+      "NUM_LAYERS": "9",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "TRAIN_SEQ_LEN": "4096",
+      "TRAIN_BATCH_TOKENS": "32768",
+      "TRAIN_LOG_EVERY": "100",
+      "VAL_LOSS_EVERY": "500",
+      "VAL_BATCH_SIZE": "65536"
+    }
+  }
+]

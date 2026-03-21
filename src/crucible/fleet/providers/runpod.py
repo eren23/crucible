@@ -14,6 +14,7 @@ from urllib import error as urlerror
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 
+from crucible.core.errors import FleetError
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
 from crucible.fleet.inventory import BAD_API_STATES
 from crucible.fleet.provider import FleetProvider
@@ -37,7 +38,7 @@ def runpod_api_key() -> str:
     """Read the RunPod API key from the environment."""
     api_key = os.environ.get("RUNPOD_API_KEY")
     if not api_key:
-        raise SystemExit("RUNPOD_API_KEY is required for automatic pod provisioning.")
+        raise FleetError("RUNPOD_API_KEY is required for automatic pod provisioning.")
     return api_key
 
 
@@ -45,10 +46,10 @@ def read_public_key(path_text: str) -> str:
     """Read and validate an SSH public key file."""
     path = Path(path_text).expanduser()
     if not path.exists():
-        raise SystemExit(f"RunPod SSH public key not found: {path}")
+        raise FleetError(f"RunPod SSH public key not found: {path}")
     value = path.read_text(encoding="utf-8").strip()
     if not value.startswith("ssh-"):
-        raise SystemExit(f"Unexpected SSH public key format in {path}")
+        raise FleetError(f"Unexpected SSH public key format in {path}")
     return value
 
 
@@ -82,11 +83,11 @@ def runpod_request(
             return json.loads(raw)
     except urlerror.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
-        raise SystemExit(
+        raise FleetError(
             f"RunPod API {method} {path} failed: {exc.code} {body_text}",
         ) from exc
     except urlerror.URLError as exc:
-        raise SystemExit(f"RunPod API {method} {path} failed: {exc}") from exc
+        raise FleetError(f"RunPod API {method} {path} failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ def runpod_list_api_pods(*, name: str | None = None) -> list[dict[str, Any]]:
         query={"name": name, "computeType": "GPU", "includeMachine": "true"},
     )
     if not isinstance(payload, list):
-        raise SystemExit("Unexpected RunPod /pods response.")
+        raise FleetError("Unexpected RunPod /pods response: expected a list.")
     return payload
 
 
@@ -108,7 +109,7 @@ def runpod_get_api_pod(pod_id: str) -> dict[str, Any]:
     """Get a single pod's details."""
     payload = runpod_request("GET", f"/pods/{pod_id}")
     if not isinstance(payload, dict):
-        raise SystemExit(f"Unexpected RunPod /pods/{pod_id} response.")
+        raise FleetError(f"Unexpected RunPod /pods/{pod_id} response: expected a dict.")
     return payload
 
 
@@ -221,7 +222,7 @@ def create_api_pod(
     )
     created = runpod_request("POST", "/pods", payload=payload)
     if not isinstance(created, dict):
-        raise SystemExit("Unexpected RunPod pod creation response.")
+        raise FleetError("Unexpected RunPod pod creation response: expected a dict.")
     return created
 
 
@@ -357,13 +358,13 @@ class RunPodProvider(FleetProvider):
                     created.append(node)
                     log_success(f"Created {name} ({cloud_type})")
                     break
-                except SystemExit as exc:
+                except FleetError as exc:
                     last_error = str(exc)
                     log_warn(
                         f"{name} create attempt failed on {cloud_type}: {last_error}",
                     )
             else:
-                raise SystemExit(last_error or f"Failed to create pod {name}")
+                raise FleetError(last_error or f"Failed to create pod {name}")
         return created
 
     def destroy(
@@ -381,8 +382,8 @@ class RunPodProvider(FleetProvider):
             if pod_id:
                 try:
                     runpod_delete_api_pod(pod_id)
-                except SystemExit:
-                    pass
+                except FleetError:
+                    pass  # Best-effort: pod may already be gone
         return remaining
 
     def refresh(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -402,7 +403,7 @@ class RunPodProvider(FleetProvider):
                 refreshed.append(
                     inventory_record_from_api(api, previous=previous_by_id.get(pod_id)),
                 )
-            except SystemExit:
+            except FleetError:
                 failed = dict(previous_by_id.get(pod_id, node))
                 failed["api_state"] = "lost"
                 failed["state"] = "lost"

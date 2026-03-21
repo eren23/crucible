@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from crucible.core.errors import FleetError
 from crucible.core.io import atomic_write_json
 from crucible.core.log import utc_now_iso
 from crucible.fleet.sync import ssh_ok
@@ -30,13 +31,13 @@ TERMINAL_RESULT_STATUSES: set[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 def load_nodes(path: Path) -> list[dict[str, Any]]:
-    """Load nodes from a JSON file.  Raises SystemExit if the file is missing
+    """Load nodes from a JSON file.  Raises FleetError if the file is missing
     or malformed."""
     if not path.exists():
-        raise SystemExit(f"Nodes file not found: {path}")
+        raise FleetError(f"Nodes file not found: {path}")
     nodes = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(nodes, list):
-        raise SystemExit(f"Nodes file must contain a JSON list: {path}")
+        raise FleetError(f"Nodes file must contain a JSON list: {path}")
     return nodes
 
 

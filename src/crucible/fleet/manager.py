@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig
+from crucible.core.errors import ConfigError
 from crucible.core.io import atomic_write_json, read_jsonl
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.bootstrap import (
@@ -83,7 +84,7 @@ class FleetManager:
         self.fleet_runs_dir = self.project_root / "fleet_runs"
         self.day_runs_dir = self.project_root / "day_runs"
         self.sync_excludes = list(config.sync_excludes)
-        self.results_file_rel = config.results_file
+        self.results_file_rel = config.remote_results_file
         self._provider: FleetProvider | None = None
 
     # ------------------------------------------------------------------
@@ -229,6 +230,8 @@ class FleetManager:
             nodes, queue,
             queue_path=self.queue_path,
             max_assignments=max_assignments,
+            run_script=self.config.runner_script,
+            timeout_map=self.config.timeout_map,
         )
 
     # ------------------------------------------------------------------
@@ -642,6 +645,8 @@ class FleetManager:
                     refresh_fn=self.provider.refresh,
                     provision_replacement_fn=_provision_replacements,
                     results_file_rel=self.results_file_rel,
+                    run_script=self.config.runner_script,
+                    timeout_map=self.config.timeout_map,
                 )
                 summary["waves"].append({
                     "name": first_wave_name,
@@ -702,6 +707,8 @@ class FleetManager:
                     refresh_fn=self.provider.refresh,
                     provision_replacement_fn=_provision_replacements,
                     results_file_rel=self.results_file_rel,
+                    run_script=self.config.runner_script,
+                    timeout_map=self.config.timeout_map,
                 )
                 summary["waves"].append({
                     "name": wave_name,
@@ -1063,7 +1070,7 @@ class FleetManager:
         """Watch a day run summary, refreshing periodically."""
         summary_path = day_dir / "summary.json"
         if not summary_path.exists():
-            raise SystemExit(f"summary.json not found in {day_dir}")
+            raise ConfigError(f"summary.json not found in {day_dir}")
         while True:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             print(render_day_status(summary), flush=True)

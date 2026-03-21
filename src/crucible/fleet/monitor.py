@@ -109,8 +109,8 @@ def render_statuses(
         ):
             continue
         metric = "-"
-        if status.get("latest_val_bpb") is not None:
-            metric = f"val_bpb={status['latest_val_bpb']:.4f}"
+        if status.get("latest_val_loss") is not None:
+            metric = f"val_loss={status['latest_val_loss']:.4f}"
         elif status.get("latest_train_loss") is not None:
             metric = f"train={status['latest_train_loss']:.4f}"
         run_id = status.get("run_id", "?")
@@ -148,8 +148,8 @@ def render_monitor(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         status = probe_node_status(node)
         metric = "-"
-        if status.get("latest_val_bpb") is not None:
-            metric = f"val_bpb={status['latest_val_bpb']:.4f}"
+        if status.get("latest_val_loss") is not None:
+            metric = f"val_loss={status['latest_val_loss']:.4f}"
         elif status.get("latest_train_loss") is not None:
             metric = f"train={status['latest_train_loss']:.4f}"
         lines.append(

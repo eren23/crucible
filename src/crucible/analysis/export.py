@@ -17,7 +17,14 @@ from crucible.analysis.leaderboard import leaderboard, sensitivity_analysis
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_DEFAULT_METRIC = "val_bpb"
+
+def _resolve_metric(metric: str | None, cfg: ProjectConfig | None) -> str:
+    """Return an explicit metric name, falling back to config or 'val_loss'."""
+    if metric is not None:
+        return metric
+    if cfg is not None:
+        return cfg.metrics.primary
+    return "val_loss"
 
 
 def _metric_val(r: ExperimentResult, metric: str) -> float:
@@ -49,7 +56,7 @@ def export_top_configs(
     out_dir: str | Path = "results/winners",
     *,
     tag: str = "",
-    metric: str = _DEFAULT_METRIC,
+    metric: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> None:
     """Write top *n* experiment configs as individual JSON files.
@@ -63,21 +70,27 @@ def export_top_configs(
     tag:
         Optional tag filter -- only experiments carrying this tag are considered.
     metric:
-        Result key to rank by (default ``val_bpb``).
+        Result key to rank by.  When *None* (default), resolved from
+        ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
     cfg:
         Project configuration.
     """
+    metric = _resolve_metric(metric, cfg)
     results = _sorted_completed(metric, tag, cfg)
     if not results:
         label = f" (tag filter: {tag})" if tag else ""
         log_warn(f"No completed experiments found{label}")
         return
 
+    secondary = (cfg.metrics.secondary if cfg is not None else "") or ""
     top = results[:n]
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    header = f"{'Rank':<5} {'Name':<45} {metric:>10} {'val_loss':>10} {'MB':>10}"
+    if secondary:
+        header = f"{'Rank':<5} {'Name':<45} {metric:>10} {secondary:>10} {'MB':>10}"
+    else:
+        header = f"{'Rank':<5} {'Name':<45} {metric:>10} {'MB':>10}"
     print(header)
     print("-" * len(header))
 
@@ -89,18 +102,22 @@ def export_top_configs(
             "name": name,
             "rank": i,
             metric: res.get(metric),
-            "val_loss": res.get("val_loss"),
             "model_bytes": mb,
             "config": r.get("config", {}),
         }
+        if secondary:
+            entry[secondary] = res.get(secondary)
         fname = out / f"{i}_{name}.json"
         atomic_write_json(fname, entry)
         mb_s = str(mb) if mb else "N/A"
         metric_v = res.get(metric)
         metric_s = f"{metric_v:.4f}" if isinstance(metric_v, (int, float)) else str(metric_v)
-        val_loss = res.get("val_loss")
-        loss_s = f"{val_loss:.4f}" if isinstance(val_loss, (int, float)) else "N/A"
-        print(f"{i:<5} {name:<45} {metric_s:>10} {loss_s:>10} {mb_s:>10}")
+        if secondary:
+            sec_v = res.get(secondary)
+            sec_s = f"{sec_v:.4f}" if isinstance(sec_v, (int, float)) else "N/A"
+            print(f"{i:<5} {name:<45} {metric_s:>10} {sec_s:>10} {mb_s:>10}")
+        else:
+            print(f"{i:<5} {name:<45} {metric_s:>10} {mb_s:>10}")
 
     log_step(f"Exported {len(top)} configs to {out}/")
 
@@ -109,7 +126,7 @@ def print_rank(
     n: int = 10,
     *,
     tag: str = "",
-    metric: str = _DEFAULT_METRIC,
+    metric: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> None:
     """Print a terminal-friendly ranked table of completed experiments.
@@ -121,10 +138,13 @@ def print_rank(
     tag:
         Optional tag filter.
     metric:
-        Result key to rank by (default ``val_bpb``).
+        Result key to rank by.  When *None* (default), resolved from
+        ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
     cfg:
         Project configuration.
     """
+    metric = _resolve_metric(metric, cfg)
+    secondary = (cfg.metrics.secondary if cfg is not None else "") or ""
     results = _sorted_completed(metric, tag, cfg)
     if not results:
         label = f" (tag filter: {tag})" if tag else ""
@@ -132,7 +152,10 @@ def print_rank(
         return
 
     top = results[:n]
-    header = f"{'Rank':<5} {'Name':<45} {metric:>10} {'val_loss':>10} {'MB':>10}"
+    if secondary:
+        header = f"{'Rank':<5} {'Name':<45} {metric:>10} {secondary:>10} {'MB':>10}"
+    else:
+        header = f"{'Rank':<5} {'Name':<45} {metric:>10} {'MB':>10}"
     print(header)
     print("-" * len(header))
 
@@ -142,9 +165,12 @@ def print_rank(
         mb_s = str(mb) if mb else "N/A"
         metric_v = res.get(metric)
         metric_s = f"{metric_v:.4f}" if isinstance(metric_v, (int, float)) else str(metric_v)
-        val_loss = res.get("val_loss")
-        loss_s = f"{val_loss:.4f}" if isinstance(val_loss, (int, float)) else "N/A"
-        print(f"{i:<5} {r.get('name', 'unnamed'):<45} {metric_s:>10} {loss_s:>10} {mb_s:>10}")
+        if secondary:
+            sec_v = res.get(secondary)
+            sec_s = f"{sec_v:.4f}" if isinstance(sec_v, (int, float)) else "N/A"
+            print(f"{i:<5} {r.get('name', 'unnamed'):<45} {metric_s:>10} {sec_s:>10} {mb_s:>10}")
+        else:
+            print(f"{i:<5} {r.get('name', 'unnamed'):<45} {metric_s:>10} {mb_s:>10}")
 
     print(f"\n{len(results)} completed total, showing top {len(top)}")
 
@@ -152,7 +178,7 @@ def print_rank(
 def generate_summary(
     *,
     top_n: int = 10,
-    metric: str = _DEFAULT_METRIC,
+    metric: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> str:
     """Produce a markdown summary of experiment results.
@@ -165,15 +191,18 @@ def generate_summary(
     top_n:
         Number of results to include in the leaderboard table.
     metric:
-        Result key to rank by (default ``val_bpb``).
+        Result key to rank by.  When *None* (default), resolved from
+        ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
     cfg:
         Project configuration.
     """
+    metric = _resolve_metric(metric, cfg)
+    secondary = (cfg.metrics.secondary if cfg is not None else "") or ""
     results = completed_results(cfg)
     if not results:
         return "No experiments completed yet.\n"
 
-    ranked = leaderboard(top_n, metric=metric, cfg=cfg)
+    ranked = leaderboard(results, top_n=top_n, metric=metric, cfg=cfg)
     if not ranked:
         return "No experiments completed yet.\n"
 
@@ -184,16 +213,23 @@ def generate_summary(
 
     # -- Leaderboard table --
     lines.append(f"### Top {top_n} by {metric}\n")
-    lines.append(f"| Rank | Name | {metric} | val_loss | Model Bytes |")
-    lines.append("|------|------|---------|----------|-------------|")
+    if secondary:
+        lines.append(f"| Rank | Name | {metric} | {secondary} | Model Bytes |")
+        lines.append("|------|------|---------|----------|-------------|")
+    else:
+        lines.append(f"| Rank | Name | {metric} | Model Bytes |")
+        lines.append("|------|------|---------|-------------|")
     for i, r in enumerate(ranked, 1):
         res = r.get("result") or {}
         mb = r.get("model_bytes", "N/A")
         metric_v = res.get(metric)
         metric_s = f"{metric_v:.4f}" if isinstance(metric_v, (int, float)) else str(metric_v)
-        val_loss = res.get("val_loss")
-        loss_s = f"{val_loss:.4f}" if isinstance(val_loss, (int, float)) else "N/A"
-        lines.append(f"| {i} | {r.get('name', 'unnamed')} | {metric_s} | {loss_s} | {mb} |")
+        if secondary:
+            sec_v = res.get(secondary)
+            sec_s = f"{sec_v:.4f}" if isinstance(sec_v, (int, float)) else "N/A"
+            lines.append(f"| {i} | {r.get('name', 'unnamed')} | {metric_s} | {sec_s} | {mb} |")
+        else:
+            lines.append(f"| {i} | {r.get('name', 'unnamed')} | {metric_s} | {mb} |")
 
     # -- Sensitivity --
     sens = sensitivity_analysis(metric=metric, cfg=cfg)

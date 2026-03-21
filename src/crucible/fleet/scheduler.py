@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from crucible.core.errors import RunnerError
 from crucible.core.io import read_jsonl
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.bootstrap import bootstrap_node, bootstrap_node_worker
@@ -692,7 +693,7 @@ def run_wave(
                     f"{wave_name} completion threshold missed: completed={len(completed)} "
                     f"required={min_completed} total={len(experiments)}"
                 )
-                raise SystemExit(
+                raise RunnerError(
                     f"Wave {wave_name} did not meet completion threshold: "
                     f"completed={len(completed)} required={min_completed} "
                     f"total={len(experiments)}"

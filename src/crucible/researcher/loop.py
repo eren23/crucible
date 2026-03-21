@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig
+from crucible.core.errors import CrucibleError, ResearcherError
 from crucible.core.log import utc_now_iso
 from crucible.researcher.batch_design import DEFAULT_TIER_COSTS, design_batch
 from crucible.researcher.hypothesis import generate_hypotheses
@@ -74,9 +75,13 @@ class AutonomousResearcher:
 
             try:
                 analysis = self.analyze()
-                hypotheses = generate_hypotheses(
-                    analysis, self._get_program_text(), self.state, self.llm, self._iteration
-                )
+                if self.dry_run:
+                    hypotheses = _dry_run_hypotheses(self._iteration)
+                    print(f"  [DRY RUN] Generated {len(hypotheses)} fixture hypotheses.")
+                else:
+                    hypotheses = generate_hypotheses(
+                        analysis, self._get_program_text(), self.state, self.llm, self._iteration
+                    )
                 if not hypotheses:
                     print("LLM returned no hypotheses. Stopping.")
                     break
@@ -93,15 +98,24 @@ class AutonomousResearcher:
                     break
                 self.execute_batch(batch)
                 self.collect_results()
-                promote_names, kill_names = reflect_and_update(self.state, self.llm)
+                if self.dry_run:
+                    print("  [DRY RUN] Skipping reflection (no LLM calls).")
+                    promote_names, kill_names = [], []
+                else:
+                    promote_names, kill_names = reflect_and_update(
+                        self.state, self.llm, metric_key=self.config.metrics.primary,
+                    )
                 promote_or_kill(self.state, promote_names, kill_names, self.tier)
                 self.state.save()
             except KeyboardInterrupt:
                 print("\nInterrupted. Saving state...")
                 self.state.save()
                 raise
-            except Exception as exc:
+            except CrucibleError as exc:
                 print(f"ERROR in iteration {self._iteration}: {exc}")
+                self.state.save()
+            except Exception as exc:
+                print(f"UNEXPECTED ERROR in iteration {self._iteration}: {exc}")
                 self.state.save()
                 time.sleep(5)
 
@@ -128,15 +142,17 @@ class AutonomousResearcher:
         sections: list[str] = []
 
         # Overall leaderboard
-        top = leaderboard(results, top_n=10)
+        primary = self.config.metrics.primary
+        secondary = self.config.metrics.secondary or ""
+        top = leaderboard(results, top_n=10, cfg=self.config)
         board_lines = ["## Leaderboard (top 10)"]
         for i, r in enumerate(top, 1):
             res = r["result"]
-            board_lines.append(
-                f"  {i}. {r['name']}: val_bpb={res.get('val_bpb', 'N/A')}  "
-                f"val_loss={res.get('val_loss', 'N/A')}  "
-                f"bytes={r.get('model_bytes', 'N/A')}"
-            )
+            parts = [f"{primary}={res.get(primary, 'N/A')}"]
+            if secondary:
+                parts.append(f"{secondary}={res.get(secondary, 'N/A')}")
+            parts.append(f"bytes={r.get('model_bytes', 'N/A')}")
+            board_lines.append(f"  {i}. {r['name']}: {'  '.join(parts)}")
         sections.append("\n".join(board_lines))
 
         # Group by model family
@@ -146,7 +162,7 @@ class AutonomousResearcher:
             families[family].append(r)
         family_lines = ["## Results by Model Family"]
         for family, runs in sorted(families.items()):
-            metrics = [r["result"].get("val_bpb") for r in runs if r.get("result", {}).get("val_bpb")]
+            metrics = [r["result"].get(primary) for r in runs if r.get("result", {}).get(primary)]
             if metrics:
                 best = min(metrics)
                 worst = max(metrics)
@@ -156,7 +172,7 @@ class AutonomousResearcher:
         sections.append("\n".join(family_lines))
 
         # Sensitivity analysis
-        sens = sensitivity_analysis(results)
+        sens = sensitivity_analysis(results, cfg=self.config)
         if sens:
             sens_lines = ["## Sensitivity Analysis (top parameters by spread)"]
             ranked_sens = sorted(sens.items(), key=lambda kv: kv[1][-1][1] - kv[1][0][1], reverse=True)
@@ -175,12 +191,12 @@ class AutonomousResearcher:
         if len(recent) >= 3:
             recent_metrics = []
             for rec in recent:
-                metric = rec.get("result", {}).get("val_bpb")
-                if isinstance(metric, (int, float)):
-                    recent_metrics.append(metric)
+                metric_val = rec.get("result", {}).get(primary)
+                if isinstance(metric_val, (int, float)):
+                    recent_metrics.append(metric_val)
             if len(recent_metrics) >= 3 and top:
                 recent_best = min(recent_metrics)
-                overall_best = top[0]["result"].get("val_bpb", recent_best)
+                overall_best = top[0]["result"].get(primary, recent_best)
                 if isinstance(overall_best, (int, float)) and abs(recent_best - overall_best) < 0.001:
                     sections.append(
                         "## Warning: Diminishing Returns\n"
@@ -189,7 +205,7 @@ class AutonomousResearcher:
                     )
 
         # Research state context
-        sections.append(f"## Research State\n{self.state.get_history_summary()}")
+        sections.append(f"## Research State\n{self.state.get_history_summary(primary_metric=primary)}")
         if self.state.beliefs:
             beliefs_str = "\n".join(f"  - {b}" for b in self.state.beliefs)
             sections.append(f"## Current Beliefs\n{beliefs_str}")
@@ -226,13 +242,16 @@ class AutonomousResearcher:
                 }
                 for exp in batch
             ]
-            added = fleet.enqueue(fleet_experiments, limit=0)
+            added = fleet.enqueue(experiments=fleet_experiments, limit=0)
             print(f"  Enqueued {len(added)} experiments to fleet.")
             dispatched = fleet.dispatch(max_assignments=len(batch))
             running = [r for r in dispatched if r.get("lease_state") == "running"]
             print(f"  Dispatched {len(running)} experiments.")
-        except (ImportError, Exception) as exc:
-            print(f"  Fleet not available ({exc}). Falling back to local execution.")
+        except ImportError as exc:
+            print(f"  Fleet module not available ({exc}). Falling back to local execution.")
+            self._execute_local(batch)
+        except CrucibleError as exc:
+            print(f"  Fleet operation failed ({exc}). Falling back to local execution.")
             self._execute_local(batch)
 
     def _execute_local(self, batch: list[dict[str, Any]]) -> None:
@@ -256,15 +275,18 @@ class AutonomousResearcher:
                 experiment_id=f"auto_{self._iteration:03d}_{exp['name'][:20]}",
                 tags=exp.get("tags", ["autonomous"]),
                 timeout_seconds=600,
+                backend=exp.get("backend", self.backend),
+                preset=exp.get("tier", self.tier),
                 project_root=self.config.project_root,
+                project_config=self.config,
             )
             self.state.record_result(
                 experiment={"name": exp["name"], "config": exp["config"], "pod_hours": tier_cost},
                 result=result,
             )
             if result.get("status") == "completed" and result.get("result"):
-                metric = result["result"].get("val_bpb")
-                print(f"    Result: primary_metric={metric}")
+                metric_val = result["result"].get(self.config.metrics.primary)
+                print(f"    Result: {self.config.metrics.primary}={metric_val}")
             else:
                 print(f"    Result: {result.get('status', 'unknown')} - {result.get('error', '')[:100]}")
 
@@ -282,7 +304,7 @@ class AutonomousResearcher:
             from crucible.fleet.manager import FleetManager
 
             fleet = FleetManager(self.config)
-        except (ImportError, Exception):
+        except (ImportError, CrucibleError):
             return  # Results already collected by _execute_local
 
         wave_name = f"auto_iter_{self._iteration}"
@@ -314,9 +336,9 @@ class AutonomousResearcher:
         # Record results into state
         tier_cost = DEFAULT_TIER_COSTS.get(self.tier, 0.5)
         try:
-            from crucible.analysis.results import load_all_results
+            from crucible.analysis.results import merged_results
 
-            all_results = load_all_results(self.config)
+            all_results = merged_results(self.config)
         except ImportError:
             all_results = []
 
@@ -356,18 +378,52 @@ class AutonomousResearcher:
             from crucible.analysis.results import completed_results
 
             results = completed_results(self.config)
-            top = leaderboard(results, top_n=10)
+            top = leaderboard(results, top_n=10, cfg=self.config)
         except ImportError:
             top = []
 
         if not top:
             print("No completed experiments.")
             return
+        primary = self.config.metrics.primary
+        secondary = self.config.metrics.secondary or ""
         print("\nFinal leaderboard:")
         for i, r in enumerate(top, 1):
             res = r["result"]
-            print(f"  {i}. {r['name']}: val_bpb={res.get('val_bpb', 'N/A')}  val_loss={res.get('val_loss', 'N/A')}")
+            parts = [f"{primary}={res.get(primary, 'N/A')}"]
+            if secondary:
+                parts.append(f"{secondary}={res.get(secondary, 'N/A')}")
+            print(f"  {i}. {r['name']}: {'  '.join(parts)}")
         if self.state.beliefs:
             print("\nFinal beliefs:")
             for b in self.state.beliefs:
                 print(f"  - {b}")
+
+
+# ---------------------------------------------------------------------------
+# Dry-run fixture data
+# ---------------------------------------------------------------------------
+
+
+def _dry_run_hypotheses(iteration: int) -> list[dict[str, Any]]:
+    """Return fixture hypotheses for dry-run mode (no LLM calls)."""
+    return [
+        {
+            "hypothesis": "Dry-run fixture: test increased recurrence depth",
+            "name": f"dryrun_recurrence_iter{iteration}",
+            "expected_impact": 0.005,
+            "confidence": 0.6,
+            "config": {"MODEL_FAMILY": "looped", "RECURRENCE_STEPS": "12"},
+            "rationale": "Fixture hypothesis for dry-run testing.",
+            "family": "looped",
+        },
+        {
+            "hypothesis": "Dry-run fixture: test wider hidden dim",
+            "name": f"dryrun_wider_iter{iteration}",
+            "expected_impact": 0.003,
+            "confidence": 0.5,
+            "config": {"MODEL_FAMILY": "baseline", "D_MODEL": "512"},
+            "rationale": "Fixture hypothesis for dry-run testing.",
+            "family": "baseline",
+        },
+    ]

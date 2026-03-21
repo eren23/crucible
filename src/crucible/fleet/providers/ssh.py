@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from crucible.core.errors import FleetError
 from crucible.core.log import log_info, log_warn, utc_now_iso
 from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import ssh_ok
@@ -119,7 +120,7 @@ class SSHProvider(FleetProvider):
             return []
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
-            raise SystemExit(f"Nodes file must contain a JSON list: {path}")
+            raise FleetError(f"Nodes file must contain a JSON list: {path}")
         # Ensure each node has the provider tag
         for node in data:
             node.setdefault("provider", "ssh")

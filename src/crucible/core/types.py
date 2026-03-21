@@ -23,7 +23,7 @@ class ExperimentResult(TypedDict, total=False):
     backend: str
     preset: str
     config: dict[str, str]
-    result: dict[str, Any] | None  # val_loss, val_bpb, steps_completed, etc.
+    result: dict[str, Any] | None  # metric keys depend on training script output
     model_bytes: int | None
     status: str  # completed | partial_recoverable | failed | timeout | killed
     tags: list[str]

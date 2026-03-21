@@ -27,6 +27,10 @@ training:
   - backend: mlx
     script: train_gpt_mlx.py
 
+metrics:
+  primary: val_bpb
+  secondary: val_loss
+
 presets:
   smoke:
     MAX_WALLCLOCK_SECONDS: "60"
