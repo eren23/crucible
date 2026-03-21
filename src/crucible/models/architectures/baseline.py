@@ -45,6 +45,7 @@ class BaselineGPT(TiedEmbeddingLM):
         block_pattern: str = "",
         use_trigram_hash: bool = False,
         trigram_hash_buckets: int = 4096,
+        activation: str = "relu_sq",
     ):
         super().__init__(vocab_size, model_dim, tie_embeddings, tied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
         self.num_encoder_layers = num_layers // 2
@@ -58,6 +59,7 @@ class BaselineGPT(TiedEmbeddingLM):
                 use_conv=use_conv_block, conv_kernel=conv_kernel,
                 multiscale_window=multiscale_window if _lw[i] == 0 else 0,
                 attention_window=_lw[i],
+                activation=activation,
             )
             for i in range(num_layers)
         ])
@@ -140,6 +142,7 @@ def _build_baseline(args: Any) -> BaselineGPT:
         block_pattern=getattr(args, 'block_pattern', ''),
         use_trigram_hash=getattr(args, 'trigram_hash', False),
         trigram_hash_buckets=getattr(args, 'trigram_hash_buckets', 4096),
+        activation=getattr(args, 'activation', 'relu_sq'),
     )
 
 

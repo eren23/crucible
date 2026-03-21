@@ -24,10 +24,11 @@ class PrefixMemoryLM(TiedEmbeddingLM):
         residual_variant: str = "standard",
         embed_bottleneck_dim: int = 0,
         spectral_embed_init: bool = False,
+        activation: str = "relu_sq",
     ):
         super().__init__(vocab_size, model_dim, tie_embeddings, tied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
         self.blocks = nn.ModuleList([
-            PrefixMemoryBlock(model_dim, state_dim, mlp_mult, residual_variant)
+            PrefixMemoryBlock(model_dim, state_dim, mlp_mult, residual_variant, activation=activation)
             for _ in range(num_layers)
         ])
         self.step_scales = nn.Parameter(torch.ones(num_layers, model_dim, dtype=torch.float32))
@@ -57,6 +58,7 @@ def _build_prefix_memory(args: Any) -> PrefixMemoryLM:
         num_layers=args.num_layers,
         mlp_mult=args.mlp_mult,
         residual_variant=args.residual_variant,
+        activation=getattr(args, 'activation', 'relu_sq'),
     )
 
 

@@ -23,14 +23,14 @@ class CausalPrefixMemory(nn.Module):
 
 
 class PrefixMemoryBlock(nn.Module):
-    def __init__(self, dim: int, state_dim: int, mlp_mult: int, residual_variant: str = "standard"):
+    def __init__(self, dim: int, state_dim: int, mlp_mult: int, residual_variant: str = "standard", activation: str = "relu_sq"):
         super().__init__()
         if residual_variant not in {"standard", "gated"}:
             raise ValueError(f"Unsupported RESIDUAL_VARIANT={residual_variant!r}")
         self.memory_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
         self.memory = CausalPrefixMemory(dim, state_dim)
-        self.mlp = MLP(dim, mlp_mult)
+        self.mlp = MLP(dim, mlp_mult, activation=activation)
         self.memory_mix = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())

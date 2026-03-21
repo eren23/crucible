@@ -126,6 +126,7 @@ class Block(nn.Module):
         conv_kernel: int = 3,
         multiscale_window: int = 0,
         attention_window: int = 0,
+        activation: str = "relu_sq",
     ):
         super().__init__()
         if residual_variant not in {"standard", "gated"}:
@@ -134,7 +135,7 @@ class Block(nn.Module):
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
         self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init, attention_variant, multiscale_window, attention_window)
-        self.mlp = MLP(dim, mlp_mult)
+        self.mlp = MLP(dim, mlp_mult, activation=activation)
         self.residual_variant = residual_variant
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))

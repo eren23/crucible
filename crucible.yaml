@@ -1,0 +1,62 @@
+# Crucible project configuration — Parameter Golf
+name: parameter-golf
+version: "0.1.0"
+
+# Compute provider
+provider:
+  type: ssh
+  ssh_key: ~/.ssh/id_ed25519
+
+# Data pipeline
+data:
+  source: huggingface
+  repo_id: willdepueoai/parameter-golf
+  local_root: ./data
+  manifest: manifest.json
+
+# Training backends
+training:
+  - backend: torch
+    script: train.py
+
+# Metrics configuration
+metrics:
+  primary: val_bpb
+  secondary: val_loss
+  size: model_bytes
+  direction: minimize
+
+# Experiment presets
+presets:
+  smoke:
+    MAX_WALLCLOCK_SECONDS: "60"
+    ITERATIONS: "400"
+    TRAIN_BATCH_TOKENS: "8192"
+  proxy:
+    MAX_WALLCLOCK_SECONDS: "1800"
+    ITERATIONS: "6000"
+    TRAIN_BATCH_TOKENS: "65536"
+
+# Autonomous researcher
+researcher:
+  model: claude-sonnet-4-6-20250514
+  budget_hours: 10.0
+  max_iterations: 20
+  program_file: program.md
+
+# Version store
+store_dir: .crucible
+
+# Sync exclusions
+sync_excludes:
+  - .git
+  - .venv
+  - __pycache__
+  - .crucible
+  - logs
+  - data/datasets
+
+# Output paths
+results_file: experiments.jsonl
+fleet_results_file: experiments_fleet.jsonl
+logs_dir: logs

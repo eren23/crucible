@@ -52,3 +52,6 @@ final_model.*
 
 # Attocode
 .attocode/
+
+# Crucible
+.crucible/

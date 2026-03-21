@@ -17,12 +17,14 @@ anthropic = ["anthropic>=0.30"]
 mcp = ["mcp>=1.0"]
 wandb = ["wandb"]
 data = ["tqdm", "huggingface-hub", "datasets"]
-all = ["crucible-ml[torch,anthropic,mcp,wandb,data]"]
+tui = ["textual>=0.50"]
+all = ["crucible-ml[torch,anthropic,mcp,wandb,data,tui]"]
 dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 crucible = "crucible.cli.main:main"
 crucible-mcp = "crucible.mcp.server:main_cli"
+crucible-tui = "crucible.tui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

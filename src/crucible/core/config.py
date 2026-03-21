@@ -61,8 +61,11 @@ class ProjectConfig:
     presets: dict[str, dict[str, str]] = field(default_factory=dict)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
+    store_dir: str = ".crucible"
+    auto_commit_versions: bool = False
+    research_state_file: str = "research_state.jsonl"
     sync_excludes: list[str] = field(default_factory=lambda: [
-        ".git", ".venv", "__pycache__", "logs", "data/datasets", "data/tokenizers",
+        ".git", ".venv", "__pycache__", ".crucible", "logs", "data/datasets", "data/tokenizers",
     ])
     results_file: str = "experiments.jsonl"
     fleet_results_file: str = "experiments_fleet.jsonl"
@@ -146,8 +149,11 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         presets=raw.get("presets", {}),
         metrics=_build_metrics(raw.get("metrics", {})),
         researcher=_build_researcher(raw.get("researcher", {})),
+        store_dir=raw.get("store_dir", ".crucible"),
+        auto_commit_versions=raw.get("auto_commit_versions", False),
+        research_state_file=raw.get("research_state_file", "research_state.jsonl"),
         sync_excludes=raw.get("sync_excludes", [
-            ".git", ".venv", "__pycache__", "logs", "data/datasets", "data/tokenizers",
+            ".git", ".venv", "__pycache__", ".crucible", "logs", "data/datasets", "data/tokenizers",
         ]),
         results_file=raw.get("results_file", "experiments.jsonl"),
         fleet_results_file=raw.get("fleet_results_file", "experiments_fleet.jsonl"),
@@ -219,6 +225,10 @@ researcher:
   model: claude-sonnet-4-6-20250514
   budget_hours: 10.0
   program_file: program.md
+
+# Version store
+# store_dir: .crucible                    # version store directory
+# auto_commit_versions: false             # auto-commit versions to git
 
 # Sync exclusions
 sync_excludes:

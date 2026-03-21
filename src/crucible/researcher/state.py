@@ -23,6 +23,7 @@ class ResearchState:
         self.hypotheses: list[dict[str, Any]] = []
         self.history: list[dict[str, Any]] = []
         self.beliefs: list[str] = []
+        self.findings: list[dict[str, Any]] = []
         self._hours_used: float = 0.0
         self._load()
 
@@ -46,6 +47,8 @@ class ResearchState:
                 self._hours_used += entry["data"].get("pod_hours", 0.0)
             elif kind == "beliefs":
                 self.beliefs = entry["data"]
+            elif kind == "finding":
+                self.findings.append(entry["data"])
             elif kind == "budget_adjustment":
                 self._total_budget_hours = entry["data"]["total_hours"]
                 self._hours_used = entry["data"].get("hours_used", self._hours_used)
@@ -57,6 +60,8 @@ class ResearchState:
             lines.append(json.dumps({"kind": "hypothesis", "ts": hyp.get("ts", utc_now_iso()), "data": hyp}))
         for rec in self.history:
             lines.append(json.dumps({"kind": "result", "ts": rec.get("ts", utc_now_iso()), "data": rec}))
+        for finding in self.findings:
+            lines.append(json.dumps({"kind": "finding", "ts": finding.get("ts", utc_now_iso()), "data": finding}))
         if self.beliefs:
             lines.append(json.dumps({"kind": "beliefs", "ts": utc_now_iso(), "data": self.beliefs}))
         lines.append(json.dumps({
@@ -147,3 +152,35 @@ class ResearchState:
 
     def charge_hours(self, hours: float) -> None:
         self._hours_used += hours
+
+    # ------------------------------------------------------------------
+    # Findings
+    # ------------------------------------------------------------------
+
+    def add_finding(
+        self,
+        finding: str,
+        category: str = "observation",
+        source_experiments: list[str] | None = None,
+        confidence: float = 0.7,
+        created_by: str = "unknown",
+    ) -> dict[str, Any]:
+        """Record a research finding."""
+        entry: dict[str, Any] = {
+            "ts": utc_now_iso(),
+            "finding": finding,
+            "category": category,
+            "source_experiments": source_experiments or [],
+            "confidence": confidence,
+            "created_by": created_by,
+        }
+        self.findings.append(entry)
+        return entry
+
+    def get_findings(self, category: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Return findings, optionally filtered by category."""
+        if category:
+            filtered = [f for f in self.findings if f.get("category") == category]
+        else:
+            filtered = list(self.findings)
+        return filtered[-limit:]
