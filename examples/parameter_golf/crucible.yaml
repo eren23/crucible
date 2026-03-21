@@ -1,0 +1,69 @@
+# Crucible config for the OpenAI Parameter Golf challenge
+# Recreates the original competition setup
+name: parameter-golf
+version: "0.1.0"
+
+provider:
+  type: runpod
+  ssh_key: ~/.ssh/id_ed25519_runpod
+  image: runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+  gpu_types:
+    - "NVIDIA GeForce RTX 4090"
+    - "NVIDIA GeForce RTX 3090"
+  defaults:
+    container_disk_gb: 20
+    volume_gb: 40
+    workspace_path: /workspace/parameter-golf
+
+data:
+  source: huggingface
+  repo_id: willdepueoai/parameter-golf
+  local_root: ./data
+  manifest: manifest.json
+
+training:
+  - backend: torch
+    script: train_gpt.py
+  - backend: mlx
+    script: train_gpt_mlx.py
+
+presets:
+  smoke:
+    MAX_WALLCLOCK_SECONDS: "60"
+    ITERATIONS: "400"
+    TRAIN_BATCH_TOKENS: "8192"
+    TRAIN_SHARD_LIMIT: "1"
+  proxy:
+    MAX_WALLCLOCK_SECONDS: "1800"
+    ITERATIONS: "6000"
+    TRAIN_BATCH_TOKENS: "65536"
+    TRAIN_SHARD_LIMIT: "8"
+  medium:
+    MAX_WALLCLOCK_SECONDS: "3600"
+    ITERATIONS: "15000"
+    TRAIN_BATCH_TOKENS: "65536"
+  promotion:
+    MAX_WALLCLOCK_SECONDS: "7200"
+    ITERATIONS: "100000"
+    TRAIN_BATCH_TOKENS: "65536"
+
+researcher:
+  model: claude-sonnet-4-6-20250514
+  budget_hours: 10.0
+  max_iterations: 20
+  program_file: program.md
+
+sync_excludes:
+  - .git
+  - .venv
+  - __pycache__
+  - logs
+  - data/datasets
+  - data/tokenizers
+  - records
+  - fleet_runs
+  - .DS_Store
+
+results_file: experiments.jsonl
+fleet_results_file: experiments_fleet.jsonl
+logs_dir: logs

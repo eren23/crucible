@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+# Import all architecture modules so they self-register with the model registry.
+import crucible.models.architectures.baseline  # noqa: F401
+import crucible.models.architectures.looped  # noqa: F401
+import crucible.models.architectures.convloop  # noqa: F401
+import crucible.models.architectures.prefix_memory  # noqa: F401

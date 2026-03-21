@@ -1,0 +1,423 @@
+"""Node bootstrap: env setup, pip install, dataset download, git sync."""
+from __future__ import annotations
+
+import concurrent.futures
+import shlex
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.fleet.day_run import append_event
+from crucible.fleet.inventory import (
+    NODES_LOCK,
+    count_bootstrapped_ready,
+    load_nodes_if_exists,
+    load_nodes_snapshot,
+    merge_node_snapshots,
+    ready_state,
+    save_nodes,
+    upsert_node_record,
+)
+from crucible.fleet.sync import (
+    checked_remote_exec,
+    local_git_sha,
+    ssh_ok,
+    sync_env_file,
+    sync_repo,
+)
+
+BOOTSTRAP_ATTEMPTS = 3
+
+
+# ---------------------------------------------------------------------------
+# Single-node bootstrap
+# ---------------------------------------------------------------------------
+
+def bootstrap_step(
+    node: dict[str, Any],
+    label: str,
+    command: str,
+) -> Any:
+    """Run one labelled bootstrap command on a node."""
+    log_step(f"bootstrap {node['name']}: {label}")
+    return checked_remote_exec(node, f"bootstrap:{label}", command)
+
+
+def bootstrap_node(
+    node: dict[str, Any],
+    *,
+    project_root: Path,
+    sync_excludes: list[str],
+    train_shards: int,
+    skip_install: bool = False,
+    skip_data: bool = False,
+    data_download_cmd: str | None = None,
+) -> dict[str, Any]:
+    """Full bootstrap sequence for a single node.
+
+    1. rsync the project
+    2. rsync the .env file
+    3. verify Python and CUDA
+    4. pip install (unless *skip_install*)
+    5. download dataset (unless *skip_data*)
+    6. record git sha
+    """
+    sync_repo(node, project_root=project_root, sync_excludes=sync_excludes)
+    sync_env_file(node, project_root=project_root)
+
+    workspace = shlex.quote(node.get("workspace_path", "/workspace/project"))
+    py = shlex.quote(node.get("python_bin", "python3"))
+
+    bootstrap_step(node, "python_version", f"cd {workspace} && {py} --version")
+    bootstrap_step(
+        node,
+        "torch_import",
+        f"cd {workspace} && {py} - <<'PY'\n"
+        "import torch\n"
+        "print(torch.__version__)\n"
+        "print(torch.version.cuda)\n"
+        "ok = torch.cuda.is_available()\n"
+        "print(ok)\n"
+        "if not ok:\n"
+        "    raise SystemExit('cuda_unavailable')\n"
+        "print(torch.cuda.device_count())\n"
+        "PY",
+    )
+
+    if not skip_install:
+        bootstrap_step(
+            node,
+            "pip_install",
+            f"cd {workspace} && "
+            "grep -viE '^(torch|torchvision|torchaudio)([<>=].*)?$' requirements.txt "
+            "> /tmp/crucible.requirements.txt && "
+            f"{py} -m pip install --break-system-packages -r /tmp/crucible.requirements.txt",
+        )
+
+    data_probe = None
+    if not skip_data:
+        data_probe = bootstrap_step(
+            node,
+            "data_probe",
+            f"cd {workspace} && {py} - <<'PY'\n"
+            "from pathlib import Path\n"
+            "root = Path('data/datasets/fineweb10B_sp1024')\n"
+            "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
+            "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
+            "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
+            "print(int(tok.exists() and bool(train) and bool(val)))\n"
+            "PY",
+        )
+
+    node["last_seen_at"] = utc_now_iso()
+    node["env_ready"] = True
+    node["state"] = "ready"
+
+    if not skip_data:
+        if data_probe is not None and data_probe.stdout.strip().endswith("0"):
+            download_cmd = data_download_cmd or (
+                f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
+                f"--variant sp1024 --train-shards {train_shards}"
+            )
+            bootstrap_step(node, "data_download", download_cmd)
+        node["dataset_ready"] = True
+
+    node["git_sha"] = local_git_sha(project_root)
+    if node["git_sha"] is None:
+        log_warn(f"{node['name']}: local git SHA unavailable; recording null git_sha")
+    return node
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap with retries (worker)
+# ---------------------------------------------------------------------------
+
+def bootstrap_node_worker(
+    node: dict[str, Any],
+    *,
+    nodes_file: Path,
+    project_root: Path,
+    sync_excludes: list[str],
+    train_shards: int,
+    data_download_cmd: str | None = None,
+) -> dict[str, Any]:
+    """Bootstrap a node with automatic retries."""
+    last_exc: BaseException | None = None
+    for attempt in range(1, BOOTSTRAP_ATTEMPTS + 1):
+        try:
+            updated = bootstrap_node(
+                node,
+                project_root=project_root,
+                sync_excludes=sync_excludes,
+                train_shards=train_shards,
+                skip_install=False,
+                skip_data=False,
+                data_download_cmd=data_download_cmd,
+            )
+            upsert_node_record(nodes_file, updated)
+            return updated
+        except BaseException as exc:
+            last_exc = exc
+            if attempt >= BOOTSTRAP_ATTEMPTS:
+                raise
+            log_warn(
+                f"{node['name']}: bootstrap attempt {attempt}/{BOOTSTRAP_ATTEMPTS} "
+                f"failed, retrying: {exc}"
+            )
+            time.sleep(min(5 * attempt, 15))
+    assert last_exc is not None
+    raise last_exc
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap supervisor (threaded)
+# ---------------------------------------------------------------------------
+
+def start_bootstrap_supervisor(
+    *,
+    day_dir: Path,
+    nodes: list[dict[str, Any]],
+    nodes_file: Path,
+    project_root: Path,
+    sync_excludes: list[str],
+    train_shards: int,
+    target_ready_count: int,
+    min_ready_to_start: int,
+    bootstrap_workers: int,
+    replacement_budget: int,
+    replace_fn: Any = None,
+    refresh_fn: Any = None,
+    data_download_cmd: str | None = None,
+) -> dict[str, Any]:
+    """Launch a background thread that bootstraps all nodes in parallel.
+
+    Returns a state dict with threading events and status counters.
+
+    Parameters
+    ----------
+    replace_fn : callable(failed_name) -> node_dict, optional
+        Called when a node needs to be replaced.  Should provision a new
+        node and return its record.
+    refresh_fn : callable(nodes) -> nodes, optional
+        Called to refresh node records from the provider API.
+    """
+    state: dict[str, Any] = {
+        "min_ready_event": threading.Event(),
+        "done_event": threading.Event(),
+        "blocking_error": None,
+        "degraded_error": None,
+        "replacements_used": 0,
+        "min_ready_to_start": min_ready_to_start,
+        "ready_count": 0,
+        "wave1_started": False,
+    }
+
+    def _bootstrap_ready_count() -> int:
+        return count_bootstrapped_ready(load_nodes_snapshot(nodes_file))
+
+    def supervisor() -> None:
+        future_to_node: dict[concurrent.futures.Future[dict[str, Any]], dict[str, Any]] = {}
+        pending_since: dict[str, float] = {}
+        running_names: set[str] = set()
+        completed_names: set[str] = set()
+        abandoned_names: set[str] = set()
+
+        def refresh_ready_state(current_nodes: list[dict[str, Any]]) -> int:
+            ready_names = {n["name"] for n in current_nodes if ready_state(n) == "ready"}
+            completed_names.update(ready_names)
+            ready_bootstrapped = len(ready_names)
+            state["ready_count"] = ready_bootstrapped
+            if ready_bootstrapped >= min_ready_to_start:
+                state["min_ready_event"].set()
+            return ready_bootstrapped
+
+        def mark_bootstrap_abandoned(name: str, reason: str) -> None:
+            abandoned_names.add(name)
+            running_names.discard(name)
+            pending_since.pop(name, None)
+            nodes_now = load_nodes_snapshot(nodes_file)
+            for n in nodes_now:
+                if n.get("name") == name:
+                    n["state"] = "boot_failed"
+                    upsert_node_record(nodes_file, n)
+                    break
+            append_event(day_dir, "node_bootstrap_abandoned", node=name, reason=reason)
+
+        def note_bootstrap_problem(message: str) -> bool:
+            current_ready = _bootstrap_ready_count()
+            state["ready_count"] = current_ready
+            if current_ready >= min_ready_to_start or state["wave1_started"]:
+                state["degraded_error"] = RuntimeError(message)
+                log_warn(message)
+                return False
+            state["blocking_error"] = RuntimeError(message)
+            return True
+
+        try:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, bootstrap_workers))
+            with pool as executor:
+                while True:
+                    seed_nodes = load_nodes_snapshot(nodes_file) or nodes
+                    if refresh_fn is not None:
+                        refreshed_nodes = refresh_fn(seed_nodes)
+                    else:
+                        refreshed_nodes = seed_nodes
+                    with NODES_LOCK:
+                        latest_nodes = load_nodes_if_exists(nodes_file)
+                        current_nodes = merge_node_snapshots(
+                            latest_nodes or seed_nodes, refreshed_nodes,
+                        )
+                        save_nodes(nodes_file, current_nodes)
+                    ready_bootstrapped = refresh_ready_state(current_nodes)
+                    if ready_bootstrapped >= target_ready_count and not future_to_node:
+                        return
+
+                    now = time.time()
+                    for n in current_nodes:
+                        name = n["name"]
+                        if name in completed_names or name in running_names or name in abandoned_names:
+                            pending_since.pop(name, None)
+                            continue
+                        pending_since.setdefault(name, now)
+                        if n.get("ssh_host") and ssh_ok(n):
+                            running_names.add(name)
+                            future = executor.submit(
+                                bootstrap_node_worker,
+                                n,
+                                nodes_file=nodes_file,
+                                project_root=project_root,
+                                sync_excludes=sync_excludes,
+                                train_shards=train_shards,
+                                data_download_cmd=data_download_cmd,
+                            )
+                            future_to_node[future] = n
+                            append_event(day_dir, "node_bootstrap_started", node=name)
+                            continue
+                        if now - pending_since[name] < 120:
+                            continue
+                        # Node not reachable after 120s -- attempt replacement
+                        if state["replacements_used"] >= replacement_budget:
+                            if note_bootstrap_problem(
+                                f"Bootstrap replacement budget exhausted while waiting for {name}"
+                            ):
+                                return
+                            mark_bootstrap_abandoned(name, "replacement_budget_exhausted")
+                            continue
+                        if replace_fn is not None:
+                            try:
+                                replacement = replace_fn(name)
+                            except BaseException as exc:
+                                if note_bootstrap_problem(
+                                    f"Bootstrap replacement failed for {name}: {exc}"
+                                ):
+                                    return
+                                mark_bootstrap_abandoned(name, f"replacement_failed:{exc}")
+                                continue
+                            state["replacements_used"] += 1
+                            append_event(
+                                day_dir,
+                                "replacement_bootstrapped",
+                                node=replacement["name"],
+                                replaced=name,
+                            )
+                            pending_since.pop(name, None)
+                            pending_since[replacement["name"]] = time.time()
+
+                    done: set[concurrent.futures.Future[dict[str, Any]]] = set()
+                    if future_to_node:
+                        done, _ = concurrent.futures.wait(
+                            list(future_to_node.keys()),
+                            timeout=5,
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                    else:
+                        time.sleep(5)
+                    for future in done:
+                        n = future_to_node.pop(future)
+                        running_names.discard(n["name"])
+                        try:
+                            result = future.result()
+                            completed_names.add(result["name"])
+                            state["ready_count"] = max(
+                                state["ready_count"], _bootstrap_ready_count(),
+                            )
+                            append_event(day_dir, "node_bootstrapped", node=result["name"])
+                            if state["ready_count"] >= min_ready_to_start:
+                                state["min_ready_event"].set()
+                            log_success(f"{result['name']}: bootstrap complete")
+                        except BaseException as exc:
+                            append_event(
+                                day_dir, "node_bootstrap_failed",
+                                node=n["name"], error=str(exc),
+                            )
+                            log_warn(f"{n['name']}: bootstrap failed: {exc}")
+                            if state["replacements_used"] >= replacement_budget:
+                                if note_bootstrap_problem(
+                                    f"Bootstrap replacement budget exhausted after "
+                                    f"{n['name']}: {exc}"
+                                ):
+                                    return
+                                mark_bootstrap_abandoned(
+                                    n["name"],
+                                    f"replacement_budget_exhausted:{exc}",
+                                )
+                                continue
+                            if replace_fn is not None:
+                                try:
+                                    replacement = replace_fn(n["name"])
+                                except BaseException as replacement_exc:
+                                    if note_bootstrap_problem(
+                                        f"Bootstrap replacement failed for "
+                                        f"{n['name']}: {replacement_exc}"
+                                    ):
+                                        return
+                                    mark_bootstrap_abandoned(
+                                        n["name"],
+                                        f"replacement_failed:{replacement_exc}",
+                                    )
+                                    continue
+                                state["replacements_used"] += 1
+                                append_event(
+                                    day_dir,
+                                    "replacement_bootstrapped",
+                                    node=replacement["name"],
+                                    replaced=n["name"],
+                                )
+                                pending_since[replacement["name"]] = time.time()
+
+                    current_nodes = load_nodes_snapshot(nodes_file) or current_nodes
+                    ready_bootstrapped = refresh_ready_state(current_nodes)
+                    actionable_pending = [
+                        n for n in current_nodes
+                        if n["name"] not in completed_names
+                        and n["name"] not in running_names
+                        and n["name"] not in abandoned_names
+                    ]
+                    if not future_to_node and not actionable_pending:
+                        if ready_bootstrapped >= min_ready_to_start or state["wave1_started"]:
+                            return
+                        if note_bootstrap_problem(
+                            "Bootstrap ended before minimum ready capacity was reached"
+                        ):
+                            return
+        except BaseException as exc:
+            if note_bootstrap_problem(f"Bootstrap supervisor failed: {exc}"):
+                state["blocking_error"] = RuntimeError(
+                    f"Bootstrap supervisor failed: {exc}"
+                )
+            else:
+                state["degraded_error"] = RuntimeError(
+                    f"Bootstrap supervisor failed: {exc}"
+                )
+        finally:
+            state["ready_count"] = _bootstrap_ready_count()
+            if state["ready_count"] >= min_ready_to_start:
+                state["min_ready_event"].set()
+            state["done_event"].set()
+
+    thread = threading.Thread(target=supervisor, name="bootstrap-supervisor", daemon=True)
+    thread.start()
+    state["thread"] = thread
+    return state

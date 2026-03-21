@@ -1,0 +1,22 @@
+# Minimal Crucible project config
+name: my-experiment
+version: "0.1.0"
+
+provider:
+  type: ssh
+  ssh_key: ~/.ssh/id_ed25519
+
+training:
+  - backend: torch
+    script: train.py
+
+presets:
+  smoke:
+    MAX_WALLCLOCK_SECONDS: "60"
+    ITERATIONS: "500"
+  full:
+    MAX_WALLCLOCK_SECONDS: "3600"
+    ITERATIONS: "10000"
+
+results_file: experiments.jsonl
+logs_dir: logs
