@@ -1,0 +1,6 @@
+title: Crucible
+description: ML research platform for autonomous experimentation on rental GPUs
+theme: jekyll-theme-cayman
+url: https://eren23.github.io
+baseurl: /crucible
+markdown: kramdown
