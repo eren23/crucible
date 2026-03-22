@@ -37,6 +37,17 @@ PRESET_DEFAULTS: dict[str, dict[str, str]] = {
         "WARMUP_STEPS": "5",
         "TRAIN_SHARD_LIMIT": "1",
     },
+    "screen": {
+        "MAX_WALLCLOCK_SECONDS": "3600",
+        "ITERATIONS": "2000",
+        "TRAIN_BATCH_TOKENS": "65536",
+        "GRAD_ACCUM_STEPS": "1",
+        "VAL_LOSS_EVERY": "500",
+        "VAL_BATCH_SIZE": "8192",
+        "TRAIN_LOG_EVERY": "20",
+        "WARMUP_STEPS": "10",
+        "TRAIN_SHARD_LIMIT": "8",
+    },
     "proxy": {
         "MAX_WALLCLOCK_SECONDS": "1800",
         "ITERATIONS": "6000",
@@ -88,6 +99,7 @@ PRESET_DEFAULTS: dict[str, dict[str, str]] = {
 CLI_TIMEOUT_DEFAULTS: dict[str, dict[str, int]] = {
     "mlx": {
         "smoke": 180,
+        "screen": 900,
         "proxy": 3600,
         "medium": 5400,
         "promotion": 10800,
@@ -95,6 +107,7 @@ CLI_TIMEOUT_DEFAULTS: dict[str, dict[str, int]] = {
     },
     "torch": {
         "smoke": 900,
+        "screen": 600,
         "proxy": 3600,
         "medium": 5400,
         "promotion": 10800,

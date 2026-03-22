@@ -38,6 +38,7 @@ from crucible.runner.output_parser import (
 )
 from crucible.runner.presets import get_preset
 from crucible.runner.tracker import RunTracker
+from crucible.runner.wandb import WandbLogger
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +229,20 @@ def run_experiment(
         timeout_seconds=timeout_seconds,
         pid=None,
     )
+
+    # -- Init W&B logger (inert if WANDB_PROJECT unset) --
+    wandb_logger = WandbLogger.create(
+        run_id=exp_id,
+        config=resolved_config,
+        backend=backend,
+        tracker=tracker,
+        tags=tags,
+    )
+    if wandb_logger.enabled:
+        wandb_logger.update_config({
+            "crucible_run_id": exp_id,
+            "crucible_preset": preset,
+        })
 
     # -- Build result skeleton --
     result: dict[str, Any] = {
@@ -460,6 +475,13 @@ def run_experiment(
             failure_class="runner_exception",
             error=result["error"],
         )
+
+    # -- Finish W&B run --
+    if wandb_logger.enabled:
+        if result.get("result"):
+            wandb_logger.update_summary(result["result"])
+        exit_code = 0 if result["status"] == "completed" else 1
+        wandb_logger.finish(exit_code=exit_code)
 
     # -- Persist result --
     append_jsonl(results_path, result)

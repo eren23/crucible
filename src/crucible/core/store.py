@@ -10,6 +10,8 @@ Layout under store_dir (default .crucible/):
     designs/{name}/current.yaml
     context/{name}/v1.yaml   # research context versions
     context/{name}/current.yaml
+
+Note: findings and notes are managed independently by HubStore and NoteStore.
 """
 from __future__ import annotations
 

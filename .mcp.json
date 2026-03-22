@@ -1,9 +1,12 @@
 {
   "mcpServers": {
     "crucible-fleet": {
-      "command": "python3",
+      "command": "/Users/eren/Documents/AI/parameter-golf_dev/.venv/bin/python3",
       "args": ["-m", "crucible.mcp.server"],
-      "cwd": "."
+      "cwd": "/Users/eren/Documents/AI/parameter-golf_dev",
+      "env": {
+        "PYTHONPATH": "src"
+      }
     }
   }
 }

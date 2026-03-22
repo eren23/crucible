@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
 
-from crucible.models.base import TiedEmbeddingLM
+if TYPE_CHECKING:
+    from crucible.models.base import TiedEmbeddingLM
 
 
 class BatchedLinearLoRA(nn.Module):

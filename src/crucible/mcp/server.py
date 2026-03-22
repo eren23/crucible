@@ -9,13 +9,18 @@ from __future__ import annotations
 import asyncio
 import json
 import traceback
+from pathlib import Path
 from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from crucible.core.env import load_env_files
 from crucible.mcp.tools import TOOL_DISPATCH
+
+# Load .env files so secrets (RUNPOD_API_KEY, WANDB_API_KEY) are available to tools
+load_env_files(Path(__file__).resolve().parent.parent.parent.parent)
 
 app = Server("crucible-fleet")
 
@@ -140,6 +145,41 @@ TOOLS: list[Tool] = [
             },
             "additionalProperties": False,
         },
+    ),
+    Tool(
+        name="fleet_refresh",
+        description="Refresh node states from cloud provider API. Updates SSH hosts, GPU info, and node state. Run after provision_nodes to get SSH connection info.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="bootstrap_nodes",
+        description="Bootstrap fleet nodes: sync code, install dependencies, download training data. Run after provision_nodes + fleet_refresh.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "train_shards": {"type": "integer", "description": "Number of data shards to download per node.", "default": 1},
+                "skip_install": {"type": "boolean", "description": "Skip pip install step.", "default": False},
+                "skip_data": {"type": "boolean", "description": "Skip data download step.", "default": False},
+                "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes to bootstrap. Empty = all."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="dispatch_experiments",
+        description="Dispatch queued experiments to idle bootstrapped nodes. Assigns one experiment per available node. Run after bootstrap_nodes + enqueue_experiment.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "max_assignments": {"type": "integer", "description": "Max experiments to dispatch.", "default": 8},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="collect_results",
+        description="Collect experiment results from all fleet nodes via rsync and merge into fleet results file. Run after experiments complete.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
         name="get_research_state",
@@ -385,6 +425,287 @@ TOOLS: list[Tool] = [
         },
     ),
     # -----------------------------------------------------------------------
+    # Note tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="note_add",
+        description="Attach a freeform markdown note to an experiment run. Use for observations, analysis, or hypotheses about a specific run.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "The experiment run_id to attach the note to."},
+                "text": {"type": "string", "description": "Markdown note body."},
+                "stage": {"type": "string", "description": "When the note was created: pre-run, mid-run, post-run, analysis.", "default": ""},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization.", "default": []},
+                "confidence": {"type": "number", "description": "Confidence in any claims made (0-1)."},
+                "created_by": {"type": "string", "description": "Identity of note creator.", "default": "mcp-agent"},
+            },
+            "required": ["run_id", "text"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="note_get",
+        description="Get all notes for a specific experiment run, optionally filtered by stage.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "The experiment run_id."},
+                "stage": {"type": "string", "description": "Filter by stage (pre-run, mid-run, post-run, analysis).", "default": ""},
+            },
+            "required": ["run_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="note_search",
+        description="Search notes across all runs by text query, tags, stage, or run_id.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Text search across note metadata.", "default": ""},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter to notes containing all these tags."},
+                "stage": {"type": "string", "description": "Filter by stage.", "default": ""},
+                "run_id": {"type": "string", "description": "Filter by run_id.", "default": ""},
+                "limit": {"type": "integer", "description": "Max results.", "default": 50},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # W&B tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="wandb_log_image",
+        description="Upload an image file to a W&B run. Requires the run to have a W&B URL in its status sidecar.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Crucible run ID."},
+                "image_path": {"type": "string", "description": "Path to image file to upload."},
+                "caption": {"type": "string", "description": "Image caption.", "default": ""},
+                "key": {"type": "string", "description": "W&B log key for the image.", "default": "image"},
+            },
+            "required": ["run_id", "image_path"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="wandb_get_url",
+        description="Get the W&B dashboard URL for a Crucible experiment run.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Crucible run ID."},
+            },
+            "required": ["run_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="wandb_annotate",
+        description="Push a note or finding annotation to a W&B run summary.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Crucible run ID."},
+                "text": {"type": "string", "description": "The note or finding text."},
+                "annotation_type": {"type": "string", "description": "Type: 'note' or 'finding'.", "default": "note"},
+            },
+            "required": ["run_id", "text"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Hub tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="hub_status",
+        description="Hub info: initialization state, active track, linked projects, and track summaries.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="hub_sync",
+        description="Git-sync the hub: stage, commit, pull, and push to remote.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "remote": {"type": "string", "description": "Git remote name (default: origin)."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="track_create",
+        description="Create a new research track for grouping related experiments across projects.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Track name (human-readable, will be slugified)."},
+                "description": {"type": "string", "description": "What this track is about.", "default": ""},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for the track.", "default": []},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="track_list",
+        description="List all research tracks with their metadata and active status.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="track_switch",
+        description="Switch the active research track. The active track is used as default context.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Track name to activate."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_findings_query",
+        description="Query findings across hub scopes (track or global) with optional filters.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string", "description": "Scope: 'track' or 'global'.", "default": "global"},
+                "track": {"type": "string", "description": "Track name (required when scope='track')."},
+                "status": {"type": "string", "description": "Filter by status: active, superseded, archived, promoted."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter to findings with any of these tags."},
+                "limit": {"type": "integer", "description": "Max findings to return.", "default": 50},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="finding_promote",
+        description="Promote a finding from track scope to global scope.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string", "description": "The finding ID to promote."},
+                "from_scope": {"type": "string", "description": "Source scope (e.g. 'track')."},
+                "to_scope": {"type": "string", "description": "Destination scope (e.g. 'global')."},
+                "from_track": {"type": "string", "description": "Source track name (if from_scope='track')."},
+                "to_track": {"type": "string", "description": "Destination track name (if to_scope='track')."},
+            },
+            "required": ["finding_id", "from_scope", "to_scope"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Briefing tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="get_research_briefing",
+        description="Comprehensive session orientation: project state, leaderboard, hypotheses, findings, notes, and suggested next steps.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "track": {"type": "string", "description": "Track to brief on. Empty uses active track.", "default": ""},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="annotate_run",
+        description="Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "The experiment run_id to annotate."},
+                "finding_index": {"type": "integer", "description": "Index of the finding in the current findings list (0-indexed)."},
+            },
+            "required": ["run_id", "finding_index"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Model extensibility tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="model_list_families",
+        description="List all registered model architecture families (e.g. baseline, looped, convloop, prefix_memory).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_list_activations",
+        description="List all available activation functions (e.g. relu_sq, gelu_sq, mish_sq).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_list_components",
+        description="List all available model building-block components (attention, MLP, norm, etc.).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_get_config_schema",
+        description="Get the accepted configuration parameters for a model family.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "family": {"type": "string", "description": "Model family name (e.g. 'baseline')."},
+            },
+            "required": ["family"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_validate_config",
+        description="Pre-flight validation of an experiment config: checks MODEL_FAMILY and ACTIVATION are valid.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "config": {"type": "object", "description": "Experiment config dict to validate.", "additionalProperties": {"type": "string"}},
+            },
+            "required": ["config"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_add_architecture",
+        description="Write and register a new architecture family at runtime. Code must call register_model().",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Family name (snake_case)."},
+                "code": {"type": "string", "description": "Full Python source that defines and registers the architecture."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_add_activation",
+        description="Register a new activation function at runtime. Provide a Python expression using 'x' with torch/F available.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Activation function name."},
+                "code": {"type": "string", "description": "Python expression (e.g. 'torch.sigmoid(x) * x')."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_generate_template",
+        description="Generate boilerplate Python code for a new architecture family.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Architecture family name (snake_case)."},
+                "base": {"type": "string", "description": "Base architecture to derive from.", "default": "baseline"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
     # Config tools
     # -----------------------------------------------------------------------
     Tool(
@@ -416,7 +737,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
     handler = TOOL_DISPATCH.get(name)
     if handler is None:
         return _error_text(f"Unknown tool: {name}")
-    return _safe_call(handler, arguments)
+    return await asyncio.to_thread(_safe_call, handler, arguments)
 
 
 # ---------------------------------------------------------------------------

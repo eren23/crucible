@@ -51,6 +51,7 @@ def rsync_base(node: dict[str, Any]) -> list[str]:
     ssh_cmd = " ".join([
         "ssh",
         "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
         "-i", ssh_key,
         "-p", str(node.get("ssh_port", 22)),

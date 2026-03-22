@@ -1,5 +1,109 @@
 # Changelog
 
+## v0.2.0-alpha (2026-03-22)
+
+**Experiment tracking experience.** Major additions for cross-project knowledge sharing, experiment annotation, and agent-friendly APIs.
+
+### New Modules
+
+- **`api/`** — Lightweight REST API server (FastAPI) exposing 10 endpoints that wrap MCP tools. Start with `crucible serve`.
+- **`core/hub.py`** — Crucible Hub (`~/.crucible-hub/`), a git-synced cross-project knowledge store for findings and research tracks.
+- **`core/finding.py`** — Finding model and promotion logic for elevating project-level insights to the hub.
+- **`runner/notes.py`** — Experiment notes system: freeform markdown with YAML frontmatter, attached to run IDs.
+- **`researcher/briefing.py`** — Research briefing generator for LLM session orientation (project context, recent findings, track state).
+
+### 27 New MCP Tools (53 total, was 26)
+
+**Notes** (3 tools):
+- `note_add` — Attach a markdown note to a run
+- `note_get` — Retrieve notes for a run
+- `note_search` — Full-text search across all notes
+
+**W&B Bridge** (3 tools):
+- `wandb_log_image` — Log an image to a W&B run
+- `wandb_get_url` — Get the W&B dashboard URL for a run
+- `wandb_annotate` — Add annotations to a W&B run
+
+**Hub** (2 tools):
+- `hub_status` — Hub state: active track, synced projects, finding count
+- `hub_sync` — Push/pull hub directory via git
+
+**Tracks** (3 tools):
+- `track_create` — Create a named research track
+- `track_list` — List all tracks with metadata
+- `track_switch` — Switch the active research track
+
+**Findings** (2 tools):
+- `hub_findings_query` — Search findings across all projects in the hub
+- `finding_promote` — Promote a project finding to the hub
+
+**Briefing** (2 tools):
+- `get_research_briefing` — Generate LLM session orientation summary
+- `annotate_run` — Add structured annotations to a completed run
+
+### New CLI Commands
+
+- `crucible hub {status|sync|findings}` — Manage the Crucible Hub
+- `crucible track {create|list|switch}` — Research track management
+- `crucible note {add|get|search}` — Experiment note management
+- `crucible serve [--port PORT]` — Start the REST API server
+- `crucible store {list|diff|get}` — Version store inspection
+
+### REST API
+
+10 FastAPI endpoints wrapping core MCP tools:
+- `GET /api/fleet/status`, `POST /api/fleet/provision`, `DELETE /api/fleet/destroy`
+- `GET /api/experiments/queue`, `POST /api/experiments/enqueue`, `GET /api/experiments/{run_id}`
+- `GET /api/analysis/leaderboard`, `GET /api/analysis/sensitivity`
+- `GET /api/research/state`, `GET /api/research/briefing`
+
+### W&B Bridge Enhancements
+
+- Image logging support (`wandb_log_image`)
+- Run URL retrieval (`wandb_get_url`)
+- Run annotation with structured metadata (`wandb_annotate`)
+
+### Research Tracks & Cross-Project Findings
+
+- Research tracks group related projects under named directions
+- Findings can be promoted from project-level context to the hub
+- Hub is git-synced for sharing across machines and collaborators
+- Briefing system orients new LLM sessions with accumulated knowledge
+
+### Model Extensibility (12 tools)
+
+- `model_list_families` — List registered model families
+- `model_list_activations` — List available activation functions
+- `model_list_components` — List model components
+- `model_get_config_schema` — Get parameter schema for a family
+- `model_validate_config` — Validate experiment config against schema
+- `model_add_architecture` — Register a user architecture plugin
+- `model_add_activation` — Register a custom activation function
+- `model_generate_template` — Generate plugin boilerplate
+
+**Config** (2 tools):
+- `config_get_presets` — List all presets with resolved values
+- `config_get_project` — Full project configuration
+
+### Architecture Plugin System
+
+- User architectures live in `models/user_architectures/` and auto-register on import
+- `example_two_tower.py` — working example plugin (two-tower with gated fusion)
+- Plugin contract: factory function `(args) -> nn.Module`
+- Plugins sync to pods automatically via rsync
+
+### Robustness Fixes
+
+- Narrowed exception handling in model registry fallback — plugin errors now propagate with real tracebacks instead of being swallowed
+- Added `TYPE_CHECKING` import guard in `lora.py` to fix circular import
+- `list_families()` gracefully handles torch-absent environments
+
+### Test Suite
+
+Fleet orchestration, architecture forward-pass, component, and runner execution tests added. Previous: 296 tests in v0.1.0.
+
+---
+
 ## v0.1.0-alpha (2026-03-21)
 
 **First release.** Extracted from the [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) competition infrastructure and generalized into a standalone ML research platform.

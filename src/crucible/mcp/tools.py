@@ -80,7 +80,7 @@ def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import load_queue, summarize_queue
 
-        rows = load_queue(config.project_root / config.fleet_results_file)
+        rows = load_queue(config.project_root / "fleet_queue.jsonl")
         summary = summarize_queue(rows)
         return {"total": len(rows), "summary": summary}
     except CrucibleError as exc:
@@ -162,7 +162,8 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
 
         fleet = FleetManager(config)
         node_names = args.get("node_names") or None
-        fleet.destroy(node_names=node_names)
+        selected = set(node_names) if node_names else None
+        fleet.destroy(selected_names=selected)
         return {"destroyed": node_names or "all", "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
@@ -190,11 +191,118 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
             if selected and node["name"] not in selected:
                 continue
             try:
-                sync_repo(node, config.project_root, config.sync_excludes)
+                sync_repo(node, project_root=config.project_root, sync_excludes=config.sync_excludes)
                 synced.append(node["name"])
             except Exception as exc:
                 errors.append({"node": node["name"], "error": str(exc)})
         return {"synced": synced, "errors": errors}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def fleet_refresh(args: dict[str, Any]) -> dict[str, Any]:
+    """Refresh node states from the cloud provider API (updates SSH hosts, GPU info, state)."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fm = FleetManager(config)
+        nodes = fm.refresh()
+        return {
+            "refreshed": len(nodes),
+            "nodes": [
+                {
+                    "name": n.get("name"),
+                    "state": n.get("state"),
+                    "ssh_host": n.get("ssh_host"),
+                    "ssh_port": n.get("ssh_port", 22),
+                    "gpu": n.get("gpu"),
+                    "env_ready": n.get("env_ready", False),
+                    "dataset_ready": n.get("dataset_ready", False),
+                }
+                for n in nodes
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def bootstrap_nodes(args: dict[str, Any]) -> dict[str, Any]:
+    """Bootstrap fleet nodes: sync code, install deps, download data. Run after provision_nodes."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fm = FleetManager(config)
+        train_shards = args.get("train_shards", 1)
+        skip_install = args.get("skip_install", False)
+        skip_data = args.get("skip_data", False)
+        node_names = args.get("node_names")
+        selected = set(node_names) if node_names else None
+
+        nodes = fm.bootstrap(
+            train_shards=train_shards,
+            skip_install=skip_install,
+            skip_data=skip_data,
+            selected_names=selected,
+        )
+        bootstrapped = [n for n in nodes if n.get("state") == "bootstrapped"]
+        return {
+            "total": len(nodes),
+            "bootstrapped": len(bootstrapped),
+            "nodes": [
+                {"name": n.get("name"), "state": n.get("state"), "env_ready": n.get("env_ready"), "dataset_ready": n.get("dataset_ready")}
+                for n in nodes
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
+    """Dispatch queued experiments to idle bootstrapped nodes. Run after bootstrap_nodes + enqueue."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fm = FleetManager(config)
+        max_assignments = args.get("max_assignments", 8)
+        assignments = fm.dispatch(max_assignments=max_assignments)
+        return {
+            "dispatched": len(assignments),
+            "assignments": [
+                {"node": a.get("assigned_node", a.get("assigned_pod", "")), "experiment": a.get("experiment_name", "")}
+                for a in assignments
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def collect_results(args: dict[str, Any]) -> dict[str, Any]:
+    """Collect experiment results from all fleet nodes via rsync and merge into fleet results."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+        from crucible.analysis.results import merged_results
+
+        fm = FleetManager(config)
+        fm.collect()
+        results = merged_results(config)
+        completed = [r for r in results if r.get("status") == "completed"]
+        return {
+            "collected": True,
+            "total_results": len(results),
+            "completed": len(completed),
+        }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
@@ -496,7 +604,24 @@ def context_get_analysis(args: dict[str, Any]) -> dict[str, Any]:
 
         state_path = config.project_root / config.research_state_file
         state = ResearchState(state_path)
-        return build_analysis_structured(config, state)
+        result = build_analysis_structured(config, state)
+
+        # Inject hub findings if available
+        try:
+            from crucible.core.hub import HubStore
+
+            hub = HubStore()
+            if hub.initialized:
+                active_track = hub.get_active_track() or config.active_track
+                if active_track:
+                    hub_findings = hub.load_context_for_track(
+                        active_track, include_global=True, max_findings=20,
+                    )
+                    result["hub_findings"] = hub_findings
+        except Exception:
+            pass  # Hub is optional
+
+        return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
@@ -816,6 +941,628 @@ def version_link_result(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Note tools
+# ---------------------------------------------------------------------------
+
+
+def _get_note_store():
+    """Lazy-load a NoteStore from project config."""
+    from crucible.runner.notes import NoteStore
+
+    config = _get_config()
+    store_dir = config.project_root / config.store_dir
+    return NoteStore(store_dir)
+
+
+def note_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Attach a note to an experiment run."""
+    try:
+        store = _get_note_store()
+        entry = store.add(
+            run_id=args["run_id"],
+            body=args["text"],
+            stage=args.get("stage", ""),
+            tags=args.get("tags", []),
+            confidence=args.get("confidence"),
+            created_by=args.get("created_by", "mcp-agent"),
+        )
+        return {"status": "added", "note": entry}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def note_get(args: dict[str, Any]) -> dict[str, Any]:
+    """Get all notes for a run."""
+    try:
+        store = _get_note_store()
+        run_id = args["run_id"]
+        stage = args.get("stage", "")
+        entries = store.get_for_run(run_id)
+        if stage:
+            entries = [e for e in entries if e.get("stage") == stage]
+        return {"run_id": run_id, "notes": entries, "total": len(entries)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def note_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search notes across runs."""
+    try:
+        store = _get_note_store()
+        entries = store.search(
+            query=args.get("query", ""),
+            tags=args.get("tags"),
+            stage=args.get("stage", ""),
+            run_id=args.get("run_id", ""),
+            limit=args.get("limit", 50),
+        )
+        return {"notes": entries, "total": len(entries)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# W&B tools
+# ---------------------------------------------------------------------------
+
+
+def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
+    """Log an image file to a W&B run."""
+    config = _get_config()
+    run_id = args["run_id"]
+    image_path = args["image_path"]
+    caption = args.get("caption", "")
+    key = args.get("key", "image")
+
+    try:
+        from crucible.runner.wandb import _resolve_wandb_url
+
+        wandb_url = _resolve_wandb_url(run_id, config)
+        if not wandb_url:
+            return {"error": f"No W&B URL found for run {run_id}"}
+
+        try:
+            import wandb  # type: ignore
+        except ImportError:
+            return {"error": "wandb not installed"}
+
+        # Parse entity/project/run_id from URL
+        parts = wandb_url.rstrip("/").split("/")
+        runs_idx = parts.index("runs")
+        wb_run_id = parts[runs_idx + 1]
+        project = parts[runs_idx - 1]
+        entity = parts[runs_idx - 2]
+
+        api = wandb.Api()
+        run = api.run(f"{entity}/{project}/{wb_run_id}")
+        run.upload_file(str(image_path))
+        return {"status": "uploaded", "run_id": run_id, "wandb_url": wandb_url, "image_path": image_path}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def wandb_get_url(args: dict[str, Any]) -> dict[str, Any]:
+    """Get W&B dashboard URL for a Crucible run."""
+    config = _get_config()
+    run_id = args["run_id"]
+    try:
+        from crucible.runner.wandb import _resolve_wandb_url
+
+        url = _resolve_wandb_url(run_id, config)
+        if url:
+            return {"run_id": run_id, "wandb_url": url}
+        return {"run_id": run_id, "wandb_url": None, "reason": "No W&B URL found in status sidecar or results."}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def wandb_annotate(args: dict[str, Any]) -> dict[str, Any]:
+    """Push note/finding to W&B run summary."""
+    config = _get_config()
+    run_id = args["run_id"]
+    text = args["text"]
+    annotation_type = args.get("annotation_type", "note")
+
+    try:
+        from crucible.runner.wandb import _resolve_wandb_url, wandb_annotate_finished_run
+
+        wandb_url = _resolve_wandb_url(run_id, config)
+        if not wandb_url:
+            return {"error": f"No W&B URL found for run {run_id}"}
+
+        if annotation_type == "finding":
+            ok = wandb_annotate_finished_run(wandb_url, findings=[text])
+        else:
+            ok = wandb_annotate_finished_run(wandb_url, notes=[text])
+
+        if ok:
+            return {"status": "annotated", "run_id": run_id, "annotation_type": annotation_type, "wandb_url": wandb_url}
+        return {"error": f"Failed to annotate W&B run for {run_id}. wandb may not be installed or the run may be inaccessible."}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Hub tools
+# ---------------------------------------------------------------------------
+
+
+def _get_hub():
+    """Lazy-load a HubStore, returning None if not initialized."""
+    from crucible.core.hub import HubStore
+
+    hub = HubStore()
+    if not hub.initialized:
+        return None
+    return hub
+
+
+def hub_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Hub info, active track, linked projects."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"initialized": False, "message": "Hub not initialized. Run hub init first."}
+
+        active_track = hub.get_active_track()
+        projects = hub.list_projects()
+        tracks = hub.list_tracks()
+
+        return {
+            "initialized": True,
+            "hub_dir": str(hub.hub_dir),
+            "active_track": active_track,
+            "projects": projects,
+            "tracks_count": len(tracks),
+            "tracks": [
+                {"name": t.get("name"), "description": t.get("description", ""), "active": t.get("active", True)}
+                for t in tracks
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Git sync the hub (push/pull/both)."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        remote = args.get("remote")
+        result = hub.sync(remote=remote)
+        return {"status": "synced", **result}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def track_create(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new research track."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        name = args["name"]
+        description = args.get("description", "")
+        tags = args.get("tags", [])
+
+        track = hub.create_track(name, description=description, tags=tags)
+        return {"status": "created", "track": track}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def track_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List all research tracks."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        tracks = hub.list_tracks()
+        active = hub.get_active_track()
+        return {
+            "active_track": active,
+            "tracks": tracks,
+            "total": len(tracks),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def track_switch(args: dict[str, Any]) -> dict[str, Any]:
+    """Switch the active research track."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        name = args["name"]
+        hub.activate_track(name)
+        return {"status": "switched", "active_track": name}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
+    """Query findings across hub scopes."""
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        scope = args.get("scope", "global")
+        track = args.get("track")
+        status = args.get("status")
+        tags = args.get("tags")
+        limit = args.get("limit", 50)
+
+        findings = hub.list_findings(scope, track=track, status=status, tags=tags)
+        return {"findings": findings[:limit], "total": len(findings)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def _research_finding_to_hub_finding(finding: dict[str, Any], config: Any) -> dict[str, Any]:
+    """Convert a ResearchState finding to hub-compatible Finding format."""
+    from crucible.core.finding import make_finding_id
+
+    return {
+        "id": make_finding_id(finding.get("finding", "untitled")[:40], "project"),
+        "title": finding.get("finding", "")[:80],
+        "body": finding.get("finding", ""),
+        "scope": "project",
+        "status": "active",
+        "confidence": finding.get("confidence", 0.5),
+        "tags": [],
+        "category": finding.get("category", "observation"),
+        "source_project": config.name,
+        "source_experiments": finding.get("source_experiments", []),
+        "created_by": finding.get("created_by", "unknown"),
+        "created_at": finding.get("ts", ""),
+    }
+
+
+def finding_promote(args: dict[str, Any]) -> dict[str, Any]:
+    """Promote a finding from one scope to another. Supports project→track→global."""
+    config = _get_config()
+    try:
+        hub = _get_hub()
+        if hub is None:
+            return {"error": "Hub not initialized."}
+
+        from_scope = args["from_scope"]
+        to_scope = args["to_scope"]
+        from_track = args.get("from_track")
+        to_track = args.get("to_track")
+
+        # Confidence threshold check
+        from crucible.core.finding import PROMOTION_RULES
+
+        rule = PROMOTION_RULES.get((from_scope, to_scope), {})
+        min_conf = rule.get("min_confidence", 0.0)
+
+        if from_scope == "project":
+            # Promote from ResearchState → Hub
+            finding_index = args.get("finding_index")
+            if finding_index is None:
+                finding_id = args.get("finding_id", "")
+                return {"error": "finding_index is required when promoting from project scope."}
+
+            from crucible.researcher.state import ResearchState
+
+            state_path = config.project_root / config.research_state_file
+            state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
+
+            if finding_index < 0 or finding_index >= len(state.findings):
+                return {"error": f"Finding index {finding_index} out of range ({len(state.findings)} findings)."}
+
+            finding = state.findings[finding_index]
+            if finding.get("confidence", 0) < min_conf:
+                return {"error": f"Confidence {finding.get('confidence', 0):.2f} below threshold {min_conf:.2f} for {from_scope}→{to_scope}."}
+
+            hub_finding = _research_finding_to_hub_finding(finding, config)
+            promoted = hub.store_finding(hub_finding, to_scope, track=to_track)
+            return {"status": "promoted", "finding": promoted}
+        else:
+            # Hub-to-hub promotion (track→global)
+            finding_id = args["finding_id"]
+            existing = hub.get_finding(finding_id, from_scope, track=from_track)
+            if existing is None:
+                return {"error": f"Finding '{finding_id}' not found in {from_scope} scope."}
+
+            if existing.get("confidence", 0) < min_conf:
+                return {"error": f"Confidence {existing.get('confidence', 0):.2f} below threshold {min_conf:.2f} for {from_scope}→{to_scope}."}
+
+            promoted = hub.promote_finding(
+                finding_id, from_scope, to_scope,
+                from_track=from_track, to_track=to_track,
+            )
+            return {"status": "promoted", "finding": promoted}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Briefing tools
+# ---------------------------------------------------------------------------
+
+
+def get_research_briefing(args: dict[str, Any]) -> dict[str, Any]:
+    """Comprehensive session orientation: project state, leaderboard, hypotheses, findings, notes, and suggested next steps."""
+    config = _get_config()
+    try:
+        from crucible.researcher.briefing import build_briefing
+
+        track = args.get("track")
+        if track:
+            original = config.active_track
+            config.active_track = track
+            try:
+                return build_briefing(config)
+            finally:
+                config.active_track = original
+        return build_briefing(config)
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
+    """Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments."""
+    config = _get_config()
+    run_id = args["run_id"]
+    finding_index = args["finding_index"]
+
+    try:
+        from crucible.researcher.state import ResearchState
+        from crucible.runner.notes import NoteStore
+
+        state_path = config.project_root / config.research_state_file
+        if not state_path.exists():
+            return {"error": "No research state found. Record findings first with context_push_finding."}
+
+        state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
+
+        if finding_index < 0 or finding_index >= len(state.findings):
+            return {
+                "error": f"Finding index {finding_index} out of range. "
+                f"There are {len(state.findings)} findings (0-indexed)."
+            }
+
+        finding = state.findings[finding_index]
+
+        # Add run_id to the finding's source_experiments
+        source_exps = finding.get("source_experiments", [])
+        if run_id not in source_exps:
+            source_exps.append(run_id)
+            finding["source_experiments"] = source_exps
+            state.save()
+
+        # Add a note to the run referencing this finding
+        store_dir = config.project_root / config.store_dir
+        note_store = NoteStore(store_dir)
+        finding_text = finding.get("finding", "")
+        category = finding.get("category", "observation")
+        note_body = (
+            f"Linked to finding [{category}]: {finding_text}\n\n"
+            f"(finding_index={finding_index}, confidence={finding.get('confidence', '?')})"
+        )
+        note_entry = note_store.add(
+            run_id=run_id,
+            body=note_body,
+            stage="post-run",
+            tags=["annotate_run", category],
+            created_by="mcp-agent",
+        )
+
+        return {
+            "status": "annotated",
+            "run_id": run_id,
+            "finding_index": finding_index,
+            "finding_text": finding_text[:200],
+            "note": note_entry,
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Model extensibility tools
+# ---------------------------------------------------------------------------
+
+
+def model_list_families(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered model architecture families."""
+    try:
+        from crucible.models.registry import list_families
+        return {"families": list_families()}
+    except ImportError:
+        # torch not installed — return known built-in families
+        return {"families": ["baseline", "convloop", "looped", "memory", "prefix_memory"]}
+
+
+def model_list_activations(args: dict[str, Any]) -> dict[str, Any]:
+    """List all available activation functions."""
+    try:
+        from crucible.models.components.mlp import ACTIVATIONS
+        return {"activations": sorted(ACTIVATIONS.keys())}
+    except ImportError:
+        return {"activations": [
+            "elu03_sq", "gelu_sq", "leaky01_sq", "leaky02_sq", "leaky08_sq",
+            "log1p_relu_sq", "mish_sq", "relu_sq", "x_absx",
+        ]}
+
+
+def model_list_components(args: dict[str, Any]) -> dict[str, Any]:
+    """List all available model components."""
+    try:
+        from crucible.models import components
+        return {"components": components.__all__}
+    except ImportError:
+        return {"components": [
+            "RMSNorm", "CastedLinear", "Rotary", "CausalSelfAttention", "Block",
+            "MLP", "SmearGate", "BigramHash", "TrigramHash", "TokenMerger",
+            "BatchedLinearLoRA", "BatchedTTTLoRA", "MoELayer",
+        ]}
+
+
+def model_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
+    """Get accepted parameters for a model family."""
+    family = args["family"]
+    try:
+        from crucible.models.registry import get_family_schema, list_families
+        if family not in list_families():
+            return {"error": f"Unknown family: {family}. Available: {list_families()}"}
+        return {"family": family, "parameters": get_family_schema(family)}
+    except Exception as exc:
+        return {"error": f"Failed to get schema: {exc}"}
+
+
+def model_validate_config(args: dict[str, Any]) -> dict[str, Any]:
+    """Pre-flight validation of experiment config."""
+    config = args.get("config", {})
+    warnings: list[str] = []
+    errors: list[str] = []
+    family = config.get("MODEL_FAMILY", "baseline")
+    try:
+        from crucible.models.registry import list_families
+        if family not in list_families():
+            errors.append(f"Unknown MODEL_FAMILY: {family}")
+    except Exception as exc:
+        warnings.append(f"Could not validate MODEL_FAMILY: {exc}")
+    activation = config.get("ACTIVATION", "relu_sq")
+    try:
+        from crucible.models.components.mlp import ACTIVATIONS
+        if activation not in ACTIVATIONS:
+            errors.append(f"Unknown ACTIVATION: {activation}. Available: {sorted(ACTIVATIONS.keys())}")
+    except ImportError:
+        warnings.append("torch not installed; cannot validate ACTIVATION")
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
+def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
+    """Write and register a new architecture family at runtime."""
+    name = args["name"]
+    code = args["code"]
+    if "register_model" not in code:
+        return {"error": "Code must call register_model() to register the family."}
+    import importlib
+    from pathlib import Path
+    arch_dir = Path(__file__).parent.parent / "models" / "user_architectures"
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    file_path = arch_dir / f"{name}.py"
+    file_path.write_text(code, encoding="utf-8")
+    try:
+        importlib.import_module(f"crucible.models.user_architectures.{name}")
+        from crucible.models.registry import list_families
+        return {"status": "registered", "family": name, "families": list_families()}
+    except Exception as e:
+        file_path.unlink(missing_ok=True)
+        return {"error": f"Failed to import: {e}"}
+
+
+def model_add_activation(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new activation function at runtime via restricted code expression."""
+    name = args["name"]
+    code = args["code"]
+    try:
+        import torch
+        import torch.nn.functional as F  # noqa: N812
+    except ImportError:
+        return {"error": "torch not installed"}
+    try:
+        # Restricted namespace: only torch and F, no builtins for safety
+        restricted_ns: dict[str, Any] = {"torch": torch, "F": F, "__builtins__": {}}
+        compiled = compile(f"__result = lambda x: {code}", "<activation>", "exec")
+        exec(compiled, restricted_ns)  # noqa: S102 — intentional: sandboxed activation builder
+        activation_fn = restricted_ns["__result"]
+        test = torch.randn(2, 3)
+        result = activation_fn(test)
+        assert result.shape == test.shape
+    except Exception as e:
+        return {"error": f"Invalid activation code: {e}"}
+    from crucible.models.components.mlp import ACTIVATIONS
+    ACTIVATIONS[name] = activation_fn
+    return {"status": "registered", "name": name, "activations": sorted(ACTIVATIONS.keys())}
+
+
+def model_generate_template(args: dict[str, Any]) -> dict[str, Any]:
+    """Generate boilerplate code for a new architecture."""
+    name = args["name"]
+    cn = name.title().replace("_", "")
+    lines = [
+        f'"""User architecture: {name}."""',
+        "from __future__ import annotations",
+        "from typing import Any",
+        "import torch",
+        "from torch import Tensor, nn",
+        "from crucible.models.base import TiedEmbeddingLM",
+        "from crucible.models.registry import register_model",
+        "from crucible.models.components.attention import Block",
+        "",
+        f"class {cn}GPT(TiedEmbeddingLM):",
+        "    def __init__(self, vocab_size, num_layers, model_dim, num_heads, num_kv_heads,",
+        '                 mlp_mult, tie_embeddings, tied_embed_init_std, logit_softcap,',
+        '                 rope_base, qk_gain_init, activation="relu_sq", **kwargs):',
+        "        super().__init__(vocab_size, model_dim, tie_embeddings, tied_embed_init_std, logit_softcap)",
+        "        self.blocks = nn.ModuleList([",
+        "            Block(model_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init,",
+        "                  activation=activation) for _ in range(num_layers)])",
+        "",
+        "    def hidden(self, input_ids: Tensor, lora=None) -> Tensor:",
+        "        x = self.embed_tokens(input_ids)",
+        "        x0 = x",
+        "        for block in self.blocks:",
+        "            x = block(x, x0)",
+        "        return x",
+        "",
+        f"def _build_{name}(args: Any) -> {cn}GPT:",
+        f"    return {cn}GPT(",
+        "        vocab_size=args.vocab_size, num_layers=args.num_layers,",
+        "        model_dim=args.model_dim, num_heads=args.num_heads,",
+        "        num_kv_heads=args.num_kv_heads, mlp_mult=args.mlp_mult,",
+        "        tie_embeddings=args.tie_embeddings, tied_embed_init_std=args.tied_embed_init_std,",
+        "        logit_softcap=args.logit_softcap, rope_base=args.rope_base,",
+        '        qk_gain_init=args.qk_gain_init, activation=getattr(args, "activation", "relu_sq"))',
+        "",
+        f'register_model("{name}", _build_{name})',
+    ]
+    return {"template": "\n".join(lines), "usage": f"Call model_add_architecture with name='{name}' and code=<this>"}
+
+
+# ---------------------------------------------------------------------------
 # Config tools
 # ---------------------------------------------------------------------------
 
@@ -899,6 +1646,10 @@ TOOL_DISPATCH: dict[str, Any] = {
     "provision_nodes": provision_nodes,
     "destroy_nodes": destroy_nodes,
     "sync_code": sync_code,
+    "fleet_refresh": fleet_refresh,
+    "bootstrap_nodes": bootstrap_nodes,
+    "dispatch_experiments": dispatch_experiments,
+    "collect_results": collect_results,
     "get_research_state": get_research_state,
     "get_sensitivity": get_sensitivity,
     # Design tools
@@ -918,6 +1669,34 @@ TOOL_DISPATCH: dict[str, Any] = {
     "version_get_design": version_get_design,
     "version_run_design": version_run_design,
     "version_link_result": version_link_result,
+    # Note tools
+    "note_add": note_add,
+    "note_get": note_get,
+    "note_search": note_search,
+    # W&B tools
+    "wandb_log_image": wandb_log_image,
+    "wandb_get_url": wandb_get_url,
+    "wandb_annotate": wandb_annotate,
+    # Hub tools
+    "hub_status": hub_status,
+    "hub_sync": hub_sync,
+    "track_create": track_create,
+    "track_list": track_list,
+    "track_switch": track_switch,
+    "hub_findings_query": hub_findings_query,
+    "finding_promote": finding_promote,
+    # Briefing tools
+    "get_research_briefing": get_research_briefing,
+    "annotate_run": annotate_run,
+    # Model extensibility tools
+    "model_list_families": model_list_families,
+    "model_list_activations": model_list_activations,
+    "model_list_components": model_list_components,
+    "model_get_config_schema": model_get_config_schema,
+    "model_validate_config": model_validate_config,
+    "model_add_architecture": model_add_architecture,
+    "model_add_activation": model_add_activation,
+    "model_generate_template": model_generate_template,
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,

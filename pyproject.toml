@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "crucible-ml"
-version = "0.1.0"
+version = "0.2.0-alpha"
 description = "ML research platform: fleet orchestration, autonomous experimentation, and model zoo"
 readme = "README.md"
 license = {text = "MIT"}
@@ -18,13 +18,15 @@ mcp = ["mcp>=1.0"]
 wandb = ["wandb"]
 data = ["tqdm", "huggingface-hub", "datasets"]
 tui = ["textual>=0.50"]
-all = ["crucible-ml[torch,anthropic,mcp,wandb,data,tui]"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
+all = ["crucible-ml[torch,anthropic,mcp,wandb,data,tui,api]"]
 dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 crucible = "crucible.cli.main:main"
 crucible-mcp = "crucible.mcp.server:main_cli"
 crucible-tui = "crucible.tui.app:main"
+crucible-api = "crucible.api.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

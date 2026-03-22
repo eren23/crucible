@@ -55,3 +55,6 @@ final_model.*
 
 # Crucible
 .crucible/
+
+# mcp
+.mcp.json

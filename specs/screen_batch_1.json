@@ -1,0 +1,107 @@
+[
+  {
+    "name": "screen-baseline-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "baseline", "control"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq"
+    }
+  },
+  {
+    "name": "screen-3x-mlp-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "mlp-3x", "competition-proven"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "3",
+      "ACTIVATION": "relu_sq"
+    }
+  },
+  {
+    "name": "screen-xsa-deep-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "xsa", "competition-proven"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "XSA_LAYERS": "6,7,8"
+    }
+  },
+  {
+    "name": "screen-deep-smear-bigram-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "deep", "smear", "bigram", "competition-proven"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "11",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1"
+    }
+  },
+  {
+    "name": "screen-moe-4expert-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "moe", "vuk-direction"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "USE_MOE": "1",
+      "MOE_NUM_EXPERTS": "4",
+      "MOE_TOP_K": "2"
+    }
+  },
+  {
+    "name": "screen-fullstack-v1",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "screen-b1",
+    "tags": ["screen-batch-1", "fullstack", "xsa", "mlp-3x", "smear", "bigram", "competition-proven"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "3",
+      "ACTIVATION": "relu_sq",
+      "XSA_LAYERS": "6,7,8",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1"
+    }
+  }
+]

@@ -77,6 +77,8 @@ class ProjectConfig:
         "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},
         "mlx": {"smoke": 180, "proxy": 3600, "medium": 7200, "promotion": 14400, "overnight": 7200},
     })
+    hub_dir: str = ""              # override hub directory (default: ~/.crucible-hub)
+    active_track: str = ""         # currently active research track
 
 
 def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
@@ -165,6 +167,8 @@ def load_config(path: Path | None = None) -> ProjectConfig:
             "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},
             "mlx": {"smoke": 180, "proxy": 3600, "medium": 7200, "promotion": 14400, "overnight": 7200},
         }),
+        hub_dir=raw.get("hub_dir", ""),
+        active_track=raw.get("active_track", ""),
     )
 
 
@@ -229,6 +233,10 @@ researcher:
 # Version store
 # store_dir: .crucible                    # version store directory
 # auto_commit_versions: false             # auto-commit versions to git
+
+# Hub integration
+# hub_dir: ~/.crucible-hub                 # cross-project knowledge store
+# active_track: ""                          # current research track
 
 # Sync exclusions
 sync_excludes:
