@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 41 MCP tools for AI agents. Start the server:
+Crucible exposes 53 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -345,6 +345,26 @@ Add structured annotations to a completed experiment run. Useful for recording L
   "summary": "Strong result — consider promoting to medium tier"
 }
 ```
+
+## Model Extensibility (8 tools)
+
+| Tool | Description |
+|------|-------------|
+| `model_list_families` | List all registered model families (built-in + plugins) |
+| `model_list_activations` | List available activation functions |
+| `model_list_components` | List model components with descriptions |
+| `model_get_config_schema` | Get parameter schema for a model family |
+| `model_validate_config` | Validate experiment config against family schema |
+| `model_add_architecture` | Save and register a user architecture plugin |
+| `model_add_activation` | Register a custom activation function |
+| `model_generate_template` | Generate boilerplate for a new architecture plugin |
+
+## Configuration (2 tools)
+
+| Tool | Description |
+|------|-------------|
+| `config_get_presets` | All presets with resolved config values |
+| `config_get_project` | Full project configuration |
 
 ---
 

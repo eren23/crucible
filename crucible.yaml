@@ -42,14 +42,14 @@ presets:
     ITERATIONS: "400"
     TRAIN_BATCH_TOKENS: "8192"
   screen:
-    MAX_WALLCLOCK_SECONDS: "420"
-    ITERATIONS: "1000"
+    MAX_WALLCLOCK_SECONDS: "3600"
+    ITERATIONS: "2000"
     TRAIN_BATCH_TOKENS: "65536"
-    VAL_LOSS_EVERY: "200"
+    VAL_LOSS_EVERY: "500"
     VAL_BATCH_SIZE: "8192"
     TRAIN_LOG_EVERY: "20"
     WARMUP_STEPS: "10"
-    TRAIN_SHARD_LIMIT: "4"
+    TRAIN_SHARD_LIMIT: "8"
   proxy:
     MAX_WALLCLOCK_SECONDS: "1800"
     ITERATIONS: "6000"
@@ -63,7 +63,7 @@ remote_results_file: experiments.jsonl
 timeout_map:
   torch:
     smoke: 120
-    screen: 600
+    screen: 4200
     proxy: 2400
     medium: 4800
     promotion: 9600

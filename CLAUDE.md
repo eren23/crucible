@@ -135,7 +135,75 @@ fm.run_day(count=6, wave_specs=[('wave1', Path('specs/screen_batch_1.json'))])
 
 Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` are JSON arrays consumed by `run_day()`. Create wave specs from designs, not the other way around.
 
+### Experiment Lifecycle
+
+1. **Design** → `version_save_design` or create YAML in `.crucible/designs/`
+2. **Wave Spec** → JSON array in `specs/` (or use `design_enqueue_batch` directly)
+3. **Provision** → `provision_nodes` creates RunPod pods
+4. **Refresh** → `fleet_refresh` gets SSH endpoints
+5. **Bootstrap** → `bootstrap_nodes` syncs code, installs deps, downloads data
+6. **Enqueue** → `design_enqueue_batch` or `enqueue_experiment` adds to queue
+7. **Dispatch** → `dispatch_experiments` assigns queued runs to idle nodes
+8. **Monitor** → `get_fleet_status` + `get_queue_status` for progress
+9. **Collect** → `collect_results` rsyncs results from pods
+10. **Results** → `get_leaderboard` ranks by val_bpb
+
+**Presets** control experiment scale:
+- `smoke` — 60s, 400 steps. Quick syntax check.
+- `screen` — 1h, 2000 steps. Directional signal for architecture screening.
+- `proxy` — 30min, 6000 steps. Medium confidence.
+- `medium` — 1h, 15K steps. Thorough comparison.
+- `promotion` — 2h, 100K steps. Competition-grade.
+
+### MCP Tools (53 total)
+
+**Tier 1 — Core Experiment Flow** (use these to run experiments):
+`provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
+
+Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`
+
+**Tier 2 — Experiment Design:**
+`version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
+
+**Tier 3 — Research Context:**
+`context_push_finding`, `context_get_findings`, `get_research_briefing`, `note_add`, `note_search`, `note_get`
+
+**Tier 4 — Model Extensibility:**
+`model_list_families`, `model_add_architecture`, `model_generate_template`, `model_validate_config`
+
+**Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
+
+### Architecture Plugins
+
+Crucible has a compact core with 4 built-in architectures (baseline, looped, convloop, prefix_memory). Everything else is a **plugin** — created by users or agents at runtime, never baked into core.
+
+**How plugins work:**
+- `src/crucible/models/user_architectures/` is the plugin directory (ships empty)
+- Any `.py` file dropped here is auto-discovered and imported on startup
+- Each plugin calls `register_model(name, factory_fn)` to register itself
+- The training script (`train_gpt.py`) falls back to the crucible registry for unknown families
+- Plugins get rsynced to pods automatically — they work on remote GPUs
+
+**How to create a plugin (via MCP):**
+1. `model_generate_template(name="two_tower")` — get boilerplate
+2. Edit the code to implement your architecture
+3. `model_add_architecture(name="two_tower", code="...")` — saves to `user_architectures/` and registers
+4. `version_save_design(name="two-tower-exp", config={"MODEL_FAMILY": "two_tower", ...})`
+5. Run it: `provision_nodes` → `bootstrap_nodes` → enqueue → dispatch → collect
+
+**The contract:** A plugin must export a factory function that takes an `args` namespace (with `vocab_size`, `model_dim`, `num_layers`, etc.) and returns an `nn.Module`.
+
+**What stays in core:** baseline, looped, convloop, prefix_memory — these originate from the OpenAI Parameter Golf competition that Crucible was born from. They're reference implementations for that specific challenge, not prescriptive. The core architectures may evolve as Crucible grows beyond its competition roots. For new work, build plugins.
+
+### Known Limitations
+
+- Only RunPod provider is fully tested (SSH provider is pass-through for manual hosts)
+- `train_gpt.py` requires `autoresearch/` modules (copied from parameter-golf)
+- Hub features require explicit initialization (`crucible hub init`)
+- W&B integration requires `wandb` package and `WANDB_API_KEY`
+
 ## What NOT to do
+- Don't add new architectures to core — build plugins in `user_architectures/`
 - Don't build a full experiment tracking UI — the TUI and REST API cover agent/developer needs; use W&B/MLflow for dashboards
 - Don't build Kubernetes support — use SkyPilot when ready
 - Don't reinvent HPO math — integrate Optuna/Ax

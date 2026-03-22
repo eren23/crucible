@@ -568,7 +568,12 @@ def build_model(args: Any) -> TiedEmbeddingLM:
         return ConvLoopedTransformerLM(**common, embed_dim=args.model_dim, core_dim=core_dim, num_heads=args.num_heads, num_kv_heads=min(args.num_kv_heads, args.num_heads), mlp_mult=args.mlp_mult, logical_steps=logical_steps, unique_blocks=max(1, min(args.share_blocks, logical_steps)), rope_base=args.rope_base, qk_gain_init=args.qk_gain_init, **attention_kwargs)
     if args.model_family in {"memory", "prefix_memory"}:
         return PrefixMemoryLM(**common, model_dim=args.model_dim, state_dim=min(args.state_dim, args.model_dim), num_layers=args.num_layers, mlp_mult=args.mlp_mult, residual_variant=args.residual_variant)
-    raise ValueError(f"unsupported MODEL_FAMILY={args.model_family!r}; expected baseline, looped, convloop, or prefix_memory")
+    # Fallback to crucible model registry for user-defined architectures
+    try:
+        from crucible.models.registry import build_model as crucible_build
+    except ImportError:
+        raise ValueError(f"unsupported MODEL_FAMILY={args.model_family!r}; expected baseline, looped, convloop, prefix_memory, or a crucible-registered family")
+    return crucible_build(args)
 
 
 # -----------------------------

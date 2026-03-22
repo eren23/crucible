@@ -5,75 +5,37 @@ title: Roadmap
 
 # Roadmap
 
-## Phase 1: Foundation (Done)
+The canonical roadmap lives at [ROADMAP.md](../ROADMAP.md) in the project root. This page summarizes the current state.
 
-### Version Store
-- Hybrid persistence: YAML files + JSONL ledger
-- Full CRUD: create, get, list, history, diff
-- Git integration (optional auto-commit)
-- Checksum tracking for integrity
+## Current: v0.2.0-alpha
 
-### MCP Tools (26 total)
-- Fleet management (4): provision, destroy, sync, status
-- Experiment queue (3): enqueue, status, results
-- Analysis (2): leaderboard, sensitivity
-- Design tools (5): browse, compare, generate hypotheses, batch design, enqueue batch
-- Context tools (3): analysis, push finding, get findings
-- Version tools (6): save, list, diff, get, run, link
-- Config tools (2): presets, project config
+**What's working:** Full fleet loop (provision → bootstrap → dispatch → collect → destroy), 53 MCP tools, hub system, notes, research briefing, REST API, architecture plugin system, W&B bridge, interactive TUI.
 
-### Interactive TUI
-- Split-pane design browser with Textual
-- Status color coding (draft/ready/running/completed/archived)
-- Diff mode for comparing designs
-- Research context and version history views
-- Screenshot export (SVG)
+**What's next:**
+- Test coverage push (fleet, architectures, components, runner)
+- Provider plugin system (registry + auto-discovery, like architecture plugins)
+- Pre-dispatch model family validation
+- CI/CD pipeline and PyPI release
 
-### Model Zoo
-- 4 transformer architectures
-- 9 configurable activation functions
-- 15+ env var knobs per model
+## Planned Phases
 
----
+### Phase 2: Integrate, Don't Reinvent
+- SkyPilot provider for 20+ cloud support
+- More provider plugins (Modal, Lambda, Vast.ai)
+- Optuna/Ax integration for mathematical HPO
+- Configurable output patterns
 
-## Phase 2: Agent Collaboration (Planned)
+### Phase 3: Build Unique Value
+- Hybrid search (LLM + Optuna)
+- Research strategies as plugins
+- Code-level search (AIDE-style)
+- Auto-generated experiment reports
 
-### Orchestration Tools
-- `research_run_iteration` — one-shot full research cycle
-- `research_collect_and_reflect` — collect results + LLM reflection
+### What We Won't Build
+- Experiment tracking UI (use W&B/MLflow)
+- Kubernetes orchestration (use SkyPilot)
+- Model serving / inference
+- Dataset hosting (use HuggingFace)
+- Optimization math (use Optuna/Ax)
 
-### Code Change Proposals
-- `proposal_create` — structured code change proposals with diffs
-- `proposal_list` / `proposal_get` — review and manage proposals
-- Proposals are versioned but don't auto-apply (require review)
-
-### Agent Session Management
-- `agent_register` — announce agent presence + focus area
-- `agent_list_sessions` — see active agents
-- `agent_claim_work` — prevent duplicate effort
-- Heartbeat-based liveness (30min timeout)
-
----
-
-## Phase 3: Multi-Agent Platform (Future)
-
-### Concurrent Agent Support
-- Advisory locking for work claims
-- Agent identity tracking across sessions
-- Conflict resolution for overlapping designs
-
-### Real-Time Fleet Dashboard
-- Live TUI with fleet node status
-- Running experiment progress bars
-- Queue visualization with priority lanes
-
-### Advanced Analysis
-- Automated Pareto frontier tracking
-- Diminishing returns alerts
-- Cross-family comparison reports
-- W&B integration for detailed metrics
-
-### Infrastructure
-- SkyPilot integration for multi-cloud
-- Optuna/Ax integration for HPO
-- Experiment replay from manifests
+See [ROADMAP.md](../ROADMAP.md) for the full plan with competitive analysis and contribution guide.

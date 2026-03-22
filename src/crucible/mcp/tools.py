@@ -80,7 +80,7 @@ def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import load_queue, summarize_queue
 
-        rows = load_queue(config.project_root / config.fleet_results_file)
+        rows = load_queue(config.project_root / "fleet_queue.jsonl")
         summary = summarize_queue(rows)
         return {"total": len(rows), "summary": summary}
     except CrucibleError as exc:
@@ -191,7 +191,7 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
             if selected and node["name"] not in selected:
                 continue
             try:
-                sync_repo(node, config.project_root, config.sync_excludes)
+                sync_repo(node, project_root=config.project_root, sync_excludes=config.sync_excludes)
                 synced.append(node["name"])
             except Exception as exc:
                 errors.append({"node": node["name"], "error": str(exc)})
@@ -277,7 +277,7 @@ def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
         return {
             "dispatched": len(assignments),
             "assignments": [
-                {"node": a.get("node_name", a.get("name", "")), "experiment": a.get("experiment_name", "")}
+                {"node": a.get("assigned_node", a.get("assigned_pod", "")), "experiment": a.get("experiment_name", "")}
                 for a in assignments
             ],
         }
@@ -1408,8 +1408,9 @@ def model_list_families(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.models.registry import list_families
         return {"families": list_families()}
-    except Exception as exc:
-        return {"error": f"Failed to list families: {exc}"}
+    except ImportError:
+        # torch not installed — return known built-in families
+        return {"families": ["baseline", "convloop", "looped", "memory", "prefix_memory"]}
 
 
 def model_list_activations(args: dict[str, Any]) -> dict[str, Any]:
@@ -1418,7 +1419,10 @@ def model_list_activations(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.models.components.mlp import ACTIVATIONS
         return {"activations": sorted(ACTIVATIONS.keys())}
     except ImportError:
-        return {"error": "torch not installed"}
+        return {"activations": [
+            "elu03_sq", "gelu_sq", "leaky01_sq", "leaky02_sq", "leaky08_sq",
+            "log1p_relu_sq", "mish_sq", "relu_sq", "x_absx",
+        ]}
 
 
 def model_list_components(args: dict[str, Any]) -> dict[str, Any]:
@@ -1427,7 +1431,11 @@ def model_list_components(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.models import components
         return {"components": components.__all__}
     except ImportError:
-        return {"error": "torch not installed"}
+        return {"components": [
+            "RMSNorm", "CastedLinear", "Rotary", "CausalSelfAttention", "Block",
+            "MLP", "SmearGate", "BigramHash", "TrigramHash", "TokenMerger",
+            "BatchedLinearLoRA", "BatchedTTTLoRA", "MoELayer",
+        ]}
 
 
 def model_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:

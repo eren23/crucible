@@ -46,6 +46,19 @@ def get_family_schema(name: str) -> dict:
     return _FAMILY_SCHEMAS.get(name, {"note": "No schema registered for this family"})
 
 
-def list_families() -> list[str]:
-    """Return the sorted list of registered model family names."""
+def list_families(*, include_builtins: bool = True) -> list[str]:
+    """Return the sorted list of registered model family names.
+
+    When *include_builtins* is True (default) and torch-based architectures
+    haven't been imported yet, attempts to import them.  Falls back to the
+    known built-in names if torch is unavailable.
+    """
+    if not _REGISTRY and include_builtins:
+        try:
+            import crucible.models.architectures  # noqa: F401 — triggers registration
+        except ImportError:
+            # torch not installed — return known built-in names
+            return sorted([
+                "baseline", "looped", "convloop", "memory", "prefix_memory",
+            ])
     return sorted(_REGISTRY)

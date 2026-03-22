@@ -12,7 +12,7 @@
 - **`runner/notes.py`** — Experiment notes system: freeform markdown with YAML frontmatter, attached to run IDs.
 - **`researcher/briefing.py`** — Research briefing generator for LLM session orientation (project context, recent findings, track state).
 
-### 15 New MCP Tools (41 total, was 26)
+### 27 New MCP Tools (53 total, was 26)
 
 **Notes** (3 tools):
 - `note_add` — Attach a markdown note to a run
@@ -70,9 +70,37 @@
 - Hub is git-synced for sharing across machines and collaborators
 - Briefing system orients new LLM sessions with accumulated knowledge
 
+### Model Extensibility (12 tools)
+
+- `model_list_families` — List registered model families
+- `model_list_activations` — List available activation functions
+- `model_list_components` — List model components
+- `model_get_config_schema` — Get parameter schema for a family
+- `model_validate_config` — Validate experiment config against schema
+- `model_add_architecture` — Register a user architecture plugin
+- `model_add_activation` — Register a custom activation function
+- `model_generate_template` — Generate plugin boilerplate
+
+**Config** (2 tools):
+- `config_get_presets` — List all presets with resolved values
+- `config_get_project` — Full project configuration
+
+### Architecture Plugin System
+
+- User architectures live in `models/user_architectures/` and auto-register on import
+- `example_two_tower.py` — working example plugin (two-tower with gated fusion)
+- Plugin contract: factory function `(args) -> nn.Module`
+- Plugins sync to pods automatically via rsync
+
+### Robustness Fixes
+
+- Narrowed exception handling in model registry fallback — plugin errors now propagate with real tracebacks instead of being swallowed
+- Added `TYPE_CHECKING` import guard in `lora.py` to fix circular import
+- `list_families()` gracefully handles torch-absent environments
+
 ### Test Suite
 
-513 tests across 30+ test files (was 296 tests in v0.1.0).
+Fleet orchestration, architecture forward-pass, component, and runner execution tests added. Previous: 296 tests in v0.1.0.
 
 ---
 

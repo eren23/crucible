@@ -19,7 +19,7 @@ src/crucible/
   researcher/     LLM-driven autonomous research loop, briefing
   analysis/       Leaderboard, sensitivity, Pareto frontier
   data/           Manifest-driven HuggingFace data pipeline
-  mcp/            MCP server (41 tools)
+  mcp/            MCP server (53 tools)
   api/            REST API server (FastAPI, 10 endpoints)
   tui/            Interactive terminal UI (Textual)
   cli/            CLI entry points

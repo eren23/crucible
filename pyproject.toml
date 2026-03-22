@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "crucible-ml"
-version = "0.1.0"
+version = "0.2.0-alpha"
 description = "ML research platform: fleet orchestration, autonomous experimentation, and model zoo"
 readme = "README.md"
 license = {text = "MIT"}
