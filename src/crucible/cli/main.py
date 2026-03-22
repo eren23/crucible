@@ -140,6 +140,45 @@ def _main() -> None:
 
     store_sub.add_parser("commit", help="Git commit all uncommitted versions")
 
+    # ── hub ──
+    hub_parser = subparsers.add_parser("hub", help="Cross-project knowledge hub")
+    hub_sub = hub_parser.add_subparsers(dest="hub_command")
+    hub_sub.add_parser("init", help="Initialize ~/.crucible-hub")
+    hub_sub.add_parser("link", help="Register current project in hub")
+    hub_sub.add_parser("sync", help="Sync hub via git")
+    hub_sub.add_parser("status", help="Show hub status")
+
+    # ── track ──
+    track_parser = subparsers.add_parser("track", help="Research track management")
+    track_sub = track_parser.add_subparsers(dest="track_command")
+    tc = track_sub.add_parser("create", help="Create a research track")
+    tc.add_argument("name")
+    tc.add_argument("--description", default="")
+    tc.add_argument("--tags", nargs="*", default=[])
+    ts = track_sub.add_parser("switch", help="Switch active track")
+    ts.add_argument("name")
+    track_sub.add_parser("list", help="List tracks")
+    tshow = track_sub.add_parser("show", help="Show track details")
+    tshow.add_argument("name", nargs="?", default="")
+
+    # ── note ──
+    note_parser = subparsers.add_parser("note", help="Experiment notes")
+    note_sub = note_parser.add_subparsers(dest="note_command")
+    na = note_sub.add_parser("add", help="Add note to a run")
+    na.add_argument("run_id")
+    na.add_argument("--text", required=True)
+    na.add_argument("--stage", default="")
+    na.add_argument("--tags", nargs="*", default=[])
+    nl = note_sub.add_parser("list", help="List notes for a run")
+    nl.add_argument("run_id")
+    ns = note_sub.add_parser("search", help="Search notes across runs")
+    ns.add_argument("--query", required=True)
+
+    # ── serve ──
+    serve = subparsers.add_parser("serve", help="Start API server")
+    serve.add_argument("--port", type=int, default=8741)
+    serve.add_argument("--host", default="0.0.0.0")
+
     # ── mcp ──
     mcp_parser = subparsers.add_parser("mcp", help="MCP server")
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
@@ -193,6 +232,22 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.store_commands import handle_store
 
         handle_store(args)
+    elif args.command == "hub":
+        from crucible.cli.hub_commands import handle_hub
+
+        handle_hub(args)
+    elif args.command == "track":
+        from crucible.cli.track_commands import handle_track
+
+        handle_track(args)
+    elif args.command == "note":
+        from crucible.cli.note_commands import handle_note
+
+        handle_note(args)
+    elif args.command == "serve":
+        from crucible.api.server import main as api_main
+
+        api_main(port=args.port, host=args.host)
     elif args.command == "mcp":
         from crucible.cli.mcp_commands import handle_mcp
 

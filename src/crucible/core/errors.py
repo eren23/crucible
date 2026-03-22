@@ -18,3 +18,9 @@ class DataError(CrucibleError):
 
 class StoreError(CrucibleError):
     """Version store read/write/integrity failures."""
+
+class HubError(CrucibleError):
+    """Hub init, sync, track, finding promotion failures."""
+
+class ApiError(CrucibleError):
+    """API server startup, auth, or request handling failures."""

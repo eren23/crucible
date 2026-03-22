@@ -11,6 +11,7 @@ from crucible.models.components.conv import DepthwiseConv1D, FeatureConvBottlene
 from crucible.models.components.merge import TokenMerger
 from crucible.models.components.memory import CausalPrefixMemory, PrefixMemoryBlock
 from crucible.models.components.lora import BatchedLinearLoRA, BatchedTTTLoRA
+from crucible.models.components.moe import MoELayer
 
 __all__ = [
     "RMSNorm",
@@ -30,4 +31,5 @@ __all__ = [
     "PrefixMemoryBlock",
     "BatchedLinearLoRA",
     "BatchedTTTLoRA",
+    "MoELayer",
 ]

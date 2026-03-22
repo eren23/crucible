@@ -7,7 +7,7 @@ import torch
 from torch import Tensor, nn
 
 from crucible.models.base import TiedEmbeddingLM
-from crucible.models.registry import register_model
+from crucible.models.registry import register_model, register_schema
 from crucible.models.components.attention import Block, _parse_block_pattern
 from crucible.models.components.gate import SmearGate
 from crucible.models.components.hash_embed import BigramHash, TrigramHash
@@ -46,6 +46,9 @@ class BaselineGPT(TiedEmbeddingLM):
         use_trigram_hash: bool = False,
         trigram_hash_buckets: int = 4096,
         activation: str = "relu_sq",
+        use_moe: bool = False,
+        moe_num_experts: int = 4,
+        moe_top_k: int = 2,
     ):
         super().__init__(vocab_size, model_dim, tie_embeddings, tied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
         self.num_encoder_layers = num_layers // 2
@@ -60,6 +63,9 @@ class BaselineGPT(TiedEmbeddingLM):
                 multiscale_window=multiscale_window if _lw[i] == 0 else 0,
                 attention_window=_lw[i],
                 activation=activation,
+                use_moe=use_moe,
+                moe_num_experts=moe_num_experts,
+                moe_top_k=moe_top_k,
             )
             for i in range(num_layers)
         ])
@@ -143,7 +149,24 @@ def _build_baseline(args: Any) -> BaselineGPT:
         use_trigram_hash=getattr(args, 'trigram_hash', False),
         trigram_hash_buckets=getattr(args, 'trigram_hash_buckets', 4096),
         activation=getattr(args, 'activation', 'relu_sq'),
+        use_moe=getattr(args, 'use_moe', False),
+        moe_num_experts=getattr(args, 'moe_num_experts', 4),
+        moe_top_k=getattr(args, 'moe_top_k', 2),
     )
 
 
 register_model("baseline", _build_baseline)
+register_schema("baseline", {
+    "MODEL_DIM": {"type": "int", "default": 512, "description": "Model/embedding dimension"},
+    "NUM_LAYERS": {"type": "int", "default": 9, "description": "Number of transformer layers"},
+    "NUM_HEADS": {"type": "int", "default": 8, "description": "Number of attention heads"},
+    "NUM_KV_HEADS": {"type": "int", "default": 4, "description": "Number of key-value heads (GQA)"},
+    "MLP_MULT": {"type": "int", "default": 2, "description": "MLP expansion multiplier"},
+    "ACTIVATION": {"type": "str", "default": "relu_sq", "description": "Activation function name"},
+    "XSA_LAYERS": {"type": "str", "default": "", "description": "Comma-separated layer indices for XSA"},
+    "SMEAR_GATE": {"type": "bool", "default": False, "description": "Enable SmearGate"},
+    "BIGRAM_HASH": {"type": "bool", "default": False, "description": "Enable BigramHash embeddings"},
+    "USE_MOE": {"type": "bool", "default": False, "description": "Enable Mixture of Experts"},
+    "MOE_NUM_EXPERTS": {"type": "int", "default": 4, "description": "Number of MOE experts"},
+    "MOE_TOP_K": {"type": "int", "default": 2, "description": "Top-k expert routing"},
+})

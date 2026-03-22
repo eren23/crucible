@@ -123,3 +123,60 @@ class QueueItem(TypedDict, total=False):
     started_at: str | None
     ended_at: str | None
     result_status: str | None
+
+
+# ---------------------------------------------------------------------------
+# Knowledge & tracking types
+# ---------------------------------------------------------------------------
+
+
+class Finding(TypedDict, total=False):
+    """A structured research finding — knowledge that may transfer across projects."""
+    id: str                        # slug-style unique name
+    title: str
+    body: str                      # freeform markdown
+    scope: str                     # "project" | "track" | "global"
+    status: str                    # "draft" | "active" | "superseded" | "archived"
+    confidence: float              # 0.0–1.0
+    tags: list[str]
+    source_project: str
+    source_experiments: list[str]
+    supersedes: str | None
+    superseded_by: str | None
+    track: str | None
+    created_at: str
+    created_by: str
+    promoted_from: str | None
+
+
+class Track(TypedDict, total=False):
+    """A research track grouping related projects and findings."""
+    name: str
+    description: str
+    tags: list[str]
+    linked_projects: list[str]
+    created_at: str
+    active: bool
+
+
+class ProjectRegistryEntry(TypedDict, total=False):
+    """A project registered in the Crucible Hub."""
+    name: str
+    path: str
+    registered_at: str
+    tracks: list[str]
+
+
+class ExperimentNote(TypedDict, total=False):
+    """A freeform note attached to an experiment run."""
+    note_id: str                   # "note_{utc_stamp}"
+    run_id: str
+    stage: str                     # freeform tag: "pre-run" | "during-run" | "post-run" | "analysis"
+    tags: list[str]
+    confidence: float | None
+    supersedes: str | None
+    finding_ids: list[str]
+    created_by: str
+    created_at: str
+    file_path: str
+    body: str

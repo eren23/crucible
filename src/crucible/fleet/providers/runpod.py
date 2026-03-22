@@ -234,9 +234,19 @@ def inventory_record_from_api(
     raw: dict[str, Any],
     *,
     previous: dict[str, Any] | None = None,
+    defaults: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Convert a RunPod API response into a fleet node record dict."""
+    """Convert a RunPod API response into a fleet node record dict.
+
+    Parameters
+    ----------
+    defaults : dict, optional
+        Provider defaults from ``crucible.yaml`` ``provider.defaults``.
+        Used as fallbacks for ``workspace_path``, ``python_bin``,
+        ``env_source`` when no previous record exists.
+    """
     previous = previous or {}
+    defaults = defaults or {}
     gpu = raw.get("gpu") or {}
     api_state = str(raw.get("desiredStatus") or raw.get("status") or "").lower()
     local_state = str(previous.get("state") or "").lower()
@@ -260,10 +270,10 @@ def inventory_record_from_api(
         "ssh_host": raw.get("publicIp") or previous.get("ssh_host") or "",
         "ssh_port": parse_port_mapping(raw, "22") or previous.get("ssh_port") or 22,
         "user": previous.get("user", "root"),
-        "ssh_key": previous.get("ssh_key", "~/.ssh/id_ed25519_runpod"),
-        "workspace_path": previous.get("workspace_path", "/workspace/parameter-golf"),
-        "python_bin": previous.get("python_bin", "python3.12"),
-        "env_source": previous.get("env_source", ".env.runpod.local"),
+        "ssh_key": previous.get("ssh_key", defaults.get("ssh_key", "~/.ssh/id_ed25519_runpod")),
+        "workspace_path": previous.get("workspace_path", defaults.get("workspace_path", "/workspace/project")),
+        "python_bin": previous.get("python_bin", defaults.get("python_bin", "python3")),
+        "env_source": previous.get("env_source", defaults.get("env_source", ".env.local")),
         "state": state,
         "api_state": api_state,
         "env_ready": bool(previous.get("env_ready", False)),
@@ -347,14 +357,10 @@ class RunPodProvider(FleetProvider):
                         public_key=public_key,
                         ports=self.ports,
                     )
-                    node = inventory_record_from_api(raw)
+                    node = inventory_record_from_api(raw, defaults=self.defaults)
                     node["state"] = "creating"
                     node["replacement"] = replacement
                     node["ssh_key"] = self.ssh_key
-                    workspace = self.defaults.get(
-                        "workspace_path", self.volume_mount_path,
-                    )
-                    node["workspace_path"] = workspace
                     created.append(node)
                     log_success(f"Created {name} ({cloud_type})")
                     break
@@ -401,7 +407,7 @@ class RunPodProvider(FleetProvider):
             try:
                 api = runpod_get_api_pod(pod_id)
                 refreshed.append(
-                    inventory_record_from_api(api, previous=previous_by_id.get(pod_id)),
+                    inventory_record_from_api(api, previous=previous_by_id.get(pod_id), defaults=self.defaults),
                 )
             except FleetError:
                 failed = dict(previous_by_id.get(pod_id, node))

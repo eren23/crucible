@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Type
 
 _REGISTRY: dict[str, Callable[..., Any]] = {}
+_FAMILY_SCHEMAS: dict[str, dict] = {}
 
 
 def register_model(name: str, factory: Callable[..., Any]) -> None:
@@ -30,6 +31,19 @@ def build_model(args: Any) -> Any:
             f"unsupported MODEL_FAMILY={family!r}; registered families: {available}"
         )
     return _REGISTRY[family](args)
+
+
+def register_schema(name: str, schema: dict) -> None:
+    """Register a parameter schema for a model family.
+
+    *schema* maps parameter names to dicts of ``{type, default, description}``.
+    """
+    _FAMILY_SCHEMAS[name] = schema
+
+
+def get_family_schema(name: str) -> dict:
+    """Return the parameter schema for *name*, or a generic stub."""
+    return _FAMILY_SCHEMAS.get(name, {"note": "No schema registered for this family"})
 
 
 def list_families() -> list[str]:

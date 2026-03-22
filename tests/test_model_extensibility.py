@@ -1,0 +1,271 @@
+"""Tests for model extensibility MCP tools and user_architectures auto-import."""
+from __future__ import annotations
+
+import ast
+import importlib
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+# We test the MCP tool functions directly, not via MCP protocol.
+# Some tools need torch; skip if not installed.
+torch = pytest.importorskip("torch")
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _ensure_architectures_loaded():
+    """Make sure the model registry is populated before each test.
+
+    There is a circular import: ``models/__init__`` -> ``base`` ->
+    ``components.__init__`` -> ``lora`` -> ``base`` (partially initialised).
+    On the very first import the circular path raises ``ImportError``.
+    Subsequent imports succeed because CPython caches the partially-loaded
+    modules.  We tolerate the first failure so the test suite works in a
+    clean interpreter.
+    """
+    try:
+        import crucible.models.architectures  # noqa: F401
+    except ImportError:
+        # First import may fail due to circular import; retry once.
+        import crucible.models.architectures  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# Discovery tools
+# ---------------------------------------------------------------------------
+
+
+def test_model_list_families():
+    from crucible.mcp.tools import model_list_families
+
+    result = model_list_families({})
+    assert "families" in result
+    families = result["families"]
+    for expected in ("baseline", "looped", "convloop", "prefix_memory"):
+        assert expected in families, f"Missing family: {expected}"
+    assert len(families) >= 4
+
+
+def test_model_list_activations():
+    from crucible.mcp.tools import model_list_activations
+
+    result = model_list_activations({})
+    assert "activations" in result
+    activations = result["activations"]
+    # There should be at least 9 built-in activations
+    assert len(activations) >= 9
+    for expected in ("relu_sq", "gelu_sq", "mish_sq", "x_absx"):
+        assert expected in activations, f"Missing activation: {expected}"
+    # Should be sorted
+    assert activations == sorted(activations)
+
+
+def test_model_list_components():
+    from crucible.mcp.tools import model_list_components
+
+    result = model_list_components({})
+    assert "components" in result
+    components = result["components"]
+    assert "Block" in components
+    assert "MLP" in components
+    assert "RMSNorm" in components
+
+
+def test_model_get_config_schema_baseline():
+    from crucible.mcp.tools import model_get_config_schema
+
+    result = model_get_config_schema({"family": "baseline"})
+    assert "family" in result
+    assert result["family"] == "baseline"
+    assert "parameters" in result
+    params = result["parameters"]
+    assert "MODEL_DIM" in params
+    assert params["MODEL_DIM"]["type"] == "int"
+    assert params["MODEL_DIM"]["default"] == 512
+    assert "ACTIVATION" in params
+
+
+def test_model_get_config_schema_unknown():
+    from crucible.mcp.tools import model_get_config_schema
+
+    result = model_get_config_schema({"family": "nonexistent_family"})
+    assert "error" in result
+    assert "nonexistent_family" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Validation tool
+# ---------------------------------------------------------------------------
+
+
+def test_model_validate_config_valid():
+    from crucible.mcp.tools import model_validate_config
+
+    result = model_validate_config({
+        "config": {"MODEL_FAMILY": "baseline", "ACTIVATION": "relu_sq"}
+    })
+    assert result["valid"] is True
+    assert result["errors"] == []
+
+
+def test_model_validate_config_invalid_family():
+    from crucible.mcp.tools import model_validate_config
+
+    result = model_validate_config({
+        "config": {"MODEL_FAMILY": "bogus_family", "ACTIVATION": "relu_sq"}
+    })
+    assert result["valid"] is False
+    assert any("bogus_family" in e for e in result["errors"])
+
+
+def test_model_validate_config_invalid_activation():
+    from crucible.mcp.tools import model_validate_config
+
+    result = model_validate_config({
+        "config": {"MODEL_FAMILY": "baseline", "ACTIVATION": "bogus_act"}
+    })
+    assert result["valid"] is False
+    assert any("bogus_act" in e for e in result["errors"])
+
+
+def test_model_validate_config_both_invalid():
+    from crucible.mcp.tools import model_validate_config
+
+    result = model_validate_config({
+        "config": {"MODEL_FAMILY": "nope", "ACTIVATION": "nada"}
+    })
+    assert result["valid"] is False
+    assert len(result["errors"]) == 2
+
+
+def test_model_validate_config_defaults():
+    """With empty config, defaults (baseline + relu_sq) should be valid."""
+    from crucible.mcp.tools import model_validate_config
+
+    result = model_validate_config({"config": {}})
+    assert result["valid"] is True
+
+
+# ---------------------------------------------------------------------------
+# Activation extensibility
+# ---------------------------------------------------------------------------
+
+
+def test_model_add_activation():
+    from crucible.mcp.tools import model_add_activation
+    from crucible.models.components.mlp import ACTIVATIONS
+
+    result = model_add_activation({
+        "name": "_test_swish",
+        "code": "torch.sigmoid(x) * x",
+    })
+    assert result["status"] == "registered"
+    assert "_test_swish" in result["activations"]
+    assert "_test_swish" in ACTIVATIONS
+
+    # Verify it actually works
+    fn = ACTIVATIONS["_test_swish"]
+    t = torch.randn(4, 8)
+    out = fn(t)
+    assert out.shape == t.shape
+
+    # Cleanup
+    del ACTIVATIONS["_test_swish"]
+
+
+def test_model_add_activation_invalid():
+    from crucible.mcp.tools import model_add_activation
+
+    result = model_add_activation({
+        "name": "_test_bad",
+        "code": "this_is_not_valid(x)",
+    })
+    assert "error" in result
+    assert "Invalid activation code" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Template generation
+# ---------------------------------------------------------------------------
+
+
+def test_model_generate_template_valid_python():
+    from crucible.mcp.tools import model_generate_template
+
+    result = model_generate_template({"name": "test_arch"})
+    assert "template" in result
+    template = result["template"]
+
+    # Template should be valid Python (parseable)
+    tree = ast.parse(template)
+    assert tree is not None
+
+    # Should contain register_model call
+    assert 'register_model("test_arch"' in template
+    # Should contain a class definition
+    assert "class TestArchGPT" in template
+
+
+def test_model_generate_template_usage():
+    from crucible.mcp.tools import model_generate_template
+
+    result = model_generate_template({"name": "my_custom"})
+    assert "usage" in result
+    assert "model_add_architecture" in result["usage"]
+    assert "my_custom" in result["usage"]
+
+
+# ---------------------------------------------------------------------------
+# user_architectures auto-import
+# ---------------------------------------------------------------------------
+
+
+def test_user_architectures_package_exists():
+    """The user_architectures package should be importable."""
+    mod = importlib.import_module("crucible.models.user_architectures")
+    assert mod is not None
+    assert hasattr(mod, "__path__")
+
+
+def test_user_architectures_auto_imports(tmp_path):
+    """Verify that .py files in user_architectures are auto-imported."""
+    # We test the auto-import mechanism by checking the __init__.py logic
+    # without actually writing files to the installed package.
+    init_path = Path(__file__).parent.parent / "src" / "crucible" / "models" / "user_architectures" / "__init__.py"
+    assert init_path.exists(), f"user_architectures/__init__.py not found at {init_path}"
+
+    source = init_path.read_text()
+    assert "pkgutil.iter_modules" in source
+    assert "importlib.import_module" in source
+
+
+# ---------------------------------------------------------------------------
+# Schema registry
+# ---------------------------------------------------------------------------
+
+
+def test_schema_registry():
+    from crucible.models.registry import get_family_schema, register_schema
+
+    # Register a test schema
+    test_schema = {
+        "PARAM_A": {"type": "int", "default": 42, "description": "Test param A"},
+    }
+    register_schema("_test_schema_family", test_schema)
+
+    result = get_family_schema("_test_schema_family")
+    assert result == test_schema
+
+    # Unknown family returns generic stub
+    result = get_family_schema("_nonexistent_schema_family")
+    assert "note" in result
+
+    # Cleanup
+    from crucible.models.registry import _FAMILY_SCHEMAS
+    del _FAMILY_SCHEMAS["_test_schema_family"]

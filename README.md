@@ -31,6 +31,14 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 - Model zoo with transformer components (RMSNorm, RoPE, GQA, SmearGate, etc.)
 - Analysis: leaderboard, sensitivity analysis, Pareto frontier
 - YAML project configuration (`crucible.yaml`)
+- Experiment notes (attach freeform observations to runs with YAML frontmatter)
+- Research tracks (group projects by research direction in the Crucible Hub)
+- Crucible Hub (`~/.crucible-hub/`) for cross-project knowledge sharing, git-synced
+- Research briefing (LLM session orientation with project context and findings)
+- REST API server (`crucible serve`) — 10 FastAPI endpoints wrapping MCP tools
+- W&B bridge with image logging and run annotation support
+- 41 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing)
+- Interactive TUI for browsing experiment designs grouped by status
 
 ## What's Coming
 
@@ -125,7 +133,8 @@ crucible research start --budget-hours 10 --tier proxy --dry-run
 ### MCP Integration
 
 ```bash
-crucible mcp serve  # starts stdio MCP server for Claude
+crucible mcp serve  # starts stdio MCP server for Claude (41 tools)
+crucible serve      # starts REST API server (FastAPI, 10 endpoints)
 ```
 
 ## CLI Reference
@@ -139,6 +148,12 @@ crucible research {start|status}
 crucible data {download|sync|status}
 crucible mcp serve
 crucible models list
+crucible hub {status|sync|findings}
+crucible track {create|list|switch}
+crucible note {add|get|search}
+crucible serve [--port PORT]
+crucible tui
+crucible store {list|diff|get}
 ```
 
 ## Installation
@@ -183,15 +198,17 @@ See [ROADMAP.md](ROADMAP.md) for the full plan — what works, what's next, what
 
 ```
 src/crucible/
-├── core/          # Config, env, I/O, types, logging
+├── core/          # Config, env, I/O, types, logging, finding, hub
 ├── fleet/         # Provider-abstracted fleet management
 │   └── providers/ # RunPod, SSH backends
-├── runner/        # Experiment execution, output parsing, presets
+├── runner/        # Experiment execution, output parsing, presets, tracking, notes
 ├── models/        # Model zoo (components + architectures)
-├── researcher/    # LLM-driven autonomous research loop
+├── researcher/    # LLM-driven autonomous research loop, briefing
 ├── analysis/      # Leaderboard, sensitivity, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server for Claude agent integration
+├── mcp/           # MCP server for Claude agent integration (41 tools)
+├── api/           # Lightweight REST API server (FastAPI)
+├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points
 ```
 

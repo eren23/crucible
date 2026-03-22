@@ -1,5 +1,81 @@
 # Changelog
 
+## v0.2.0-alpha (2026-03-22)
+
+**Experiment tracking experience.** Major additions for cross-project knowledge sharing, experiment annotation, and agent-friendly APIs.
+
+### New Modules
+
+- **`api/`** — Lightweight REST API server (FastAPI) exposing 10 endpoints that wrap MCP tools. Start with `crucible serve`.
+- **`core/hub.py`** — Crucible Hub (`~/.crucible-hub/`), a git-synced cross-project knowledge store for findings and research tracks.
+- **`core/finding.py`** — Finding model and promotion logic for elevating project-level insights to the hub.
+- **`runner/notes.py`** — Experiment notes system: freeform markdown with YAML frontmatter, attached to run IDs.
+- **`researcher/briefing.py`** — Research briefing generator for LLM session orientation (project context, recent findings, track state).
+
+### 15 New MCP Tools (41 total, was 26)
+
+**Notes** (3 tools):
+- `note_add` — Attach a markdown note to a run
+- `note_get` — Retrieve notes for a run
+- `note_search` — Full-text search across all notes
+
+**W&B Bridge** (3 tools):
+- `wandb_log_image` — Log an image to a W&B run
+- `wandb_get_url` — Get the W&B dashboard URL for a run
+- `wandb_annotate` — Add annotations to a W&B run
+
+**Hub** (2 tools):
+- `hub_status` — Hub state: active track, synced projects, finding count
+- `hub_sync` — Push/pull hub directory via git
+
+**Tracks** (3 tools):
+- `track_create` — Create a named research track
+- `track_list` — List all tracks with metadata
+- `track_switch` — Switch the active research track
+
+**Findings** (2 tools):
+- `hub_findings_query` — Search findings across all projects in the hub
+- `finding_promote` — Promote a project finding to the hub
+
+**Briefing** (2 tools):
+- `get_research_briefing` — Generate LLM session orientation summary
+- `annotate_run` — Add structured annotations to a completed run
+
+### New CLI Commands
+
+- `crucible hub {status|sync|findings}` — Manage the Crucible Hub
+- `crucible track {create|list|switch}` — Research track management
+- `crucible note {add|get|search}` — Experiment note management
+- `crucible serve [--port PORT]` — Start the REST API server
+- `crucible store {list|diff|get}` — Version store inspection
+
+### REST API
+
+10 FastAPI endpoints wrapping core MCP tools:
+- `GET /api/fleet/status`, `POST /api/fleet/provision`, `DELETE /api/fleet/destroy`
+- `GET /api/experiments/queue`, `POST /api/experiments/enqueue`, `GET /api/experiments/{run_id}`
+- `GET /api/analysis/leaderboard`, `GET /api/analysis/sensitivity`
+- `GET /api/research/state`, `GET /api/research/briefing`
+
+### W&B Bridge Enhancements
+
+- Image logging support (`wandb_log_image`)
+- Run URL retrieval (`wandb_get_url`)
+- Run annotation with structured metadata (`wandb_annotate`)
+
+### Research Tracks & Cross-Project Findings
+
+- Research tracks group related projects under named directions
+- Findings can be promoted from project-level context to the hub
+- Hub is git-synced for sharing across machines and collaborators
+- Briefing system orients new LLM sessions with accumulated knowledge
+
+### Test Suite
+
+513 tests across 30+ test files (was 296 tests in v0.1.0).
+
+---
+
 ## v0.1.0-alpha (2026-03-21)
 
 **First release.** Extracted from the [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) competition infrastructure and generalized into a standalone ML research platform.

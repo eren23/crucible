@@ -4,8 +4,17 @@ version: "0.1.0"
 
 # Compute provider
 provider:
-  type: ssh
-  ssh_key: ~/.ssh/id_ed25519
+  type: runpod
+  ssh_key: ~/.ssh/id_ed25519_runpod
+  image: runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
+  gpu_types:
+    - "NVIDIA GeForce RTX 4090"
+  defaults:
+    container_disk: 20
+    volume_disk: 40
+    workspace_path: /workspace/parameter-golf
+    python_bin: python3.12
+    env_source: .env.runpod.local
 
 # Data pipeline
 data:
@@ -17,7 +26,7 @@ data:
 # Training backends
 training:
   - backend: torch
-    script: train.py
+    script: train_gpt.py
 
 # Metrics configuration
 metrics:
@@ -32,10 +41,40 @@ presets:
     MAX_WALLCLOCK_SECONDS: "60"
     ITERATIONS: "400"
     TRAIN_BATCH_TOKENS: "8192"
+  screen:
+    MAX_WALLCLOCK_SECONDS: "420"
+    ITERATIONS: "1000"
+    TRAIN_BATCH_TOKENS: "65536"
+    VAL_LOSS_EVERY: "200"
+    VAL_BATCH_SIZE: "8192"
+    TRAIN_LOG_EVERY: "20"
+    WARMUP_STEPS: "10"
+    TRAIN_SHARD_LIMIT: "4"
   proxy:
     MAX_WALLCLOCK_SECONDS: "1800"
     ITERATIONS: "6000"
     TRAIN_BATCH_TOKENS: "65536"
+
+# Runner script on pods (invoked by fleet scheduler via SSH)
+runner_script: src/crucible/runner/run_remote.py
+remote_results_file: experiments.jsonl
+
+# Timeout map (seconds) per backend per preset
+timeout_map:
+  torch:
+    smoke: 120
+    screen: 600
+    proxy: 2400
+    medium: 4800
+    promotion: 9600
+    overnight: 5400
+  mlx:
+    smoke: 180
+    screen: 900
+    proxy: 3600
+    medium: 7200
+    promotion: 14400
+    overnight: 7200
 
 # Autonomous researcher
 researcher:
@@ -55,8 +94,13 @@ sync_excludes:
   - .crucible
   - logs
   - data/datasets
+  - data/tokenizers
+  - fleet_runs
+  - day_runs
+  - .DS_Store
 
 # Output paths
 results_file: experiments.jsonl
 fleet_results_file: experiments_fleet.jsonl
 logs_dir: logs
+nodes_file: nodes.json
