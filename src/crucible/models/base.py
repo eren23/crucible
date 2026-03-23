@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 
 import torch
 import torch.nn.functional as F
@@ -10,7 +11,43 @@ from crucible.models.components.norm import RMSNorm
 from crucible.models.components.linear import CastedLinear
 
 
-class TiedEmbeddingLM(nn.Module):
+class CrucibleModel(nn.Module, ABC):
+    """Abstract base for all Crucible models, modality-agnostic.
+
+    Every model that participates in the Crucible training contract should
+    inherit from this class.  The generic training backend
+    (``training.generic_backend``) relies on :meth:`training_step` and
+    :meth:`validation_step`` to drive the loop.
+    """
+
+    @abstractmethod
+    def forward(self, **batch) -> dict[str, Tensor]:
+        """Forward pass. Returns dict with at least ``'loss'`` key."""
+        ...
+
+    def training_step(self, **batch) -> dict[str, Tensor]:
+        """Training forward pass. Default: delegates to forward()."""
+        return self.forward(**batch)
+
+    def validation_step(self, **batch) -> dict[str, Tensor]:
+        """Validation forward pass. Default: delegates to forward()."""
+        return self.forward(**batch)
+
+    def metric_names(self) -> list[str]:
+        """Names of metrics this model reports beyond ``'loss'``."""
+        return []
+
+    def param_groups(self) -> list[dict]:
+        """Optimizer parameter groups. Override for custom grouping."""
+        return [{"params": list(self.parameters())}]
+
+    @classmethod
+    def modality(cls) -> str:
+        """Modality tag: ``'lm'``, ``'vision'``, ``'diffusion'``, ``'rl'``, etc."""
+        return "generic"
+
+
+class TiedEmbeddingLM(CrucibleModel):
     def __init__(
         self,
         vocab_size: int,
@@ -94,5 +131,18 @@ class TiedEmbeddingLM(nn.Module):
     def hidden(self, input_ids: Tensor, lora=None) -> Tensor:
         raise NotImplementedError
 
-    def forward(self, input_ids: Tensor, target_ids: Tensor, lora=None) -> Tensor:
+    def forward(self, input_ids: Tensor, target_ids: Tensor, lora=None) -> Tensor:  # type: ignore[override]
         return self.compute_loss(self.hidden(input_ids, lora=lora), target_ids, lora=lora)
+
+    def training_step(self, **batch) -> dict[str, Tensor]:
+        """Bridge to generic training contract: ``{'loss': scalar}``."""
+        loss = self.compute_loss(
+            self.hidden(batch["input_ids"], lora=batch.get("lora")),
+            batch["target_ids"],
+            lora=batch.get("lora"),
+        )
+        return {"loss": loss}
+
+    @classmethod
+    def modality(cls) -> str:
+        return "lm"

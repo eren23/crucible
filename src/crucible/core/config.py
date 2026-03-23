@@ -31,6 +31,7 @@ class TrainingConfig:
     script: str = "train.py"
     backend: str = "torch"  # "torch" | "mlx" | custom
     python: str = "python3"
+    modality: str = "lm"    # "lm" | "vision" | "diffusion" | "rl" | "generic"
 
 
 @dataclass
@@ -110,6 +111,7 @@ def _build_training(raw: list[dict[str, Any]]) -> list[TrainingConfig]:
             script=t.get("script", "train.py"),
             backend=t.get("backend", "torch"),
             python=t.get("python", "python3"),
+            modality=t.get("modality", "lm"),
         )
         for t in raw
     ]

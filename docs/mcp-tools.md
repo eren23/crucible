@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 64 MCP tools for AI agents. Start the server:
+Crucible exposes 76 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -432,3 +432,85 @@ Compose architectures from known components via YAML specs — no Python code ne
 9. finding_promote                → promote insight to hub
 10. hub_sync                      → sync hub to remote
 ```
+
+---
+
+## Agent Assistance (3 tools)
+
+| Tool | Description |
+|------|-------------|
+| `get_run_logs` | Fetch training stdout/stderr for an experiment (local or SSH) |
+| `model_fetch_architecture` | Read source code or YAML spec for any architecture family |
+| `get_architecture_guide` | Decision tree for declarative vs Python plugin workflows |
+
+### get_run_logs
+
+Fetch training output logs for debugging experiments. Checks local collected logs first, falls back to SSH.
+
+**Parameters:**
+- `run_id` (string, required) — The experiment run_id
+- `tail_lines` (int, optional) — Lines from end to return (default: 100, 0 = all)
+
+### model_fetch_architecture
+
+Read the full source code (Python) or spec (YAML) for any registered architecture. Searches local > global > builtin.
+
+**Parameters:**
+- `family` (string, required) — Model family name (e.g., "baseline", "looped")
+
+### get_architecture_guide
+
+Returns a decision tree for choosing between declarative composition (`model_compose`) and Python plugins (`model_add_architecture`), with step-by-step workflows for each approach.
+
+---
+
+## Tree Search (8 tools)
+
+Branching experiment exploration. Instead of running all experiments equally, organize them as a tree where promising directions expand and poor ones get pruned.
+
+| Tool | Description |
+|------|-------------|
+| `tree_create` | Create a search tree with root experiment(s) and selection policies |
+| `tree_get` | Get tree structure, ASCII visualization, and best path |
+| `tree_expand_node` | Add child experiments to a completed node |
+| `tree_auto_expand` | LLM-generate children for a node using Claude |
+| `tree_prune` | Prune a node or entire branch |
+| `tree_enqueue_pending` | Move pending tree nodes to fleet queue |
+| `tree_sync_results` | Match completed results back to tree nodes |
+| `tree_list` | List all search trees with summary stats |
+
+### tree_create
+
+**Parameters:**
+- `name` (string, required) — Tree name
+- `roots` (array, optional) — Root experiment nodes with name, config, hypothesis
+- `expansion_policy` (string, optional) — "agent_directed" (default), "ucb1", "greedy", "epsilon_greedy"
+- `pruning_policy` (string, optional) — "agent_directed" (default), "threshold"
+- `primary_metric` (string, optional) — Metric to optimize (default: val_bpb)
+- `metric_direction` (string, optional) — "minimize" or "maximize"
+
+### Workflow
+
+```
+1. tree_create         → create tree with baseline root
+2. tree_enqueue_pending → move to fleet queue
+3. dispatch_experiments → run on nodes
+4. collect_results     → download results
+5. tree_sync_results   → update tree with metrics
+6. tree_get            → view results + ASCII tree
+7. tree_expand_node    → add children to best nodes
+   (or tree_auto_expand for LLM-generated children)
+8. Repeat from step 2
+```
+
+---
+
+## Training Generalization (1 tool)
+
+| Tool | Description |
+|------|-------------|
+| `config_get_modalities` | List training backends with modality tags, data adapters, and objectives |
+
+### config_get_modalities
+
+Returns available training backends (torch, generic), registered data adapters (token), and training objectives (cross_entropy, mse, kl_divergence).

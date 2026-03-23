@@ -61,6 +61,9 @@ WARMUP_RE = re.compile(r"warmup_step:(\d+)/(\d+)")
 # Wall-clock training time
 TRAIN_TIME_RE = re.compile(r"train_time:(\d+)ms")
 
+# Generic metric emitted by the generic training backend: metric:name=value
+GENERIC_METRIC_RE = re.compile(r"metric:(\w+)=([\d.eE+\-]+)")
+
 
 # ---------------------------------------------------------------------------
 # OutputParser: configurable pattern-based parser
@@ -88,6 +91,7 @@ class OutputParser:
     stopping_re: re.Pattern[str] = field(default_factory=lambda: STOPPING_RE)
     warmup_re: re.Pattern[str] = field(default_factory=lambda: WARMUP_RE)
     train_time_re: re.Pattern[str] = field(default_factory=lambda: TRAIN_TIME_RE)
+    generic_metric_re: re.Pattern[str] = field(default_factory=lambda: GENERIC_METRIC_RE)
 
     @classmethod
     def from_config(cls, patterns: dict[str, str] | None = None) -> "OutputParser":
@@ -105,6 +109,7 @@ class OutputParser:
             "stopping": "stopping_re",
             "warmup": "warmup_re",
             "train_time": "train_time_re",
+            "generic_metric": "generic_metric_re",
         }
         for key, attr in mapping.items():
             if key in patterns:
@@ -143,6 +148,9 @@ class OutputParser:
                 result_dict["ttt_val_loss"] = float(ttt_match.group(1))
                 result_dict["ttt_val_bpb"] = float(ttt_match.group(2))
 
+            # Collect generic metrics (metric:name=value) -- LM keys take precedence
+            self._collect_generic_metrics(text, result_dict)
+
             return {
                 "status": "completed",
                 "result": result_dict,
@@ -153,16 +161,45 @@ class OutputParser:
         losses = self.train_loss_re.findall(text)
         if losses:
             step, _, last_loss = losses[-1]
+            result_dict_partial: dict[str, Any] = {
+                "train_loss_fallback": float(last_loss),
+                "steps_completed": int(step),
+            }
+            self._collect_generic_metrics(text, result_dict_partial)
             return {
                 "status": "partial_recoverable",
-                "result": {
-                    "train_loss_fallback": float(last_loss),
-                    "steps_completed": int(step),
-                },
+                "result": result_dict_partial,
+                "model_bytes": None,
+            }
+
+        # Last resort: try generic metrics alone
+        generic: dict[str, Any] = {}
+        self._collect_generic_metrics(text, generic)
+        if generic:
+            return {
+                "status": "partial_recoverable",
+                "result": generic,
                 "model_bytes": None,
             }
 
         return None
+
+    def _collect_generic_metrics(
+        self, text: str, result_dict: dict[str, Any]
+    ) -> None:
+        """Scan *text* for ``metric:name=value`` patterns.
+
+        Values are inserted into *result_dict* only if the key does not
+        already exist (LM-specific patterns take precedence).
+        """
+        for m in self.generic_metric_re.finditer(text):
+            key = m.group(1)
+            try:
+                value = float(m.group(2))
+            except ValueError:
+                continue
+            if key not in result_dict:
+                result_dict[key] = value
 
     # -- Line-level helpers ------------------------------------------------
 
@@ -220,6 +257,18 @@ class OutputParser:
 
         if "_ttt_lora" in stripped and stripped.startswith("final_"):
             return {"type": "final_ttt", "line": stripped}
+
+        # Generic metric line (metric:name=value)
+        gm = self.generic_metric_re.search(stripped)
+        if gm:
+            try:
+                return {
+                    "type": "generic_metric",
+                    "name": gm.group(1),
+                    "value": float(gm.group(2)),
+                }
+            except ValueError:
+                pass
 
         return None
 

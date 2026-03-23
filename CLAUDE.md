@@ -160,12 +160,12 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (64 total)
+### MCP Tools (76 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
 
-Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`
+Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`
 
 **Tier 2 — Experiment Design:**
 `version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
@@ -174,12 +174,27 @@ Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`, `cancel_experimen
 `context_push_finding`, `context_get_findings`, `get_research_briefing`, `note_add`, `note_search`, `note_get`
 
 **Tier 4 — Model Extensibility (Code Plugins):**
-`model_list_families`, `model_add_architecture`, `model_generate_template`, `model_validate_config`
+`model_list_families`, `model_add_architecture`, `model_generate_template`, `model_validate_config`, `model_fetch_architecture`
 
 **Tier 5 — Declarative Architecture Composition (Lego Blocks):**
 `model_compose`, `model_from_template`, `model_list_stack_patterns`, `model_list_block_types`, `model_preview_spec`, `model_get_spec`
 
+**Tier 6 — Agent Assistance:**
+- `get_run_logs(run_id)` — Fetch training stdout/stderr (local logs or SSH fallback). Essential for debugging.
+- `model_fetch_architecture(family)` — Read source code/spec for any architecture. Enables read→modify→re-register workflow.
+- `get_architecture_guide()` — Decision tree for declarative vs code plugin workflows.
+
+**Tier 7 — Tree Search (branching experiment exploration):**
+`tree_create` → `tree_enqueue_pending` → `dispatch_experiments` → `collect_results` → `tree_sync_results` → `tree_get` → `tree_expand_node` or `tree_auto_expand` → repeat
+
+Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, and agent-directed selection policies.
+
+**Tier 8 — Training Generalization:**
+`config_get_modalities` — List available training backends with modality tags, data adapters, and objectives.
+
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
+
+**Tool descriptions**: All tools include REQUIRES/RETURNS/NEXT sections to guide autonomous agents on preconditions, return shapes, and workflow sequencing.
 
 ### Architecture Plugins
 

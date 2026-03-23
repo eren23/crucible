@@ -37,7 +37,7 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 - Research briefing (LLM session orientation with project context and findings)
 - REST API server (`crucible serve`) — 10 FastAPI endpoints wrapping MCP tools
 - W&B bridge with image logging and run annotation support
-- 64 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition)
+- 76 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization)
 - Interactive TUI for browsing experiment designs grouped by status
 
 ## What's Coming
