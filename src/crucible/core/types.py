@@ -180,3 +180,57 @@ class ExperimentNote(TypedDict, total=False):
     created_at: str
     file_path: str
     body: str
+
+
+# ---------------------------------------------------------------------------
+# Search tree types
+# ---------------------------------------------------------------------------
+
+
+class SearchTreeNode(TypedDict, total=False):
+    """A node in a search tree over experiments."""
+    node_id: str
+    tree_name: str
+    parent_node_id: str | None
+    children: list[str]
+    depth: int
+    experiment_name: str
+    run_id: str | None
+    config: dict[str, str]
+    status: str                    # pending | queued | running | completed | failed | pruned
+    result_metric: float | None
+    result: dict | None
+    hypothesis: str
+    rationale: str
+    generation_method: str
+    priority_score: float
+    visit_count: int
+    created_at: str
+    completed_at: str | None
+    pruned_at: str | None
+    prune_reason: str | None
+    tags: list[str]
+
+
+class SearchTreeMeta(TypedDict, total=False):
+    """Metadata for a search tree over experiments."""
+    name: str
+    description: str
+    root_node_ids: list[str]
+    expansion_policy: str
+    pruning_policy: str
+    expansion_config: dict
+    pruning_config: dict
+    primary_metric: str
+    metric_direction: str
+    max_depth: int
+    max_nodes: int
+    max_expansions_per_node: int
+    status: str
+    total_nodes: int
+    completed_nodes: int
+    pruned_nodes: int
+    best_node_id: str | None
+    best_metric: float | None
+    created_at: str
+    updated_at: str

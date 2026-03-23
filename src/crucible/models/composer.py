@@ -380,6 +380,112 @@ class ComposedArchitecture:
         return _build_composed_model(resolved, args)
 
 
+def _build_blocks(
+    resolved_spec: ResolvedSpec,
+    build_args: Any,
+    pattern_name: str,
+    model_dim: int,
+) -> tuple[Any, int]:
+    """Build a ModuleList of blocks from the resolved spec.
+
+    Returns ``(blocks, num_blocks_built)`` where *blocks* is a
+    ``torch.nn.ModuleList``.  Factored out so both ``TiedEmbeddingLM``
+    and ``CrucibleModel`` composers can share it.
+    """
+    from torch import nn
+    from crucible.models.components.attention import _parse_block_pattern
+
+    block_cfg = resolved_spec.block
+    block_type_name = block_cfg.get("type", "attention_block")
+    if block_type_name not in BLOCK_TYPES:
+        raise ComposerError(f"Unknown block type {block_type_name!r}; available: {list(BLOCK_TYPES)}")
+    block_cls = BLOCK_TYPES[block_type_name]
+
+    block_dim = block_cfg.get("dim", model_dim)
+    block_params = block_cfg.get("params", {})
+    stack_cfg = resolved_spec.stack
+
+    # Determine number of blocks to instantiate
+    if pattern_name in ("looped",):
+        logical_steps = stack_cfg.get("logical_steps", 0)
+        if logical_steps <= 0:
+            logical_steps = getattr(build_args, "num_layers", 9)
+        unique_blocks = stack_cfg.get("unique_blocks", logical_steps)
+        unique_blocks = max(1, min(unique_blocks, logical_steps))
+        num_blocks_to_build = unique_blocks
+    elif pattern_name == "prefix_memory_stack":
+        num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
+    elif pattern_name == "encoder_decoder_skip":
+        num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
+    else:
+        num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
+
+    if block_type_name == "attention_block":
+        block_pattern = block_params.get("block_pattern", "")
+        _lw = _parse_block_pattern(block_pattern, num_blocks_to_build) if block_pattern else [0] * num_blocks_to_build
+
+        blocks = nn.ModuleList([
+            block_cls(
+                block_dim,
+                block_params.get("num_heads", getattr(build_args, "num_heads", 8)),
+                block_params.get("num_kv_heads", getattr(build_args, "num_kv_heads", 4)),
+                block_params.get("mlp_mult", getattr(build_args, "mlp_mult", 2)),
+                block_params.get("rope_base", getattr(build_args, "rope_base", 10000.0)),
+                block_params.get("qk_gain_init", getattr(build_args, "qk_gain_init", 1.0)),
+                block_params.get("attention_variant", getattr(build_args, "attention_variant", "standard")),
+                block_params.get("residual_variant", getattr(build_args, "residual_variant", "standard")),
+                use_conv=block_params.get("use_conv", False),
+                conv_kernel=block_params.get("conv_kernel", 3),
+                multiscale_window=block_params.get("multiscale_window", 0) if _lw[i] == 0 else 0,
+                attention_window=_lw[i],
+                activation=block_params.get("activation", getattr(build_args, "activation", "relu_sq")),
+                use_moe=block_params.get("use_moe", False),
+                moe_num_experts=block_params.get("moe_num_experts", 4),
+                moe_top_k=block_params.get("moe_top_k", 2),
+            )
+            for i in range(num_blocks_to_build)
+        ])
+    elif block_type_name == "prefix_memory_block":
+        state_dim = block_params.get("state_dim", getattr(build_args, "state_dim", model_dim))
+        blocks = nn.ModuleList([
+            block_cls(
+                block_dim,
+                state_dim,
+                block_params.get("mlp_mult", getattr(build_args, "mlp_mult", 2)),
+                block_params.get("residual_variant", getattr(build_args, "residual_variant", "standard")),
+                activation=block_params.get("activation", getattr(build_args, "activation", "relu_sq")),
+            )
+            for _ in range(num_blocks_to_build)
+        ])
+    else:
+        raise ComposerError(f"Don't know how to construct block type {block_type_name!r}")
+
+    return blocks, num_blocks_to_build
+
+
+def _build_stack_extras(
+    model: Any,
+    pattern: StackPattern,
+    pattern_name: str,
+    resolved_spec: ResolvedSpec,
+    build_args: Any,
+) -> dict:
+    """Build and register stack pattern extras on *model*."""
+    from torch import nn
+
+    stack_extra = pattern.build(resolved_spec, build_args)
+    for key, val in stack_extra.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, nn.Parameter):
+            model.register_parameter(f"stack_{key}", val)
+            stack_extra[key] = val
+        elif isinstance(val, nn.Module):
+            model.add_module(f"stack_{key}", val)
+            stack_extra[key] = val
+    return stack_extra
+
+
 def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
     """Build a composed model from a resolved spec + args namespace."""
     import math
@@ -387,7 +493,6 @@ def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
     from torch import nn
 
     from crucible.models.base import TiedEmbeddingLM
-    from crucible.models.components.attention import _parse_block_pattern
 
     _ensure_block_types()
     _ensure_augmentations()
@@ -398,7 +503,60 @@ def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
         raise ComposerError(f"Unknown stack pattern {pattern_name!r}; available: {list(STACK_PATTERNS)}")
     pattern = STACK_PATTERNS[pattern_name]
 
-    # ----- Build the model class dynamically -----
+    base = resolved.base
+
+    # ----- CrucibleModel path (no embedding/lm_head) -----
+    if base == "crucible_model":
+        from crucible.models.base import CrucibleModel
+        from crucible.models.components.norm import RMSNorm
+
+        class _ComposedGenericModel(CrucibleModel):
+            def __init__(self, resolved_spec: ResolvedSpec, build_args: Any):
+                super().__init__()
+                self._resolved = resolved_spec
+                self._pattern = pattern
+                self._pattern_name = pattern_name
+
+                block_cfg = resolved_spec.block
+                model_dim = block_cfg.get("dim", getattr(build_args, "model_dim", 512))
+                self._model_dim = model_dim
+
+                self.blocks, num_blocks_built = _build_blocks(
+                    resolved_spec, build_args, pattern_name, model_dim
+                )
+                self._stack_extra = _build_stack_extras(
+                    self, pattern, pattern_name, resolved_spec, build_args
+                )
+                self.final_norm = RMSNorm()
+
+                if resolved_spec.init:
+                    if resolved_spec.init.get("ortho", False):
+                        self._apply_ortho_init(num_blocks_built)
+
+            def _apply_ortho_init(self, num_layers: int) -> None:
+                for name, p in self.named_parameters():
+                    if p.ndim == 2 and p.numel() > 256:
+                        nn.init.orthogonal_(p)
+                        if 'proj' in name:
+                            p.data *= 1.0 / math.sqrt(2 * num_layers)
+
+            def forward(self, **batch) -> dict:
+                x = batch.get("input")
+                if x is None:
+                    raise ComposerError(
+                        "CrucibleModel composed forward expects 'input' key in batch"
+                    )
+                x0 = x
+                x = self._pattern.forward(x, x0, self.blocks, self._stack_extra)
+                x = self.final_norm(x)
+                output = {"output": x}
+                if "target" in batch and "loss_fn" in batch:
+                    output["loss"] = batch["loss_fn"](x, batch["target"])
+                return output
+
+        return _ComposedGenericModel(resolved, args)
+
+    # ----- Default: TiedEmbeddingLM path -----
     class _ComposedModel(TiedEmbeddingLM):
         def __init__(self, resolved_spec: ResolvedSpec, build_args: Any):
             # Extract embedding params
@@ -422,86 +580,16 @@ def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
 
             # ----- Build blocks -----
             block_cfg = resolved_spec.block
-            block_type_name = block_cfg.get("type", "attention_block")
-            if block_type_name not in BLOCK_TYPES:
-                raise ComposerError(f"Unknown block type {block_type_name!r}; available: {list(BLOCK_TYPES)}")
-            block_cls = BLOCK_TYPES[block_type_name]
-
             block_dim = block_cfg.get("dim", model_dim)
-            block_params = block_cfg.get("params", {})
 
-            stack_cfg = resolved_spec.stack
-
-            # Determine number of blocks to instantiate
-            if pattern_name in ("looped",):
-                logical_steps = stack_cfg.get("logical_steps", 0)
-                # Mirror Python builder: if logical_steps <= 0, fall back to num_layers
-                if logical_steps <= 0:
-                    logical_steps = getattr(build_args, "num_layers", 9)
-                unique_blocks = stack_cfg.get("unique_blocks", logical_steps)
-                unique_blocks = max(1, min(unique_blocks, logical_steps))
-                num_blocks_to_build = unique_blocks
-            elif pattern_name == "prefix_memory_stack":
-                num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
-            elif pattern_name == "encoder_decoder_skip":
-                num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
-            else:
-                num_blocks_to_build = stack_cfg.get("num_layers", getattr(build_args, "num_layers", 9))
-
-            # Build block constructor kwargs based on block type
-            if block_type_name == "attention_block":
-                block_pattern = block_params.get("block_pattern", "")
-                _lw = _parse_block_pattern(block_pattern, num_blocks_to_build) if block_pattern else [0] * num_blocks_to_build
-
-                self.blocks = nn.ModuleList([
-                    block_cls(
-                        block_dim,
-                        block_params.get("num_heads", getattr(build_args, "num_heads", 8)),
-                        block_params.get("num_kv_heads", getattr(build_args, "num_kv_heads", 4)),
-                        block_params.get("mlp_mult", getattr(build_args, "mlp_mult", 2)),
-                        block_params.get("rope_base", getattr(build_args, "rope_base", 10000.0)),
-                        block_params.get("qk_gain_init", getattr(build_args, "qk_gain_init", 1.0)),
-                        block_params.get("attention_variant", getattr(build_args, "attention_variant", "standard")),
-                        block_params.get("residual_variant", getattr(build_args, "residual_variant", "standard")),
-                        use_conv=block_params.get("use_conv", False),
-                        conv_kernel=block_params.get("conv_kernel", 3),
-                        multiscale_window=block_params.get("multiscale_window", 0) if _lw[i] == 0 else 0,
-                        attention_window=_lw[i],
-                        activation=block_params.get("activation", getattr(build_args, "activation", "relu_sq")),
-                        use_moe=block_params.get("use_moe", False),
-                        moe_num_experts=block_params.get("moe_num_experts", 4),
-                        moe_top_k=block_params.get("moe_top_k", 2),
-                    )
-                    for i in range(num_blocks_to_build)
-                ])
-            elif block_type_name == "prefix_memory_block":
-                state_dim = block_params.get("state_dim", getattr(build_args, "state_dim", model_dim))
-                self.blocks = nn.ModuleList([
-                    block_cls(
-                        block_dim,
-                        state_dim,
-                        block_params.get("mlp_mult", getattr(build_args, "mlp_mult", 2)),
-                        block_params.get("residual_variant", getattr(build_args, "residual_variant", "standard")),
-                        activation=block_params.get("activation", getattr(build_args, "activation", "relu_sq")),
-                    )
-                    for _ in range(num_blocks_to_build)
-                ])
-            else:
-                raise ComposerError(f"Don't know how to construct block type {block_type_name!r}")
+            self.blocks, num_blocks_to_build = _build_blocks(
+                resolved_spec, build_args, pattern_name, model_dim
+            )
 
             # ----- Build stack pattern extras -----
-            self._stack_extra = pattern.build(resolved_spec, build_args)
-            # Register nn.Parameters and nn.Modules from extra as proper attributes
-            for key, val in self._stack_extra.items():
-                if key.startswith("_"):
-                    continue  # skip metadata entries
-                if isinstance(val, nn.Parameter):
-                    self.register_parameter(f"stack_{key}", val)
-                    # Replace dict entry with the registered version
-                    self._stack_extra[key] = val
-                elif isinstance(val, nn.Module):
-                    self.add_module(f"stack_{key}", val)
-                    self._stack_extra[key] = val
+            self._stack_extra = _build_stack_extras(
+                self, pattern, pattern_name, resolved_spec, build_args
+            )
 
             # ----- Transform (pre/post stack) -----
             self._has_transform = resolved_spec.transform is not None

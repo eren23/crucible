@@ -32,6 +32,7 @@ from crucible.core.log import utc_now_iso
 _TYPE_DIRS: dict[str, str] = {
     "experiment_design": "designs",
     "research_context": "context",
+    "search_tree": "search_trees",
 }
 
 

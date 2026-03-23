@@ -27,3 +27,6 @@ class ApiError(CrucibleError):
 
 class ComposerError(CrucibleError):
     """Architecture composition spec loading, resolution, or build failures."""
+
+class SearchTreeError(CrucibleError):
+    """Search tree creation, expansion, pruning, or persistence failures."""

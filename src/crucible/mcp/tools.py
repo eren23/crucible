@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig, load_config
@@ -14,9 +15,56 @@ def _get_config() -> ProjectConfig:
     return load_config()
 
 
+def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
+    """SSH to a node and collect GPU/memory/disk metrics."""
+    from crucible.fleet.sync import remote_exec
+
+    name = node.get("name", "unknown")
+    if not node.get("ssh_host"):
+        return {"node": name, "error": "no SSH host"}
+    try:
+        cmd = (
+            "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu "
+            "--format=csv,noheader,nounits 2>/dev/null; echo '---SEP---'; "
+            "free -m 2>/dev/null | grep Mem; echo '---SEP---'; "
+            "df -BM /workspace 2>/dev/null | tail -1"
+        )
+        proc = remote_exec(node, cmd, check=False)
+        parts = (proc.stdout or "").split("---SEP---")
+
+        result: dict[str, Any] = {"node": name}
+
+        # Parse nvidia-smi
+        if len(parts) >= 1 and parts[0].strip():
+            gpu_parts = parts[0].strip().split(",")
+            if len(gpu_parts) >= 4:
+                result["gpu_utilization_pct"] = int(gpu_parts[0].strip())
+                result["gpu_memory_used_mb"] = int(gpu_parts[1].strip())
+                result["gpu_memory_total_mb"] = int(gpu_parts[2].strip())
+                result["gpu_temperature_c"] = int(gpu_parts[3].strip())
+
+        # Parse free
+        if len(parts) >= 2 and parts[1].strip():
+            mem_parts = parts[1].strip().split()
+            if len(mem_parts) >= 3:
+                result["ram_total_mb"] = int(mem_parts[1])
+                result["ram_used_mb"] = int(mem_parts[2])
+
+        # Parse df
+        if len(parts) >= 3 and parts[2].strip():
+            disk_parts = parts[2].strip().split()
+            if len(disk_parts) >= 5:
+                result["disk_used_pct"] = disk_parts[4]
+
+        return result
+    except Exception as exc:
+        return {"node": name, "error": str(exc)}
+
+
 def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
-    """Node inventory, health summary, and current assignments."""
+    """Node inventory, health summary, current assignments, and optional live metrics."""
     config = _get_config()
+    include_metrics = args.get("include_metrics", False)
     try:
         from crucible.fleet.inventory import load_nodes, summarize_nodes
 
@@ -34,7 +82,16 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
             }
             for n in nodes
         ]
-        return {"summary": summary, "nodes": node_details}
+        result: dict[str, Any] = {"summary": summary, "nodes": node_details}
+
+        if include_metrics and nodes:
+            from concurrent.futures import ThreadPoolExecutor
+            ssh_nodes = [n for n in nodes if n.get("ssh_host")]
+            with ThreadPoolExecutor(max_workers=min(8, len(ssh_nodes) or 1)) as pool:
+                metrics = list(pool.map(_probe_node_metrics, ssh_nodes))
+            result["metrics"] = metrics
+
+        return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}", "nodes": []}
     except Exception as exc:
@@ -237,6 +294,13 @@ def bootstrap_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Bootstrap fleet nodes: sync code, install deps, download data. Run after provision_nodes."""
     config = _get_config()
     try:
+        # Precondition: nodes with SSH hosts must exist
+        from crucible.fleet.inventory import load_nodes_if_exists
+        nodes_check = load_nodes_if_exists(config.project_root / config.nodes_file)
+        ssh_nodes = [n for n in nodes_check if n.get("ssh_host")]
+        if not ssh_nodes:
+            return {"error": "No nodes with SSH connectivity found. Run fleet_refresh first (wait ~60s after provision_nodes).", "total": 0, "bootstrapped": 0, "nodes": []}
+
         from crucible.fleet.manager import FleetManager
 
         fm = FleetManager(config)
@@ -271,6 +335,13 @@ def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
     """Dispatch queued experiments to idle bootstrapped nodes. Run after bootstrap_nodes + enqueue."""
     config = _get_config()
     try:
+        # Precondition: bootstrapped nodes must exist
+        from crucible.fleet.inventory import load_nodes_if_exists
+        nodes_check = load_nodes_if_exists(config.project_root / config.nodes_file)
+        bootstrapped = [n for n in nodes_check if n.get("env_ready")]
+        if not bootstrapped:
+            return {"error": "No bootstrapped nodes found. Run bootstrap_nodes first (after provision_nodes + fleet_refresh).", "dispatched": 0, "assignments": []}
+
         from crucible.fleet.manager import FleetManager
 
         fm = FleetManager(config)
@@ -293,6 +364,12 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
     """Collect experiment results from all fleet nodes via rsync and merge into fleet results."""
     config = _get_config()
     try:
+        # Precondition: nodes must exist
+        from crucible.fleet.inventory import load_nodes_if_exists
+        nodes_check = load_nodes_if_exists(config.project_root / config.nodes_file)
+        if not nodes_check:
+            return {"error": "No fleet nodes found. Run provision_nodes + fleet_refresh first.", "collected": False, "total_results": 0, "completed": 0}
+
         from crucible.fleet.manager import FleetManager
         from crucible.analysis.results import merged_results
 
@@ -483,6 +560,9 @@ def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
 
 def design_generate_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
     """Generate LLM-driven experiment hypotheses with agent-provided context."""
+    import os
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return {"error": "ANTHROPIC_API_KEY not set. Export it or add to .env file."}
     config = _get_config()
     try:
         from crucible.researcher.analysis import build_analysis
@@ -1511,7 +1591,14 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
     code = args["code"]
     scope = args.get("scope", "local")
     if "register_model" not in code:
-        return {"error": "Code must call register_model() to register the family."}
+        return {"error": (
+            "Code must call register_model() to register the family. Example:\n\n"
+            "from crucible.models.registry import register_model\n\n"
+            "def _build(args):\n"
+            "    return MyArchitecture(args)\n\n"
+            f"register_model('{name}', _build)\n\n"
+            "Use model_generate_template() for full boilerplate."
+        )}
 
     if scope == "global":
         try:
@@ -2141,6 +2228,625 @@ def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
     return {"cleared": cleared, "count": len(cleared)}
 
 
+# ---------------------------------------------------------------------------
+# Run logs tool
+# ---------------------------------------------------------------------------
+
+
+def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
+    """Fetch stdout/stderr logs for an experiment run."""
+    config = _get_config()
+    run_id = args["run_id"]
+    tail_lines = args.get("tail_lines", 100)
+
+    # Step 1: Check locally collected logs
+    fleet_runs_dir = config.project_root / "fleet_runs"
+    local_logs: list[Path] = []
+    if fleet_runs_dir.exists():
+        local_logs = sorted(fleet_runs_dir.glob(f"*/logs/{run_id}*.txt"))
+    # Also check project-level logs/
+    project_logs_dir = config.project_root / "logs"
+    if project_logs_dir.exists():
+        local_logs.extend(sorted(project_logs_dir.glob(f"{run_id}*.txt")))
+
+    if local_logs:
+        combined = []
+        for lf in local_logs:
+            try:
+                text = lf.read_text(encoding="utf-8", errors="replace")
+                combined.append(f"--- {lf.name} ---\n{text}")
+            except Exception:
+                combined.append(f"--- {lf.name} --- (read error)")
+        full_text = "\n".join(combined)
+        lines = full_text.splitlines()
+        total = len(lines)
+        if tail_lines > 0 and total > tail_lines:
+            lines = lines[-tail_lines:]
+        return {
+            "found": True,
+            "run_id": run_id,
+            "source": "local",
+            "log_text": "\n".join(lines),
+            "lines_returned": len(lines),
+            "total_lines": total,
+            "log_files": [str(lf) for lf in local_logs],
+        }
+
+    # Step 2: Try SSH to remote pod
+    try:
+        from crucible.fleet.inventory import load_nodes_if_exists
+        from crucible.fleet.queue import load_queue
+        from crucible.fleet.sync import remote_exec
+
+        queue_path = config.project_root / "fleet_queue.jsonl"
+        queue = load_queue(queue_path) if queue_path.exists() else []
+        assigned_node = None
+        for row in queue:
+            if row.get("run_id") == run_id:
+                assigned_node = row.get("assigned_node") or row.get("assigned_pod")
+                break
+        if not assigned_node:
+            return {"found": False, "run_id": run_id, "reason": "No local logs and run_id not found in queue."}
+
+        nodes = load_nodes_if_exists(config.project_root / config.nodes_file)
+        node = next((n for n in nodes if n.get("name") == assigned_node), None)
+        if not node or not node.get("ssh_host"):
+            return {"found": False, "run_id": run_id, "reason": f"Node '{assigned_node}' not reachable (no SSH host). Try collect_results first."}
+
+        workspace = node.get("workspace_path", "/workspace/project")
+        tail_flag = f"-n {tail_lines}" if tail_lines > 0 else ""
+        cmd = (
+            f"cat {workspace}/logs/{run_id}.launcher.txt "
+            f"{workspace}/logs/{run_id}.txt 2>/dev/null"
+        )
+        if tail_flag:
+            cmd += f" | tail {tail_flag}"
+        proc = remote_exec(node, cmd, check=False)
+        if proc.returncode != 0 and not proc.stdout.strip():
+            return {"found": False, "run_id": run_id, "reason": f"Logs not found on node '{assigned_node}'. Experiment may not have started yet."}
+
+        text = proc.stdout or ""
+        lines = text.splitlines()
+        return {
+            "found": True,
+            "run_id": run_id,
+            "source": "remote",
+            "node": assigned_node,
+            "log_text": "\n".join(lines),
+            "lines_returned": len(lines),
+        }
+    except Exception as exc:
+        return {"found": False, "run_id": run_id, "reason": f"SSH probe failed: {exc}. Try collect_results to download logs locally."}
+
+
+# ---------------------------------------------------------------------------
+# Architecture fetch tool
+# ---------------------------------------------------------------------------
+
+
+def model_fetch_architecture(args: dict[str, Any]) -> dict[str, Any]:
+    """Fetch full source code (Python) or spec (YAML) for a registered architecture."""
+    family = args["family"]
+    config = _get_config()
+
+    # Search tiers in precedence order: local > global > builtin
+    search_paths: list[tuple[str, Path]] = []
+
+    # Local
+    local_arch_dir = config.project_root / config.store_dir / "architectures"
+    search_paths.append(("local", local_arch_dir / f"{family}.py"))
+    search_paths.append(("local", local_arch_dir / f"{family}.yaml"))
+
+    # Global (hub)
+    hub_dir = Path.home() / ".crucible-hub" / "architectures" / "plugins"
+    search_paths.append(("global", hub_dir / f"{family}.py"))
+    search_paths.append(("global", hub_dir / f"{family}.yaml"))
+
+    # Builtin code
+    import crucible.models.architectures as arch_pkg
+    builtin_arch_dir = Path(arch_pkg.__file__).parent
+    search_paths.append(("builtin", builtin_arch_dir / f"{family}.py"))
+
+    # Builtin specs
+    builtin_spec_dir = builtin_arch_dir.parent / "specs"
+    search_paths.append(("builtin", builtin_spec_dir / f"{family}.yaml"))
+
+    for source, path in search_paths:
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+                kind = "code" if path.suffix == ".py" else "spec"
+                return {
+                    "family": family,
+                    "kind": kind,
+                    "source": source,
+                    "content": content,
+                    "file_path": str(path),
+                }
+            except Exception as exc:
+                return {"error": f"Found {path} but failed to read: {exc}"}
+
+    from crucible.models.registry import list_families
+    available = list_families()
+    return {"error": f"Architecture '{family}' not found. Available: {available}"}
+
+
+# ---------------------------------------------------------------------------
+# Architecture guide tool
+# ---------------------------------------------------------------------------
+
+
+def get_architecture_guide(args: dict[str, Any]) -> dict[str, Any]:
+    """Decision guide for creating model architectures."""
+    return {
+        "decision_tree": {
+            "use_declarative_composition": [
+                "Standard block types (attention, prefix_memory) are sufficient",
+                "Standard wiring patterns (sequential, looped, encoder_decoder_skip) fit your design",
+                "No custom forward pass logic needed",
+                "You want rapid iteration without writing Python",
+            ],
+            "use_python_plugin": [
+                "You need custom forward pass logic",
+                "You're implementing a novel attention mechanism or memory system",
+                "You need to import external libraries",
+                "Your architecture doesn't fit block -> stack -> output pattern",
+            ],
+        },
+        "workflows": {
+            "declarative_composition": {
+                "description": "No code required. Compose from blocks + patterns via YAML.",
+                "steps": [
+                    "1. model_list_stack_patterns() -- see wiring patterns",
+                    "2. model_list_block_types() -- see available blocks",
+                    "3. model_compose(name, spec) -- create and register",
+                    "4. model_preview_spec(spec) -- validate on CPU (param count, layers)",
+                    "5. enqueue_experiment(config={MODEL_FAMILY: name}) -- run it",
+                ],
+            },
+            "python_plugin": {
+                "description": "Full control. Write a Python module with custom forward logic.",
+                "steps": [
+                    "1. model_fetch_architecture(family) -- read an existing arch for reference",
+                    "2. model_generate_template(name) -- get boilerplate code",
+                    "3. Edit the code: implement __init__ + hidden() methods",
+                    "4. model_add_architecture(name, code) -- register plugin",
+                    "5. model_validate_config(config) -- pre-flight check",
+                    "6. enqueue_experiment(config={MODEL_FAMILY: name}) -- run it",
+                ],
+            },
+        },
+        "tips": [
+            "Start with declarative composition -- switch to Python only if needed",
+            "Use model_from_template(name, base, overrides) to fork an existing spec",
+            "model_preview_spec lets you check param count without GPU",
+            "model_fetch_architecture returns source code for any registered family",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tree search tools
+# ---------------------------------------------------------------------------
+
+
+def _get_tree_dir(config, name: str):
+    """Resolve the directory for a named search tree."""
+    store_dir = config.project_root / config.store_dir
+    return store_dir / "search_trees" / name
+
+
+def tree_create(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new search tree over experiments."""
+    config = _get_config()
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        roots = args.get("roots", [])
+        tree = SearchTree.create(
+            tree_dir=tree_dir,
+            name=name,
+            description=args.get("description", ""),
+            roots=roots if roots else None,
+            expansion_policy=args.get("expansion_policy", "agent_directed"),
+            pruning_policy=args.get("pruning_policy", "agent_directed"),
+            expansion_config=args.get("expansion_config", {}),
+            pruning_config=args.get("pruning_config", {}),
+            primary_metric=args.get("primary_metric", config.metrics.primary),
+            metric_direction=args.get("metric_direction", "minimize"),
+            max_depth=args.get("max_depth", 10),
+            max_nodes=args.get("max_nodes", 500),
+            max_expansions_per_node=args.get("max_expansions_per_node", 5),
+        )
+        return {
+            "status": "created",
+            "name": name,
+            "root_node_ids": tree.meta["root_node_ids"],
+            "total_nodes": tree.meta["total_nodes"],
+            "tree_dir": str(tree_dir),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_get(args: dict[str, Any]) -> dict[str, Any]:
+    """Get tree structure and ASCII visualization."""
+    config = _get_config()
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        summary = tree.get_tree_summary()
+        ascii_tree = tree.render_ascii(max_depth=args.get("max_depth"))
+
+        result: dict[str, Any] = {
+            "summary": summary,
+            "ascii_tree": ascii_tree,
+        }
+
+        best_path = tree.get_best_path()
+        if best_path:
+            result["best_path"] = [
+                {
+                    "node_id": n["node_id"],
+                    "experiment_name": n["experiment_name"],
+                    "depth": n["depth"],
+                    "status": n["status"],
+                    "result_metric": n.get("result_metric"),
+                    "hypothesis": n.get("hypothesis", ""),
+                }
+                for n in best_path
+            ]
+
+        return result
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_expand_node(args: dict[str, Any]) -> dict[str, Any]:
+    """Add children to a completed node in the search tree."""
+    config = _get_config()
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        parent_id = args["parent_node_id"]
+        children = args["children"]
+        new_ids = tree.expand_node(parent_id, children)
+
+        return {
+            "status": "expanded",
+            "parent_node_id": parent_id,
+            "new_node_ids": new_ids,
+            "total_nodes": tree.meta["total_nodes"],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
+    """LLM-generate children for a node. Requires ANTHROPIC_API_KEY."""
+    config = _get_config()
+    try:
+        import os
+
+        from crucible.researcher.search_tree import SearchTree
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return {"error": "ANTHROPIC_API_KEY not set. Required for auto-expansion."}
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        node_id = args["node_id"]
+        node = tree.get_node(node_id)
+        if node is None:
+            return {"error": f"Node '{node_id}' not found"}
+
+        n_children = args.get("n_children", 3)
+        extra_context = args.get("extra_context", "")
+
+        ancestry = tree.get_ancestry(node_id)
+        siblings = tree.get_siblings(node_id)
+        summary = tree.get_tree_summary()
+
+        ancestry_str = "\n".join(
+            f"  depth={a['depth']} name={a['experiment_name']} "
+            f"config={json.dumps(a['config'])} metric={a.get('result_metric')}"
+            for a in ancestry
+        )
+        sibling_str = "\n".join(
+            f"  name={s['experiment_name']} config={json.dumps(s['config'])} "
+            f"metric={s.get('result_metric')} status={s['status']}"
+            for s in siblings
+        ) or "  (none)"
+
+        prompt = (
+            f"You are expanding a search tree of ML experiment configurations.\n\n"
+            f"Tree: {summary.get('name')} - {summary.get('description', '')}\n"
+            f"Primary metric: {summary.get('primary_metric')} ({summary.get('metric_direction')})\n"
+            f"Best so far: {summary.get('best_metric')}\n\n"
+            f"Current node path (root to current):\n{ancestry_str}\n\n"
+            f"Siblings of current node:\n{sibling_str}\n\n"
+            f"Current node config: {json.dumps(node['config'])}\n"
+            f"Current node result: metric={node.get('result_metric')}\n"
+            f"Current node hypothesis: {node.get('hypothesis', '')}\n\n"
+        )
+        if extra_context:
+            prompt += f"Additional context: {extra_context}\n\n"
+
+        prompt += (
+            f"Generate exactly {n_children} child experiment configurations as JSON.\n"
+            f"Each child should modify the parent config to test a specific hypothesis.\n"
+            f"Return a JSON array of objects with: name, config (dict of overrides), "
+            f"hypothesis, rationale.\n"
+            f"Only return the JSON array, no other text."
+        )
+
+        try:
+            import anthropic
+        except ImportError:
+            return {"error": "anthropic package not installed. Run: pip install anthropic"}
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        response_text = response.content[0].text.strip()
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1])
+
+        children_specs = json.loads(response_text)
+        if not isinstance(children_specs, list):
+            return {"error": "LLM response was not a JSON array"}
+
+        for spec in children_specs:
+            spec["generation_method"] = "llm_auto_expand"
+
+        new_ids = tree.expand_node(node_id, children_specs)
+        return {
+            "status": "auto_expanded",
+            "node_id": node_id,
+            "new_node_ids": new_ids,
+            "children": [
+                {
+                    "node_id": nid,
+                    "name": tree.get_node(nid)["experiment_name"],
+                    "hypothesis": tree.get_node(nid).get("hypothesis", ""),
+                }
+                for nid in new_ids
+            ],
+            "total_nodes": tree.meta["total_nodes"],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except json.JSONDecodeError as exc:
+        return {"error": f"Failed to parse LLM response as JSON: {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
+    """Prune a node or entire branch in the search tree."""
+    config = _get_config()
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        node_id = args["node_id"]
+        reason = args.get("reason", "")
+        prune_branch = args.get("prune_branch", False)
+
+        if prune_branch:
+            count = tree.prune_branch(node_id, reason)
+            return {
+                "status": "branch_pruned",
+                "node_id": node_id,
+                "nodes_pruned": count,
+                "total_pruned": tree.meta["pruned_nodes"],
+            }
+        else:
+            tree.prune_node(node_id, reason)
+            return {
+                "status": "node_pruned",
+                "node_id": node_id,
+                "total_pruned": tree.meta["pruned_nodes"],
+            }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
+    """Move pending tree nodes to the fleet queue."""
+    config = _get_config()
+    try:
+        from crucible.fleet.queue import enqueue_experiments
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        node_ids = args.get("node_ids")
+        tier = args.get("tier", "proxy")
+        backend = args.get("backend", "torch")
+
+        if node_ids:
+            nodes_to_enqueue = [
+                tree.get_node(nid) for nid in node_ids
+                if tree.get_node(nid) and tree.get_node(nid)["status"] == "pending"
+            ]
+        else:
+            nodes_to_enqueue = tree.get_pending_nodes()
+
+        if not nodes_to_enqueue:
+            return {"status": "no_pending_nodes", "enqueued": 0}
+
+        experiments = []
+        for node in nodes_to_enqueue:
+            experiments.append({
+                "name": node["experiment_name"],
+                "config": node["config"],
+                "tier": tier,
+                "backend": backend,
+                "tags": node.get("tags", []) + [f"tree:{name}", f"node:{node['node_id']}"],
+            })
+
+        queue_path = config.project_root / "fleet_queue.jsonl"
+        added = enqueue_experiments(queue_path, experiments, limit=len(experiments))
+
+        enqueued_info = []
+        for item in added:
+            for node in nodes_to_enqueue:
+                if node["experiment_name"] == item["experiment_name"]:
+                    node["status"] = "queued"
+                    node["run_id"] = item["run_id"]
+                    tree._append_node_event("enqueue", node)
+                    enqueued_info.append({
+                        "node_id": node["node_id"],
+                        "run_id": item["run_id"],
+                        "experiment_name": node["experiment_name"],
+                    })
+                    break
+
+        tree.meta["updated_at"] = utc_now_iso()
+        tree._save_meta()
+        tree._save_snapshot()
+
+        return {
+            "status": "enqueued",
+            "enqueued": len(added),
+            "items": enqueued_info,
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_sync_results(args: dict[str, Any]) -> dict[str, Any]:
+    """Match completed queue results to tree nodes."""
+    config = _get_config()
+    try:
+        from crucible.analysis.results import merged_results
+        from crucible.researcher.search_tree import SearchTree
+
+        name = args["name"]
+        tree_dir = _get_tree_dir(config, name)
+        tree = SearchTree.load(tree_dir)
+
+        all_results = merged_results(config)
+        results_by_id = {r.get("id", r.get("run_id", "")): r for r in all_results}
+
+        synced = []
+        for node in tree.nodes.values():
+            if node["status"] in ("queued", "running") and node.get("run_id"):
+                result = results_by_id.get(node["run_id"])
+                if result and result.get("status") == "completed":
+                    result_data = result.get("result", {})
+                    result_data["run_id"] = node["run_id"]
+                    tree.record_result(node["node_id"], result_data)
+                    synced.append({
+                        "node_id": node["node_id"],
+                        "run_id": node["run_id"],
+                        "metric": node.get("result_metric"),
+                    })
+
+        return {
+            "status": "synced",
+            "synced_count": len(synced),
+            "synced_nodes": synced,
+            "best_node_id": tree.meta.get("best_node_id"),
+            "best_metric": tree.meta.get("best_metric"),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List all search trees."""
+    config = _get_config()
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        store_dir = config.project_root / config.store_dir
+        trees_dir = store_dir / "search_trees"
+
+        if not trees_dir.exists():
+            return {"trees": [], "total": 0}
+
+        trees = []
+        for entry in sorted(trees_dir.iterdir()):
+            if entry.is_dir() and (entry / "tree.yaml").exists():
+                try:
+                    tree = SearchTree.load(entry)
+                    trees.append(tree.get_tree_summary())
+                except Exception:
+                    trees.append({"name": entry.name, "status": "error", "error": "failed to load"})
+
+        return {"trees": trees, "total": len(trees)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Modalities tool
+# ---------------------------------------------------------------------------
+
+
+def config_get_modalities(args: dict[str, Any]) -> dict[str, Any]:
+    """List available training backends with their modality tags."""
+    config = _get_config()
+    try:
+        from crucible.training.data_adapters import DATA_ADAPTER_REGISTRY
+        from crucible.training.objectives import OBJECTIVE_REGISTRY
+
+        backends = []
+        for t in config.training:
+            backends.append({
+                "backend": t.backend,
+                "script": t.script,
+                "modality": t.modality,
+            })
+
+        return {
+            "training_backends": backends,
+            "data_adapters": sorted(DATA_ADAPTER_REGISTRY.keys()),
+            "objectives": sorted(OBJECTIVE_REGISTRY.keys()),
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -2219,4 +2925,19 @@ TOOL_DISPATCH: dict[str, Any] = {
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,
+    # New tools (Phase 1)
+    "get_run_logs": get_run_logs,
+    "model_fetch_architecture": model_fetch_architecture,
+    "get_architecture_guide": get_architecture_guide,
+    # Tree search tools (Phase 2)
+    "tree_create": tree_create,
+    "tree_get": tree_get,
+    "tree_expand_node": tree_expand_node,
+    "tree_auto_expand": tree_auto_expand,
+    "tree_prune": tree_prune,
+    "tree_enqueue_pending": tree_enqueue_pending,
+    "tree_sync_results": tree_sync_results,
+    "tree_list": tree_list,
+    # Modalities tool (Phase 3)
+    "config_get_modalities": config_get_modalities,
 }

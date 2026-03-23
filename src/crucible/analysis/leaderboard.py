@@ -37,17 +37,28 @@ def _metric_value(result: ExperimentResult, metric: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_direction(direction: str | None, cfg: ProjectConfig | None) -> str:
+    """Return an explicit direction, falling back to config or 'minimize'."""
+    if direction is not None:
+        return direction
+    if cfg is not None:
+        return cfg.metrics.direction
+    return "minimize"
+
+
 def leaderboard(
     results: list[ExperimentResult] | None = None,
     top_n: int = 50,
     *,
     metric: str | None = None,
+    direction: str | None = None,
     cfg: ProjectConfig | None = None,
 ) -> list[ExperimentResult]:
-    """Return the *top_n* completed experiments ranked by *metric* (ascending).
+    """Return the *top_n* completed experiments ranked by *metric*.
 
-    Lower values are better (e.g. loss, BPB).  Pass ``metric`` to rank by a
-    different key inside the ``result`` dict.
+    When ``direction`` is ``"minimize"`` (default) lower values are better
+    (e.g. loss, BPB).  When ``"maximize"`` higher values are better
+    (e.g. accuracy, reward).
 
     Parameters
     ----------
@@ -57,8 +68,13 @@ def leaderboard(
     metric:
         Result key to rank by.  When *None* (default), resolved from
         ``cfg.metrics.primary`` or falls back to ``"val_loss"``.
+    direction:
+        Sort direction ``"minimize"`` or ``"maximize"``.  When *None*,
+        resolved from ``cfg.metrics.direction`` or falls back to
+        ``"minimize"``.
     """
     metric = _resolve_metric(metric, cfg)
+    direction = _resolve_direction(direction, cfg)
     if results is None:
         results = completed_results(cfg)
     if not results:
@@ -70,8 +86,9 @@ def leaderboard(
         log_warn(f"No completed results contain metric '{metric}'")
         return []
 
-    valid.sort(key=lambda r: _metric_value(r, metric))
-    log_info(f"Leaderboard: {len(valid)} results ranked by {metric}, showing top {top_n}")
+    reverse = direction == "maximize"
+    valid.sort(key=lambda r: _metric_value(r, metric), reverse=reverse)
+    log_info(f"Leaderboard: {len(valid)} results ranked by {metric} ({direction}), showing top {top_n}")
     return valid[:top_n]
 
 
