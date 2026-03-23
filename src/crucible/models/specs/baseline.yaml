@@ -1,0 +1,62 @@
+# Baseline GPT — encoder-decoder with learned skip connections
+# Equivalent to: src/crucible/models/architectures/baseline.py
+name: baseline
+version: 1
+base: tied_embedding_lm
+
+embedding:
+  vocab_size: "{VOCAB_SIZE:50304}"
+  model_dim: "{MODEL_DIM:512}"
+  tie_embeddings: "{TIE_EMBEDDINGS:true}"
+  tied_embed_init_std: "{TIED_EMBED_INIT_STD:0.02}"
+  logit_softcap: "{LOGIT_SOFTCAP:30.0}"
+  embed_bottleneck_dim: "{EMBED_BOTTLENECK_DIM:0}"
+  spectral_embed_init: "{SPECTRAL_EMBED_INIT:false}"
+
+block:
+  type: attention_block
+  dim: "{MODEL_DIM:512}"
+  params:
+    num_heads: "{NUM_HEADS:8}"
+    num_kv_heads: "{NUM_KV_HEADS:4}"
+    mlp_mult: "{MLP_MULT:2}"
+    rope_base: "{ROPE_BASE:10000.0}"
+    qk_gain_init: "{QK_GAIN_INIT:1.0}"
+    attention_variant: "{ATTENTION_VARIANT:standard}"
+    residual_variant: "{RESIDUAL_VARIANT:standard}"
+    use_conv: "{CONV_BLOCK:false}"
+    conv_kernel: "{CONV_KERNEL:3}"
+    multiscale_window: "{MULTISCALE_WINDOW:0}"
+    block_pattern: "{BLOCK_PATTERN:}"
+    activation: "{ACTIVATION:relu_sq}"
+    use_moe: "{USE_MOE:false}"
+    moe_num_experts: "{MOE_NUM_EXPERTS:4}"
+    moe_top_k: "{MOE_TOP_K:2}"
+
+stack:
+  pattern: encoder_decoder_skip
+  num_layers: "{NUM_LAYERS:9}"
+
+augmentations:
+  smear_gate:
+    enabled: "{SMEAR_GATE:false}"
+    dim: "{MODEL_DIM:512}"
+  bigram_hash:
+    enabled: "{BIGRAM_HASH:false}"
+    vocab_size: "{VOCAB_SIZE:50304}"
+    num_buckets: "{BIGRAM_HASH_BUCKETS:2048}"
+    embed_dim: "{BIGRAM_HASH_EMBED_DIM:128}"
+    model_dim: "{MODEL_DIM:512}"
+  trigram_hash:
+    enabled: "{TRIGRAM_HASH:false}"
+    vocab_size: "{VOCAB_SIZE:50304}"
+    num_buckets: "{TRIGRAM_HASH_BUCKETS:4096}"
+    embed_dim: "{BIGRAM_HASH_EMBED_DIM:128}"
+    model_dim: "{MODEL_DIM:512}"
+  token_merge:
+    enabled: false
+    threshold: "{TOKEN_MERGE_THRESHOLD:0.9}"
+    layer: "{TOKEN_MERGE_LAYER:0}"
+
+init:
+  ortho: "{ORTHO_INIT:false}"

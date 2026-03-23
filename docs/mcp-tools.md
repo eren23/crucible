@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 53 MCP tools for AI agents. Start the server:
+Crucible exposes 64 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -22,7 +22,7 @@ Configure in Claude Desktop or any MCP client:
 
 ---
 
-## Fleet Management (4 tools)
+## Fleet Management (6 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -30,14 +30,18 @@ Configure in Claude Desktop or any MCP client:
 | `provision_nodes` | Create N new compute nodes |
 | `destroy_nodes` | Tear down tracked nodes |
 | `sync_code` | Push local code to nodes via rsync |
+| `fleet_refresh` | Refresh node states from cloud provider API |
+| `bootstrap_nodes` | Sync code, install deps, download data on nodes |
 
-## Experiment Queue (3 tools)
+## Experiment Queue (5 tools)
 
 | Tool | Description |
 |------|-------------|
 | `get_queue_status` | Queue state: queued, running, completed |
 | `enqueue_experiment` | Add one experiment to queue |
 | `get_experiment_result` | Get result for a specific run_id |
+| `cancel_experiment` | Cancel queued/running experiments by name, run_id, or wave |
+| `clear_stale_queue` | Mark experiments failed if assigned to non-existent nodes |
 
 ## Analysis (2 tools)
 
@@ -346,18 +350,39 @@ Add structured annotations to a completed experiment run. Useful for recording L
 }
 ```
 
-## Model Extensibility (8 tools)
+## Model Extensibility — Code Plugins (8 tools)
 
 | Tool | Description |
 |------|-------------|
-| `model_list_families` | List all registered model families (built-in + plugins) |
+| `model_list_families` | List all registered model families (built-in + plugins + specs) |
 | `model_list_activations` | List available activation functions |
 | `model_list_components` | List model components with descriptions |
 | `model_get_config_schema` | Get parameter schema for a model family |
 | `model_validate_config` | Validate experiment config against family schema |
-| `model_add_architecture` | Save and register a user architecture plugin |
+| `model_add_architecture` | Save and register a user architecture plugin (Python) |
 | `model_add_activation` | Register a custom activation function |
 | `model_generate_template` | Generate boilerplate for a new architecture plugin |
+
+## Model Extensibility — Hub Promotion (3 tools)
+
+| Tool | Description |
+|------|-------------|
+| `model_list_global_architectures` | List architecture plugins in the global hub |
+| `model_promote_architecture` | Promote a local plugin to the global hub |
+| `model_import_architecture` | Import a hub plugin into the local project |
+
+## Declarative Architecture Composition (6 tools)
+
+Compose architectures from known components via YAML specs — no Python code needed.
+
+| Tool | Description |
+|------|-------------|
+| `model_compose` | Create architecture from declarative spec (block + stack + augmentations) |
+| `model_from_template` | Fork an existing spec-based architecture with overrides |
+| `model_list_stack_patterns` | List wiring patterns (sequential, looped, encoder_decoder_skip, etc.) |
+| `model_list_block_types` | List block types (attention_block, prefix_memory_block) |
+| `model_preview_spec` | Dry-run: instantiate on CPU, return param count + structure |
+| `model_get_spec` | Retrieve the YAML spec for a family (null if code-defined) |
 
 ## Configuration (2 tools)
 

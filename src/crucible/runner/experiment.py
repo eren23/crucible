@@ -74,6 +74,7 @@ def _resolve_script(
     # Fallback: look for common training script names
     root = project_root or Path.cwd()
     candidates = [
+        root / "src" / "crucible" / "training" / f"{backend}_backend.py",
         root / f"train_{backend}.py",
         root / "train.py",
     ]

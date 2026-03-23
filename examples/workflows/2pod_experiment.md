@@ -138,7 +138,7 @@ crucible fleet provision --count 2 --name-prefix crucible-test
 crucible fleet bootstrap --train-shards 1
 
 # Enqueue 3 SOTA experiments
-crucible run enqueue --spec autoresearch/specs/next_batch_merged.json --limit 3
+crucible run enqueue --spec specs/next_batch_merged.json --limit 3
 
 # Dispatch to pods
 crucible run dispatch

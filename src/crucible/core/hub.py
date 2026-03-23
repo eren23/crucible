@@ -95,6 +95,18 @@ class HubStore:
         return self.hub_dir / "global"
 
     @property
+    def _architectures_dir(self) -> Path:
+        return self.hub_dir / "architectures"
+
+    @property
+    def _arch_plugins_dir(self) -> Path:
+        return self._architectures_dir / "plugins"
+
+    @property
+    def _arch_registry_path(self) -> Path:
+        return self._architectures_dir / "registry.jsonl"
+
+    @property
     def initialized(self) -> bool:
         return self._hub_yaml_path.exists()
 
@@ -160,6 +172,7 @@ class HubStore:
         hub_dir.mkdir(parents=True, exist_ok=True)
         (hub_dir / "tracks").mkdir(exist_ok=True)
         (hub_dir / "global").mkdir(exist_ok=True)
+        (hub_dir / "architectures" / "plugins").mkdir(parents=True, exist_ok=True)
 
         config = {
             "name": name or hub_dir.name,
@@ -670,6 +683,114 @@ class HubStore:
             promoted["track"] = to_track
 
         return self.store_finding(promoted, to_scope, to_track)
+
+    # ------------------------------------------------------------------
+    # Architecture storage
+    # ------------------------------------------------------------------
+
+    def store_architecture(
+        self,
+        name: str,
+        code: str,
+        source_project: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Store an architecture plugin in the hub for cross-project reuse.
+
+        Validates the name is a valid Python identifier and the code contains
+        a ``register_model`` call. Rejects duplicates.
+
+        Returns the metadata dict written to the registry ledger.
+        """
+        self._require_init()
+
+        if not name.isidentifier():
+            raise HubError(
+                f"Architecture name must be a valid Python identifier: {name!r}"
+            )
+
+        if "register_model" not in code:
+            raise HubError(
+                f"Architecture code must contain a register_model call: {name!r}"
+            )
+
+        # Check for duplicates in the registry ledger
+        existing = read_jsonl(self._arch_registry_path)
+        for entry in existing:
+            if entry.get("name") == name:
+                raise HubError(f"Architecture '{name}' already exists in the hub.")
+
+        # Write the plugin file
+        self._arch_plugins_dir.mkdir(parents=True, exist_ok=True)
+        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        plugin_path.write_text(code, encoding="utf-8")
+
+        # Build metadata record
+        record: dict[str, Any] = {
+            "name": name,
+            "added_at": utc_now_iso(),
+            "source_project": source_project,
+            "tags": tags or [],
+        }
+
+        # Append to the registry ledger
+        append_jsonl(self._arch_registry_path, record)
+
+        return record
+
+    def get_architecture(self, name: str) -> dict[str, Any] | None:
+        """Get architecture metadata by name from the registry ledger.
+
+        Returns None if no architecture with that name exists.
+        """
+        self._require_init()
+        entries = read_jsonl(self._arch_registry_path)
+        for entry in entries:
+            if entry.get("name") == name:
+                return entry
+        return None
+
+    def get_architecture_code(self, name: str) -> str | None:
+        """Read the plugin source code for an architecture.
+
+        Returns the file contents, or None if the plugin file doesn't exist.
+        """
+        self._require_init()
+        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        if not plugin_path.exists():
+            return None
+        return plugin_path.read_text(encoding="utf-8")
+
+    def list_architectures(self) -> list[dict[str, Any]]:
+        """List all architecture entries from the registry ledger.
+
+        Returns an empty list if the ledger doesn't exist.
+        """
+        self._require_init()
+        return read_jsonl(self._arch_registry_path)
+
+    def remove_architecture(self, name: str) -> bool:
+        """Remove an architecture from the hub.
+
+        Deletes the plugin file and removes the entry from the registry
+        ledger. Returns True if the architecture was found and removed,
+        False otherwise.
+        """
+        self._require_init()
+
+        # Remove from ledger
+        existing = read_jsonl(self._arch_registry_path)
+        updated = [e for e in existing if e.get("name") != name]
+        if len(updated) == len(existing):
+            return False
+        write_jsonl(self._arch_registry_path, updated)
+
+        # Delete the plugin file
+        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        if plugin_path.exists():
+            plugin_path.unlink()
+
+        return True
 
     # ------------------------------------------------------------------
     # Context loading

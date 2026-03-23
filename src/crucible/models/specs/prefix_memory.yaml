@@ -1,0 +1,27 @@
+# Prefix Memory LM — causal prefix memory with step scales
+# Equivalent to: src/crucible/models/architectures/prefix_memory.py
+name: prefix_memory
+version: 1
+base: tied_embedding_lm
+
+embedding:
+  vocab_size: "{VOCAB_SIZE:50304}"
+  model_dim: "{MODEL_DIM:512}"
+  tie_embeddings: "{TIE_EMBEDDINGS:true}"
+  tied_embed_init_std: "{TIED_EMBED_INIT_STD:0.02}"
+  logit_softcap: "{LOGIT_SOFTCAP:30.0}"
+  embed_bottleneck_dim: "{EMBED_BOTTLENECK_DIM:0}"
+  spectral_embed_init: "{SPECTRAL_EMBED_INIT:false}"
+
+block:
+  type: prefix_memory_block
+  dim: "{MODEL_DIM:512}"
+  params:
+    state_dim: "{STATE_DIM:512}"
+    mlp_mult: "{MLP_MULT:2}"
+    residual_variant: "{RESIDUAL_VARIANT:standard}"
+    activation: "{ACTIVATION:relu_sq}"
+
+stack:
+  pattern: prefix_memory_stack
+  num_layers: "{NUM_LAYERS:9}"

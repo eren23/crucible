@@ -24,3 +24,6 @@ class HubError(CrucibleError):
 
 class ApiError(CrucibleError):
     """API server startup, auth, or request handling failures."""
+
+class ComposerError(CrucibleError):
+    """Architecture composition spec loading, resolution, or build failures."""

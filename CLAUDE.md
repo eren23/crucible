@@ -12,11 +12,16 @@ src/crucible/
 ├── fleet/         # Provider-abstracted fleet management (RunPod, SSH)
 │   └── providers/ # Compute backends (runpod.py, ssh.py)
 ├── runner/        # Experiment execution, output parsing, presets, tracking, notes
-├── models/        # Model zoo — PyTorch transformer components + architectures
+├── training/      # Training backends (torch) — extracted from train_gpt.py
+├── models/        # Model zoo — components, architectures, declarative composer
+│   ├── components/     # Reusable blocks (Attention, MLP, MoE, RMSNorm, etc.)
+│   ├── architectures/  # 4 built-in architectures + plugin auto-discovery
+│   ├── specs/          # YAML architecture specs (declarative definitions)
+│   └── composer.py     # Declarative architecture composition engine
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools
+├── mcp/           # MCP server exposing fleet ops as Claude tools (64 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -155,12 +160,12 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (53 total)
+### MCP Tools (64 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
 
-Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`
+Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`
 
 **Tier 2 — Experiment Design:**
 `version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
@@ -168,8 +173,11 @@ Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`
 **Tier 3 — Research Context:**
 `context_push_finding`, `context_get_findings`, `get_research_briefing`, `note_add`, `note_search`, `note_get`
 
-**Tier 4 — Model Extensibility:**
+**Tier 4 — Model Extensibility (Code Plugins):**
 `model_list_families`, `model_add_architecture`, `model_generate_template`, `model_validate_config`
+
+**Tier 5 — Declarative Architecture Composition (Lego Blocks):**
+`model_compose`, `model_from_template`, `model_list_stack_patterns`, `model_list_block_types`, `model_preview_spec`, `model_get_spec`
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 
@@ -177,28 +185,40 @@ Plus: `get_fleet_status`, `get_queue_status`, `destroy_nodes`
 
 Crucible has a compact core with 4 built-in architectures (baseline, looped, convloop, prefix_memory). Everything else is a **plugin** — created by users or agents at runtime, never baked into core.
 
-**How plugins work:**
-- `src/crucible/models/user_architectures/` is the plugin directory (ships empty)
-- Any `.py` file dropped here is auto-discovered and imported on startup
-- Each plugin calls `register_model(name, factory_fn)` to register itself
-- The training script (`train_gpt.py`) falls back to the crucible registry for unknown families
-- Plugins get rsynced to pods automatically — they work on remote GPUs
+**Two ways to create architectures:**
 
-**How to create a plugin (via MCP):**
+**Option A — Declarative Composition (recommended, no code):**
+Compose from known components via YAML specs. Uses the `model_compose` MCP tool.
+1. `model_list_stack_patterns()` — see available wiring patterns (sequential, looped, encoder_decoder_skip, etc.)
+2. `model_list_block_types()` — see available blocks (attention_block, prefix_memory_block)
+3. `model_compose(name="my_arch", spec={block: {...}, stack: {...}, augmentations: {...}})` — creates `.crucible/architectures/my_arch.yaml`
+4. Or use `model_from_template(name="my_arch", base="baseline", overrides={...})` to fork an existing spec
+5. Run it: `provision_nodes` → `bootstrap_nodes` → enqueue with `MODEL_FAMILY: my_arch` → dispatch → collect
+
+Specs are YAML files — no Python written. The `ComposedArchitecture` class interprets them at runtime.
+
+**Option B — Python Plugin (for novel forward logic):**
+When you need custom forward passes that YAML can't express.
 1. `model_generate_template(name="two_tower")` — get boilerplate
 2. Edit the code to implement your architecture
-3. `model_add_architecture(name="two_tower", code="...")` — saves to `user_architectures/` and registers
-4. `version_save_design(name="two-tower-exp", config={"MODEL_FAMILY": "two_tower", ...})`
-5. Run it: `provision_nodes` → `bootstrap_nodes` → enqueue → dispatch → collect
+3. `model_add_architecture(name="two_tower", code="...")` — saves to `.crucible/architectures/two_tower.py` and registers
+4. Run it the same way
 
-**The contract:** A plugin must export a factory function that takes an `args` namespace (with `vocab_size`, `model_dim`, `num_layers`, etc.) and returns an `nn.Module`.
+**Plugin discovery** (3-tier with precedence):
+- **Builtin** (lowest): 4 core architectures in `src/crucible/models/architectures/`
+- **Global** (hub): `~/.crucible-hub/architectures/plugins/*.py` + `*.yaml`
+- **Local** (highest): `.crucible/architectures/*.py` + `*.yaml`
 
-**What stays in core:** baseline, looped, convloop, prefix_memory — these originate from the OpenAI Parameter Golf competition that Crucible was born from. They're reference implementations for that specific challenge, not prescriptive. The core architectures may evolve as Crucible grows beyond its competition roots. For new work, build plugins.
+Both `.py` and `.yaml` files are auto-discovered. `.py` takes precedence over `.yaml` at the same scope.
+
+**The contract:** A plugin (Python or YAML spec) produces an `nn.Module` from an `args` namespace (with `vocab_size`, `model_dim`, `num_layers`, etc.).
+
+**What stays in core:** baseline, looped, convloop, prefix_memory — reference implementations from Parameter Golf. For new work, compose or build plugins.
 
 ### Known Limitations
 
 - Only RunPod provider is fully tested (SSH provider is pass-through for manual hosts)
-- `train_gpt.py` requires `autoresearch/` modules (copied from parameter-golf)
+- `train_gpt.py` is a compatibility wrapper — actual training is in `src/crucible/training/`
 - Hub features require explicit initialization (`crucible hub init`)
 - W&B integration requires `wandb` package and `WANDB_API_KEY`
 

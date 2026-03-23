@@ -1,0 +1,73 @@
+[
+  {
+    "name": "baseline-control",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "3way-validation",
+    "tags": ["validation", "baseline", "control"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "ITERATIONS": "2000",
+      "QUANT_MODE": "int8"
+    }
+  },
+  {
+    "name": "sota-10l-int5-bigram-swa",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "3way-validation",
+    "tags": ["validation", "sota-replica", "int6-qat", "bigram-hash", "smear-gate", "ortho-init", "swa"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "10",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "BIGRAM_HASH_BUCKETS": "10240",
+      "ORTHO_INIT": "1",
+      "INT6_QAT": "1",
+      "QUANT_MODE": "int6",
+      "MUON_WEIGHT_DECAY": "0.04",
+      "ADAM_WEIGHT_DECAY": "0.04",
+      "SWA_INTERVAL": "50",
+      "EVAL_STRIDE": "64",
+      "ITERATIONS": "2000"
+    }
+  },
+  {
+    "name": "looped-augmented-12step",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "3way-validation",
+    "tags": ["validation", "composed-spec", "looped", "bigram-hash", "smear-gate", "lego-block"],
+    "config": {
+      "MODEL_FAMILY": "looped_augmented",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "RECURRENCE_STEPS": "12",
+      "SHARE_BLOCKS": "3",
+      "SMEAR_GATE": "1",
+      "BIGRAM_HASH": "1",
+      "BIGRAM_HASH_BUCKETS": "4096",
+      "ORTHO_INIT": "1",
+      "INT6_QAT": "1",
+      "QUANT_MODE": "int6",
+      "MUON_WEIGHT_DECAY": "0.04",
+      "SWA_INTERVAL": "50",
+      "EVAL_STRIDE": "64",
+      "ITERATIONS": "2000"
+    }
+  }
+]

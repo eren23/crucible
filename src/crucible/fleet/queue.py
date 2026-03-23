@@ -72,7 +72,7 @@ def enqueue_experiments(
                 "run_id": make_run_id(exp["name"]),
                 "tier": exp["tier"],
                 "backend": exp["backend"],
-                "config": exp["config"],
+                "config": dict(exp["config"]),
                 "tags": exp.get("tags", []),
                 "priority": exp.get("priority", 0),
                 "wave": exp.get("wave"),
@@ -228,5 +228,5 @@ def prepare_wave_experiments(
     prepared: list[dict[str, Any]] = []
     for exp in experiments:
         tags = list(dict.fromkeys([*exp.get("tags", []), *extra_tags]))
-        prepared.append({**exp, "tags": tags})
+        prepared.append({**exp, "tags": tags, "config": dict(exp.get("config", {}))})
     return prepared

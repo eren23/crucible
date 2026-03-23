@@ -65,13 +65,16 @@ class ProjectConfig:
     auto_commit_versions: bool = False
     research_state_file: str = "research_state.jsonl"
     sync_excludes: list[str] = field(default_factory=lambda: [
-        ".git", ".venv", "__pycache__", ".crucible", "logs", "data/datasets", "data/tokenizers",
+        ".git", ".venv", "__pycache__",
+        ".crucible/designs", ".crucible/context", ".crucible/notes",
+        ".crucible/store.jsonl", ".crucible/notes.jsonl",
+        "logs", "data/datasets", "data/tokenizers",
     ])
     results_file: str = "experiments.jsonl"
     fleet_results_file: str = "experiments_fleet.jsonl"
     logs_dir: str = "logs"
     nodes_file: str = "nodes.json"
-    runner_script: str = "autoresearch/run_experiment.py"
+    runner_script: str = "src/crucible/runner/run_remote.py"
     remote_results_file: str = "experiments.jsonl"
     timeout_map: dict[str, dict[str, int]] = field(default_factory=lambda: {
         "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},
@@ -161,7 +164,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         fleet_results_file=raw.get("fleet_results_file", "experiments_fleet.jsonl"),
         logs_dir=raw.get("logs_dir", "logs"),
         nodes_file=raw.get("nodes_file", "nodes.json"),
-        runner_script=raw.get("runner_script", "autoresearch/run_experiment.py"),
+        runner_script=raw.get("runner_script", "src/crucible/runner/run_remote.py"),
         remote_results_file=raw.get("remote_results_file", "experiments.jsonl"),
         timeout_map=raw.get("timeout_map", {
             "torch": {"smoke": 120, "proxy": 2400, "medium": 4800, "promotion": 9600, "overnight": 5400},

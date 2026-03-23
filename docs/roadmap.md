@@ -9,7 +9,7 @@ The canonical roadmap lives at [ROADMAP.md](../ROADMAP.md) in the project root. 
 
 ## Current: v0.2.0-alpha
 
-**What's working:** Full fleet loop (provision → bootstrap → dispatch → collect → destroy), 53 MCP tools, hub system, notes, research briefing, REST API, architecture plugin system, W&B bridge, interactive TUI.
+**What's working:** Full fleet loop (provision → bootstrap → dispatch → collect → destroy), 64 MCP tools, hub system, notes, research briefing, REST API, declarative architecture composition + Python plugins, training module (extracted from train_gpt.py), W&B bridge, interactive TUI.
 
 **What's next:**
 - Test coverage push (fleet, architectures, components, runner)

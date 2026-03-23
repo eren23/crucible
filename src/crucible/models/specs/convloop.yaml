@@ -1,0 +1,43 @@
+# ConvLoop Transformer — compress to core_dim, loop, expand back
+# Equivalent to: src/crucible/models/architectures/convloop.py
+name: convloop
+version: 1
+base: tied_embedding_lm
+
+embedding:
+  vocab_size: "{VOCAB_SIZE:50304}"
+  model_dim: "{MODEL_DIM:512}"
+  tie_embeddings: "{TIE_EMBEDDINGS:true}"
+  tied_embed_init_std: "{TIED_EMBED_INIT_STD:0.02}"
+  logit_softcap: "{LOGIT_SOFTCAP:30.0}"
+  embed_bottleneck_dim: "{EMBED_BOTTLENECK_DIM:0}"
+  spectral_embed_init: "{SPECTRAL_EMBED_INIT:false}"
+
+block:
+  type: attention_block
+  dim: "{STATE_DIM:256}"
+  params:
+    num_heads: "{NUM_HEADS:8}"
+    num_kv_heads: "{NUM_KV_HEADS:4}"
+    mlp_mult: "{MLP_MULT:2}"
+    rope_base: "{ROPE_BASE:10000.0}"
+    qk_gain_init: "{QK_GAIN_INIT:1.0}"
+    attention_variant: "{ATTENTION_VARIANT:standard}"
+    residual_variant: "{RESIDUAL_VARIANT:standard}"
+    activation: "{ACTIVATION:relu_sq}"
+
+stack:
+  pattern: looped
+  logical_steps: "{RECURRENCE_STEPS:0}"
+  unique_blocks: "{SHARE_BLOCKS:1}"
+
+transform:
+  pre_stack:
+    type: compress
+    in_dim: "{MODEL_DIM:512}"
+    out_dim: "{STATE_DIM:256}"
+  post_stack:
+    type: expand
+    in_dim: "{STATE_DIM:256}"
+    out_dim: "{MODEL_DIM:512}"
+    residual: true
