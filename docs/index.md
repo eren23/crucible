@@ -18,8 +18,8 @@ Crucible combines LLM-driven hypothesis generation with fleet orchestration, ver
 ### Versioned Experiment Designs
 Every experiment design is a human-readable YAML file tracked with full version history. Agents iterate on designs, compare versions, and promote winners — all through MCP tools or the interactive TUI.
 
-### 53 MCP Tools
-Agents interact with Crucible over the Model Context Protocol. Browse experiments, generate hypotheses, design batches, save versioned configs, and trigger fleet runs — all without leaving the conversation.
+### 64 MCP Tools
+Agents interact with Crucible over the Model Context Protocol. Browse experiments, generate hypotheses, design batches, compose architectures declaratively, and trigger fleet runs — all without leaving the conversation.
 
 ### Interactive TUI
 A Textual-powered terminal app for browsing designs, viewing diffs, cycling statuses, and exploring research context. Launch with `crucible tui`.
@@ -62,11 +62,12 @@ src/crucible/
   core/          Config, I/O, types, logging, version store
   fleet/         Provider-abstracted fleet (RunPod, SSH)
   runner/        Experiment execution, output parsing, presets
-  models/        Model zoo — PyTorch transformer components
+  training/      Training backends (torch) — factored from train_gpt.py
+  models/        Model zoo — components, architectures, declarative composer
   researcher/    LLM-driven autonomous research loop
   analysis/      Leaderboard, sensitivity, Pareto frontier
   data/          Manifest-driven HuggingFace data pipeline
-  mcp/           MCP server (53 tools for Claude agents)
+  mcp/           MCP server (64 tools for Claude agents)
   tui/           Interactive terminal UI (Textual)
   cli/           CLI entry points
 ```
@@ -77,7 +78,7 @@ src/crucible/
 
 - [Getting Started](getting-started) — Installation, project setup, first experiment
 - [TUI Guide](tui) — Interactive design browser walkthrough
-- [MCP Tools Reference](mcp-tools) — All 53 tools with schemas
+- [MCP Tools Reference](mcp-tools) — All 64 tools with schemas
 - [Architecture](architecture) — System design and module overview
 - [Plugins](plugins) — How to write architecture plugins
 - [Roadmap](roadmap) — What's done, what's next

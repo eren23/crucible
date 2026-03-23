@@ -222,10 +222,13 @@ class TestStoreConsistency:
 # ---------------------------------------------------------------------------
 
 class TestSyncExcludes:
-    def test_crucible_dir_in_default_excludes(self):
+    def test_crucible_subdirs_in_default_excludes(self):
+        """Crucible data subdirs are excluded but architectures/ is synced to pods."""
         from crucible.core.config import ProjectConfig
         config = ProjectConfig()
-        assert ".crucible" in config.sync_excludes
+        assert ".crucible/designs" in config.sync_excludes
+        assert ".crucible/context" in config.sync_excludes
+        assert ".crucible/store.jsonl" in config.sync_excludes
 
 
 # ---------------------------------------------------------------------------

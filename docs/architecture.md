@@ -13,13 +13,16 @@ src/crucible/
   fleet/          Provider-abstracted fleet management
     providers/    RunPod, SSH backends
   runner/         Experiment execution, output parsing, presets, tracking, notes
-  models/         Model zoo — PyTorch transformer components
-    architectures/  baseline, looped, convloop, prefix_memory
-    components/     attention, MLP, normalization, embeddings
+  training/       Training backends (torch_backend, hyperparams, muon, quantization, etc.)
+  models/         Model zoo — components, architectures, declarative composer
+    architectures/  4 built-in architectures + plugin auto-discovery (.py + .yaml)
+    components/     Attention, MLP, MoE, RMSNorm, SmearGate, BigramHash, etc.
+    specs/          YAML architecture specs (declarative definitions)
+    composer.py     Declarative composition engine (YAML spec → nn.Module)
   researcher/     LLM-driven autonomous research loop, briefing
   analysis/       Leaderboard, sensitivity, Pareto frontier
   data/           Manifest-driven HuggingFace data pipeline
-  mcp/            MCP server (53 tools)
+  mcp/            MCP server (64 tools)
   api/            REST API server (FastAPI, 10 endpoints)
   tui/            Interactive terminal UI (Textual)
   cli/            CLI entry points
@@ -94,6 +97,7 @@ CrucibleError
   StoreError        Version store failures
   HubError          Hub sync, track, finding promotion failures
   ApiError          REST API server failures
+  ComposerError     Declarative architecture composition failures
 ```
 
 ## Model Zoo

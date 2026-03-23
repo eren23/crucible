@@ -32,6 +32,35 @@ BOOTSTRAP_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
+# Global plugin materialization
+# ---------------------------------------------------------------------------
+
+def _materialize_global_architectures(project_root: Path) -> None:
+    """Copy hub architecture plugins into .crucible/architectures/ so they get rsynced to pods."""
+    import shutil
+    try:
+        from crucible.core.hub import HubStore
+        hub_dir = HubStore.discover()
+        if hub_dir is None:
+            return
+        plugins_dir = hub_dir / "architectures" / "plugins"
+        if not plugins_dir.is_dir():
+            return
+        target_dir = project_root / ".crucible" / "architectures"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for py_file in plugins_dir.glob("*.py"):
+            if py_file.name.startswith("_"):
+                continue
+            dest = target_dir / f"_hub_{py_file.name}"
+            src_content = py_file.read_text(encoding="utf-8")
+            if dest.exists() and dest.read_text(encoding="utf-8") == src_content:
+                continue
+            shutil.copy2(py_file, dest)
+    except Exception:
+        pass  # Best-effort: don't fail bootstrap if hub is unavailable
+
+
+# ---------------------------------------------------------------------------
 # Single-node bootstrap
 # ---------------------------------------------------------------------------
 
@@ -64,6 +93,7 @@ def bootstrap_node(
     5. download dataset (unless *skip_data*)
     6. record git sha
     """
+    _materialize_global_architectures(project_root)
     sync_repo(node, project_root=project_root, sync_excludes=sync_excludes)
     sync_env_file(node, project_root=project_root)
 

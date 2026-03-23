@@ -35,7 +35,7 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-SPEC_FILE = "autoresearch/specs/next_batch_merged.json"
+SPEC_FILE = "specs/next_batch_merged.json"
 NUM_PODS = 2
 NUM_EXPERIMENTS = 3  # First 3 from the spec
 NAME_PREFIX = "crucible-test"

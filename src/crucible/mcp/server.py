@@ -630,7 +630,13 @@ TOOLS: list[Tool] = [
     Tool(
         name="model_list_families",
         description="List all registered model architecture families (e.g. baseline, looped, convloop, prefix_memory).",
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "detailed": {"type": "boolean", "description": "If true, include source metadata for each family", "default": False},
+            },
+            "additionalProperties": False,
+        },
     ),
     Tool(
         name="model_list_activations",
@@ -674,6 +680,7 @@ TOOLS: list[Tool] = [
             "properties": {
                 "name": {"type": "string", "description": "Family name (snake_case)."},
                 "code": {"type": "string", "description": "Full Python source that defines and registers the architecture."},
+                "scope": {"type": "string", "description": "Where to store: 'local' (project) or 'global' (hub)", "default": "local", "enum": ["local", "global"]},
             },
             "required": ["name", "code"],
             "additionalProperties": False,
@@ -704,6 +711,149 @@ TOOLS: list[Tool] = [
             "required": ["name"],
             "additionalProperties": False,
         },
+    ),
+    # -----------------------------------------------------------------------
+    # Plugin promotion / import tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="model_list_global_architectures",
+        description="List architecture plugins stored in the global hub (~/.crucible-hub/).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_promote_architecture",
+        description="Promote a project-local architecture plugin to the global hub for cross-project reuse.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin family name (must exist in user_architectures/)."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_import_architecture",
+        description="Import a global hub architecture into the project's user_architectures/ directory.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Architecture name to import from the hub."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Composition tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="model_compose",
+        description="Create architecture from declarative YAML spec. Validates, saves, and registers — no Python code written.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Architecture family name (valid Python identifier, snake_case)."},
+                "spec": {
+                    "type": "object",
+                    "description": "Architecture spec dict with block, stack, embedding, etc. See baseline.yaml for format.",
+                    "properties": {
+                        "version": {"type": "integer", "default": 1},
+                        "base": {"type": "string", "default": "tied_embedding_lm"},
+                        "embedding": {"type": "object", "description": "Embedding layer configuration."},
+                        "block": {"type": "object", "description": "Block type and parameters (type, dim, params)."},
+                        "stack": {"type": "object", "description": "Stack wiring pattern and layer config (pattern, num_layers, etc.)."},
+                        "transform": {"type": "object", "description": "Optional pre/post stack transforms."},
+                        "init": {"type": "object", "description": "Optional initialization config (e.g. ortho)."},
+                        "augmentations": {"type": "object", "description": "Optional augmentations (smear_gate, bigram_hash, etc.)."},
+                    },
+                },
+                "scope": {"type": "string", "description": "Where to store: 'local' (project) or 'global' (hub).", "default": "local", "enum": ["local", "global"]},
+            },
+            "required": ["name", "spec"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_from_template",
+        description="Fork an existing spec-based architecture with overrides to create a new family.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "New architecture family name (valid Python identifier)."},
+                "base": {"type": "string", "description": "Existing family name to fork from (must have a YAML spec)."},
+                "overrides": {"type": "object", "description": "Dict of overrides to deep-merge into the base spec.", "default": {}},
+            },
+            "required": ["name", "base"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_list_stack_patterns",
+        description="List available stack wiring patterns for architecture composition (sequential, encoder_decoder_skip, looped, etc.).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_list_block_types",
+        description="List available block types for architecture composition (attention_block, prefix_memory_block, etc.).",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="model_preview_spec",
+        description="Dry-run a spec with given config: instantiate on CPU and return param count + layer structure without GPU.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "description": "Architecture spec dict (same format as model_compose). Must include 'name'.",
+                },
+                "config": {
+                    "type": "object",
+                    "description": "Config overrides (MODEL_DIM, NUM_LAYERS, etc.) to resolve template variables.",
+                    "additionalProperties": {"type": "string"},
+                    "default": {},
+                },
+            },
+            "required": ["spec"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="model_get_spec",
+        description="Get the YAML spec for a model family. Returns the spec dict if spec-based, or null if code-defined.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "family": {"type": "string", "description": "Model family name."},
+            },
+            "required": ["family"],
+            "additionalProperties": False,
+        },
+    ),
+    # -----------------------------------------------------------------------
+    # Config tools
+    # -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Queue management tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="cancel_experiment",
+        description="Cancel queued or running experiments by name, run_id, or wave. Marks them as failed/cancelled.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Cancel a specific run by ID."},
+                "experiment_name": {"type": "string", "description": "Cancel all runs with this experiment name."},
+                "wave": {"type": "string", "description": "Cancel all runs in this wave."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="clear_stale_queue",
+        description="Mark experiments as failed if assigned to nodes that no longer exist in the fleet inventory.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     # -----------------------------------------------------------------------
     # Config tools

@@ -5,160 +5,137 @@ title: Architecture Plugins
 
 # Architecture Plugins
 
-Crucible ships with 4 built-in transformer architectures (baseline, looped, convloop, prefix_memory). Everything else is a **plugin** — a Python file you drop into `models/user_architectures/`.
+Crucible ships with 4 built-in transformer architectures (baseline, looped, convloop, prefix_memory). Everything else is a **plugin** — created declaratively via YAML specs or as Python code.
 
-## How It Works
+## Two Ways to Create Architectures
 
-1. Any `.py` file in `src/crucible/models/user_architectures/` is auto-discovered on import
-2. Each plugin calls `register_model(name, factory_fn)` to register itself
-3. The training script falls back to the Crucible registry for unknown `MODEL_FAMILY` values
-4. Plugins get rsynced to pods automatically — they work on remote GPUs
+### Option A: Declarative Composition (Recommended)
 
-## Writing a Plugin
+Compose from known components via YAML specs — no Python code needed. Uses the `model_compose` MCP tool.
 
-### The Contract
+**Available building blocks:**
 
-Your plugin must export a **factory function** that:
-- Takes an `args` namespace (with `vocab_size`, `model_dim`, `num_layers`, etc.)
-- Returns an `nn.Module` that extends `TiedEmbeddingLM`
+| Stack Patterns | Block Types | Augmentations |
+|---------------|-------------|---------------|
+| `sequential` — linear pass | `attention_block` — standard transformer | `smear_gate` — previous-token gating |
+| `encoder_decoder_skip` — U-Net skips (baseline) | `prefix_memory_block` — bounded memory | `bigram_hash` — token-pair embeddings |
+| `looped` — weight-shared iteration | | `trigram_hash` — token-triple embeddings |
+| `prefix_memory_stack` — sequential + step scales | | |
 
-### Available Args
+**MCP workflow:**
 
-The training script provides these attributes on the `args` namespace:
-
-| Arg | Type | Description |
-|-----|------|-------------|
-| `vocab_size` | int | Vocabulary size |
-| `model_dim` | int | Model embedding dimension |
-| `num_layers` | int | Number of transformer layers |
-| `num_heads` | int | Number of attention heads |
-| `num_kv_heads` | int | Number of key/value heads (for GQA) |
-| `mlp_mult` | int | MLP expansion factor |
-| `rope_base` | float | RoPE base frequency |
-| `qk_gain_init` | float | QK initialization gain |
-| `tie_embeddings` | bool | Whether to tie input/output embeddings |
-| `tied_embed_init_std` | float | Embedding initialization std |
-| `logit_softcap` | float | Logit soft-capping value |
-| `embed_bottleneck_dim` | int | Embedding bottleneck (0 = none) |
-| `attention_variant` | str | Attention variant name |
-| `residual_variant` | str | Residual connection variant |
-| `model_family` | str | The family name (your plugin's name) |
-| `activation` | str | Activation function name |
-
-Additional args may be available depending on the experiment config — use `getattr(args, 'my_param', default)` for custom parameters.
-
-### Available Components
-
-Reuse these from `crucible.models.components`:
-
-```python
-from crucible.models.components.attention import Block      # Full transformer block
-from crucible.models.components.mlp import MLP              # Feed-forward network
-from crucible.models.components.norm import RMSNorm          # RMS normalization
-from crucible.models.components.linear import CastedLinear   # Float32-cast linear
-from crucible.models.components.conv import DepthwiseConv1D  # Causal convolution
-from crucible.models.components.gate import SmearGate        # Gated residual
-from crucible.models.components.moe import MoELayer          # Mixture of Experts
-from crucible.models.components.rotary import Rotary         # RoPE embeddings
-from crucible.models.components.memory import CausalPrefixMemory  # Bounded memory
+```
+1. model_list_stack_patterns()     → see available wiring patterns
+2. model_list_block_types()        → see available blocks
+3. model_compose(name, spec)       → create .crucible/architectures/my_arch.yaml
+4. design_enqueue_batch(...)       → run with MODEL_FAMILY: my_arch
 ```
 
-### Example: Two-Tower Architecture
+**Example: Looped + Augmented (novel hybrid)**
 
-See `src/crucible/models/user_architectures/example_two_tower.py` for a complete working example.
-
-```python
-"""Two parallel transformer towers with gated fusion."""
-from __future__ import annotations
-from typing import Any
-import torch
-from torch import Tensor, nn
-
-from crucible.models.base import TiedEmbeddingLM
-from crucible.models.registry import register_model
-from crucible.models.components.attention import Block
-
-
-class TwoTowerLM(TiedEmbeddingLM):
-    def __init__(self, vocab_size, model_dim, num_layers, num_heads,
-                 num_kv_heads, mlp_mult, rope_base, qk_gain_init,
-                 tie_embeddings, tied_embed_init_std, logit_softcap, **kw):
-        super().__init__(vocab_size, model_dim, tie_embeddings,
-                         tied_embed_init_std, logit_softcap)
-        self.tower_a = nn.ModuleList([
-            Block(model_dim, num_heads, num_kv_heads, mlp_mult,
-                  rope_base, qk_gain_init)
-            for _ in range(num_layers)
-        ])
-        self.tower_b = nn.ModuleList([
-            Block(model_dim, num_heads, num_kv_heads, mlp_mult,
-                  rope_base, qk_gain_init)
-            for _ in range(num_layers)
-        ])
-        self.fusion_gate = nn.Parameter(torch.zeros(model_dim))
-
-    def hidden(self, input_ids, lora=None):
-        x = self.embed_tokens(input_ids)
-        a, b = x, x
-        for block in self.tower_a:
-            a = block(a, x)
-        for block in self.tower_b:
-            b = block(b, x)
-        gate = torch.sigmoid(self.fusion_gate).to(dtype=x.dtype)
-        return gate * a + (1 - gate) * b
-
-
-def _build(args):
-    return TwoTowerLM(
-        vocab_size=args.vocab_size, model_dim=args.model_dim,
-        num_layers=args.num_layers, num_heads=args.num_heads,
-        num_kv_heads=args.num_kv_heads, mlp_mult=args.mlp_mult,
-        rope_base=args.rope_base, qk_gain_init=args.qk_gain_init,
-        tie_embeddings=args.tie_embeddings,
-        tied_embed_init_std=args.tied_embed_init_std,
-        logit_softcap=args.logit_softcap,
-    )
-
-
-register_model("two_tower", _build)
-```
-
-## Using a Plugin in Experiments
-
-Once your plugin is in `user_architectures/`, use it in experiment designs:
+The built-in `looped` architecture has no augmentations. Compose a hybrid that adds BigramHash + SmearGate:
 
 ```yaml
-# .crucible/designs/my-two-tower/current.yaml
-config:
-  MODEL_FAMILY: "two_tower"
-  NUM_LAYERS: "6"
-  MODEL_DIM: "512"
-  NUM_HEADS: "8"
-  NUM_KV_HEADS: "4"
+# .crucible/architectures/looped_augmented.yaml
+name: looped_augmented
+version: 1
+base: tied_embedding_lm
+
+embedding:
+  vocab_size: "{VOCAB_SIZE:50304}"
+  model_dim: "{MODEL_DIM:512}"
+  tie_embeddings: "{TIE_EMBEDDINGS:true}"
+  tied_embed_init_std: "{TIED_EMBED_INIT_STD:0.02}"
+  logit_softcap: "{LOGIT_SOFTCAP:30.0}"
+
+block:
+  type: attention_block
+  dim: "{MODEL_DIM:512}"
+  params:
+    num_heads: "{NUM_HEADS:8}"
+    num_kv_heads: "{NUM_KV_HEADS:4}"
+    mlp_mult: "{MLP_MULT:2}"
+    activation: "{ACTIVATION:relu_sq}"
+
+stack:
+  pattern: looped
+  logical_steps: "{RECURRENCE_STEPS:12}"
+  unique_blocks: "{SHARE_BLOCKS:3}"
+
+augmentations:
+  smear_gate:
+    enabled: "{SMEAR_GATE:true}"
+    dim: "{MODEL_DIM:512}"
+  bigram_hash:
+    enabled: "{BIGRAM_HASH:true}"
+    vocab_size: "{VOCAB_SIZE:50304}"
+    num_buckets: "{BIGRAM_HASH_BUCKETS:4096}"
+    embed_dim: "{BIGRAM_HASH_EMBED_DIM:128}"
+    model_dim: "{MODEL_DIM:512}"
 ```
 
-Or via MCP:
+Template variables like `"{VOCAB_SIZE:50304}"` resolve from experiment config env vars at build time.
+
+**Forking existing specs:**
+
+Use `model_from_template` to fork an existing architecture and override specific fields:
+
 ```json
 {
-  "tool": "version_save_design",
+  "tool": "model_from_template",
   "arguments": {
-    "name": "two-tower-exp",
-    "config": {"MODEL_FAMILY": "two_tower", "NUM_LAYERS": "6"},
-    "hypothesis": "Two parallel towers may capture different feature patterns"
+    "name": "wide_baseline",
+    "base": "baseline",
+    "overrides": {
+      "block": { "params": { "mlp_mult": "{MLP_MULT:4}" } }
+    }
   }
 }
 ```
 
-## MCP Tools for Plugins
+### Option B: Python Plugin (for novel forward logic)
 
-- `model_generate_template(name="my_arch")` — Generate boilerplate for a new plugin
-- `model_add_architecture(name="my_arch", code="...")` — Save code to user_architectures/ and register
-- `model_list_families()` — See all registered families (built-in + plugins)
-- `model_validate_config(family="my_arch", config={...})` — Validate config against schema
+When you need custom forward passes that YAML can't express.
+
+1. `model_generate_template(name="my_arch")` — get boilerplate
+2. Edit the code to implement your architecture
+3. `model_add_architecture(name="my_arch", code="...")` — saves to `.crucible/architectures/my_arch.py`
+
+**The contract:** A Python plugin must call `register_model(name, factory_fn)` where the factory takes an `args` namespace and returns an `nn.Module`.
+
+**Available components to reuse:**
+
+```python
+from crucible.models.components.attention import Block
+from crucible.models.components.mlp import MLP
+from crucible.models.components.norm import RMSNorm
+from crucible.models.components.linear import CastedLinear
+from crucible.models.components.conv import DepthwiseConv1D
+from crucible.models.components.gate import SmearGate
+from crucible.models.components.moe import MoELayer
+from crucible.models.components.rotary import Rotary
+from crucible.models.components.memory import CausalPrefixMemory
+from crucible.models.components.hash_embed import BigramHash, TrigramHash
+```
+
+See `src/crucible/models/user_architectures/example_two_tower.py` for a complete working example.
+
+## Plugin Discovery (3-tier precedence)
+
+| Tier | Location | Precedence |
+|------|----------|-----------|
+| **Builtin** | `src/crucible/models/architectures/` | Lowest |
+| **Global (hub)** | `~/.crucible-hub/architectures/plugins/` | Medium |
+| **Local (project)** | `.crucible/architectures/` | Highest |
+
+Both `.py` and `.yaml` files are auto-discovered. At the same scope, `.py` takes precedence over `.yaml`.
+
+**Hub promotion:** Use `model_promote_architecture` to share a local plugin across projects.
+**Hub import:** Use `model_import_architecture` to pull a hub plugin into your project.
 
 ## Important Notes
 
-- **Plugins sync to pods automatically** — `user_architectures/` is not in `sync_excludes`
-- **Built-in families take priority** — If your plugin name conflicts with baseline/looped/convloop/prefix_memory, the built-in wins (they're hardcoded in the training script dispatch)
-- **Plugin errors propagate** — Syntax errors or import failures surface as real tracebacks, not silent fallbacks
-- **No core modifications needed** — Never add architectures to `models/architectures/`. Use `user_architectures/` exclusively.
+- **Plugins sync to pods automatically** — `.crucible/architectures/` is included in rsync
+- **Higher precedence overrides lower** — a local plugin named `baseline` overrides the built-in
+- **YAML specs need no torch** — they're interpreted at runtime by the `ComposedArchitecture` class
+- **Python plugin errors propagate** — syntax errors surface as real tracebacks

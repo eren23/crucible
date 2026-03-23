@@ -175,8 +175,10 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
     """Push local code to nodes via rsync."""
     config = _get_config()
     try:
+        from crucible.fleet.bootstrap import _materialize_global_architectures
         from crucible.fleet.manager import FleetManager
 
+        _materialize_global_architectures(config.project_root)
         fleet = FleetManager(config)
         # Simple sync implementation
         from crucible.fleet.inventory import load_nodes
@@ -1406,6 +1408,22 @@ def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
 def model_list_families(args: dict[str, Any]) -> dict[str, Any]:
     """List all registered model architecture families."""
     try:
+        detailed = args.get("detailed", False)
+        if detailed:
+            from crucible.models.registry import list_families_detailed
+            families = list_families_detailed()
+            # Enrich with kind: "spec" if a .yaml spec exists, else "code"
+            config = _get_config()
+            specs_dir = config.project_root / "src" / "crucible" / "models" / "specs"
+            arch_dir = config.project_root / config.store_dir / "architectures"
+            for entry in families:
+                name = entry["name"]
+                has_spec = (
+                    (specs_dir / f"{name}.yaml").exists()
+                    or (arch_dir / f"{name}.yaml").exists()
+                )
+                entry["kind"] = "spec" if has_spec else "code"
+            return {"families": families}
         from crucible.models.registry import list_families
         return {"families": list_families()}
     except ImportError:
@@ -1469,6 +1487,21 @@ def model_validate_config(args: dict[str, Any]) -> dict[str, Any]:
             errors.append(f"Unknown ACTIVATION: {activation}. Available: {sorted(ACTIVATIONS.keys())}")
     except ImportError:
         warnings.append("torch not installed; cannot validate ACTIVATION")
+    # Validate spec-based families: check that template variables have values or defaults
+    try:
+        spec_dict = _load_spec_dict(family)
+        if spec_dict is not None:
+            import re
+            var_pattern = re.compile(r"\{([A-Z_][A-Z0-9_]*)(?::([^}]*))?\}")
+            missing_vars: list[str] = []
+            _scan_spec_vars(spec_dict, var_pattern, config, missing_vars)
+            if missing_vars:
+                warnings.append(
+                    f"Spec-based family {family!r} has template variables without defaults "
+                    f"or config values: {missing_vars}"
+                )
+    except Exception:
+        pass  # Don't fail validation for spec introspection errors
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
@@ -1476,18 +1509,43 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
     """Write and register a new architecture family at runtime."""
     name = args["name"]
     code = args["code"]
+    scope = args.get("scope", "local")
     if "register_model" not in code:
         return {"error": "Code must call register_model() to register the family."}
-    import importlib
-    from pathlib import Path
-    arch_dir = Path(__file__).parent.parent / "models" / "user_architectures"
+
+    if scope == "global":
+        try:
+            from crucible.core.hub import HubStore
+            hub = HubStore()
+            result = hub.store_architecture(
+                name=name,
+                code=code,
+                source_project=_get_config().name if _get_config else "",
+            )
+            # Also import into current process
+            try:
+                from crucible.models.registry import load_global_architectures
+                load_global_architectures(hub._arch_plugins_dir)
+            except Exception:
+                pass
+            from crucible.models.registry import list_families
+            return {"status": "registered", "scope": "global", "family": name, "families": list_families()}
+        except Exception as exc:
+            return {"error": f"Failed to store global architecture: {exc}"}
+
+    import importlib.util
+    config = _get_config()
+    arch_dir = config.project_root / config.store_dir / "architectures"
     arch_dir.mkdir(parents=True, exist_ok=True)
     file_path = arch_dir / f"{name}.py"
     file_path.write_text(code, encoding="utf-8")
     try:
-        importlib.import_module(f"crucible.models.user_architectures.{name}")
+        spec = importlib.util.spec_from_file_location(f"_crucible_local_arch_{name}", file_path)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
         from crucible.models.registry import list_families
-        return {"status": "registered", "family": name, "families": list_families()}
+        return {"status": "registered", "scope": "local", "family": name, "families": list_families()}
     except Exception as e:
         file_path.unlink(missing_ok=True)
         return {"error": f"Failed to import: {e}"}
@@ -1560,6 +1618,386 @@ def model_generate_template(args: dict[str, Any]) -> dict[str, Any]:
         f'register_model("{name}", _build_{name})',
     ]
     return {"template": "\n".join(lines), "usage": f"Call model_add_architecture with name='{name}' and code=<this>"}
+
+
+# ---------------------------------------------------------------------------
+# Plugin promotion / import tools
+# ---------------------------------------------------------------------------
+
+
+def model_list_global_architectures(args: dict[str, Any]) -> dict[str, Any]:
+    """List architecture plugins stored in the global hub."""
+    try:
+        from crucible.core.hub import HubStore
+        hub = HubStore()
+        return {"architectures": hub.list_architectures()}
+    except Exception as exc:
+        return {"architectures": [], "note": str(exc)}
+
+
+def model_promote_architecture(args: dict[str, Any]) -> dict[str, Any]:
+    """Promote a project-local architecture plugin to the global hub."""
+    name = args["name"]
+    config = _get_config()
+    plugin_path = config.project_root / config.store_dir / "architectures" / f"{name}.py"
+    if not plugin_path.exists():
+        return {"error": f"Local plugin {name!r} not found at {plugin_path}"}
+    code = plugin_path.read_text(encoding="utf-8")
+    try:
+        from crucible.core.hub import HubStore
+        hub = HubStore()
+        result = hub.store_architecture(name=name, code=code, source_project=config.name)
+        return {"status": "promoted", "family": name, "metadata": result}
+    except Exception as exc:
+        return {"error": f"Promotion failed: {exc}"}
+
+
+def model_import_architecture(args: dict[str, Any]) -> dict[str, Any]:
+    """Import a global hub architecture into the project's user_architectures/ directory."""
+    name = args["name"]
+    try:
+        from crucible.core.hub import HubStore
+        hub = HubStore()
+        code = hub.get_architecture_code(name)
+        if code is None:
+            return {"error": f"Architecture {name!r} not found in hub"}
+        config = _get_config()
+        target = config.project_root / config.store_dir / "architectures" / f"{name}.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(code, encoding="utf-8")
+        # Import into current process
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(f"user_arch_{name}", target)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+        except Exception:
+            pass
+        from crucible.models.registry import list_families
+        return {"status": "imported", "family": name, "path": str(target), "families": list_families()}
+    except Exception as exc:
+        return {"error": f"Import failed: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Composition tools — helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_spec_dict(family: str) -> dict | None:
+    """Try to load a YAML spec dict for *family* from specs/ or .crucible/architectures/.
+
+    Returns the parsed dict or None if no spec file exists.
+    """
+    import yaml
+
+    config = _get_config()
+    specs_dir = config.project_root / "src" / "crucible" / "models" / "specs"
+    arch_dir = config.project_root / config.store_dir / "architectures"
+    for directory in (specs_dir, arch_dir):
+        path = directory / f"{family}.yaml"
+        if path.exists():
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                return data
+    return None
+
+
+def _scan_spec_vars(
+    obj: Any,
+    var_pattern: Any,
+    config: dict,
+    missing: list[str],
+) -> None:
+    """Recursively scan a spec dict for unresolved template vars without defaults."""
+    import re
+
+    if isinstance(obj, str):
+        for m in var_pattern.finditer(obj):
+            var_name, default = m.group(1), m.group(2)
+            if default is None and var_name not in config:
+                if var_name not in missing:
+                    missing.append(var_name)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _scan_spec_vars(v, var_pattern, config, missing)
+    elif isinstance(obj, list):
+        for item in obj:
+            _scan_spec_vars(item, var_pattern, config, missing)
+
+
+def _deep_merge(base: dict, overrides: dict) -> dict:
+    """Recursively merge *overrides* into a copy of *base*."""
+    import copy
+    result = copy.deepcopy(base)
+    for key, value in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Composition tools
+# ---------------------------------------------------------------------------
+
+
+def model_compose(args: dict[str, Any]) -> dict[str, Any]:
+    """Create architecture from declarative YAML spec. No Python code written."""
+    import yaml
+    from pathlib import Path as _Path
+
+    name = args.get("name")
+    spec = args.get("spec")
+    scope = args.get("scope", "local")
+
+    if not name:
+        return {"error": "name is required"}
+    if not spec or not isinstance(spec, dict):
+        return {"error": "spec must be a non-empty dict with block, stack, etc."}
+
+    # Validate name is a valid Python identifier
+    if not name.isidentifier():
+        return {"error": f"name must be a valid Python identifier, got: {name!r}"}
+
+    # Build full spec dict
+    spec_dict = {
+        "name": name,
+        "version": spec.get("version", 1),
+        "base": spec.get("base", "tied_embedding_lm"),
+        "embedding": spec.get("embedding", {}),
+        "block": spec.get("block", {}),
+        "stack": spec.get("stack", {}),
+    }
+    if "transform" in spec:
+        spec_dict["transform"] = spec["transform"]
+    if "init" in spec:
+        spec_dict["init"] = spec["init"]
+    if "augmentations" in spec:
+        spec_dict["augmentations"] = spec["augmentations"]
+
+    # Validate using ArchitectureSpec.from_dict
+    try:
+        from crucible.models.composer import ArchitectureSpec
+        ArchitectureSpec.from_dict(spec_dict)
+    except Exception as exc:
+        return {"error": f"Spec validation failed: {exc}"}
+
+    # Determine save path
+    config = _get_config()
+    if scope == "global":
+        try:
+            from crucible.core.hub import HubStore
+            hub = HubStore()
+            arch_dir = hub._arch_plugins_dir
+        except Exception as exc:
+            return {"error": f"Hub not available for global scope: {exc}"}
+    else:
+        arch_dir = config.project_root / config.store_dir / "architectures"
+
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    path = arch_dir / f"{name}.yaml"
+    with open(path, "w") as f:
+        yaml.safe_dump(spec_dict, f, default_flow_style=False, sort_keys=False)
+
+    # Register using register_from_spec
+    try:
+        from crucible.models.composer import register_from_spec
+        register_from_spec(name, spec_dict, source="local" if scope == "local" else "global")
+    except Exception as exc:
+        return {"error": f"Registration failed (spec saved at {path}): {exc}"}
+
+    return {"registered": name, "scope": scope, "path": str(path)}
+
+
+def model_from_template(args: dict[str, Any]) -> dict[str, Any]:
+    """Fork existing spec with overrides to create a new family."""
+    import yaml
+
+    name = args.get("name")
+    base = args.get("base")
+    overrides = args.get("overrides", {})
+
+    if not name:
+        return {"error": "name is required"}
+    if not base:
+        return {"error": "base family name is required"}
+    if not name.isidentifier():
+        return {"error": f"name must be a valid Python identifier, got: {name!r}"}
+
+    # Load existing spec
+    base_spec = _load_spec_dict(base)
+    if base_spec is None:
+        return {"error": f"No YAML spec found for base family {base!r}. Only spec-based families can be forked."}
+
+    # Deep-merge overrides
+    merged = _deep_merge(base_spec, overrides)
+    merged["name"] = name
+
+    # Validate
+    try:
+        from crucible.models.composer import ArchitectureSpec
+        ArchitectureSpec.from_dict(merged)
+    except Exception as exc:
+        return {"error": f"Merged spec validation failed: {exc}"}
+
+    # Save
+    config = _get_config()
+    arch_dir = config.project_root / config.store_dir / "architectures"
+    arch_dir.mkdir(parents=True, exist_ok=True)
+    path = arch_dir / f"{name}.yaml"
+    with open(path, "w") as f:
+        yaml.safe_dump(merged, f, default_flow_style=False, sort_keys=False)
+
+    # Register
+    try:
+        from crucible.models.composer import register_from_spec
+        register_from_spec(name, merged, source="local")
+    except Exception as exc:
+        return {"error": f"Registration failed (spec saved at {path}): {exc}"}
+
+    return {"registered": name, "base": base, "path": str(path), "spec": merged}
+
+
+def model_list_stack_patterns(args: dict[str, Any]) -> dict[str, Any]:
+    """List available stack wiring patterns."""
+    try:
+        from crucible.models.composer import STACK_PATTERNS
+        patterns = []
+        _descriptions = {
+            "sequential": "Simple linear pass through all blocks.",
+            "encoder_decoder_skip": "Encoder-decoder with learned skip connections (baseline architecture).",
+            "looped": "Looped iteration over shared blocks with step scales.",
+            "prefix_memory_stack": "Sequential with step scales for PrefixMemoryBlock layers.",
+        }
+        _params = {
+            "sequential": [],
+            "encoder_decoder_skip": ["num_layers"],
+            "looped": ["logical_steps", "unique_blocks"],
+            "prefix_memory_stack": ["num_layers"],
+        }
+        for name in sorted(STACK_PATTERNS):
+            patterns.append({
+                "name": name,
+                "description": _descriptions.get(name, ""),
+                "params": _params.get(name, []),
+            })
+        return {"patterns": patterns}
+    except ImportError:
+        return {"patterns": [
+            {"name": "sequential", "description": "Simple linear pass through all blocks.", "params": []},
+            {"name": "encoder_decoder_skip", "description": "Encoder-decoder with learned skip connections.", "params": ["num_layers"]},
+            {"name": "looped", "description": "Looped iteration over shared blocks with step scales.", "params": ["logical_steps", "unique_blocks"]},
+            {"name": "prefix_memory_stack", "description": "Sequential with step scales for PrefixMemoryBlock layers.", "params": ["num_layers"]},
+        ]}
+
+
+def model_list_block_types(args: dict[str, Any]) -> dict[str, Any]:
+    """List available block types for architecture composition."""
+    try:
+        from crucible.models.composer import BLOCK_TYPES, _ensure_block_types
+        _ensure_block_types()
+        _descriptions = {
+            "attention_block": "Standard transformer block with multi-head attention, MLP, and RMSNorm.",
+            "prefix_memory_block": "Prefix memory block with state compression for recurrent-style architectures.",
+        }
+        block_types = []
+        for name in sorted(BLOCK_TYPES):
+            block_types.append({
+                "name": name,
+                "description": _descriptions.get(name, ""),
+            })
+        return {"block_types": block_types}
+    except ImportError:
+        return {"block_types": [
+            {"name": "attention_block", "description": "Standard transformer block with multi-head attention, MLP, and RMSNorm."},
+            {"name": "prefix_memory_block", "description": "Prefix memory block with state compression for recurrent-style architectures."},
+        ]}
+
+
+def model_preview_spec(args: dict[str, Any]) -> dict[str, Any]:
+    """Dry-run a spec: instantiate on CPU and return param count + structure."""
+    spec = args.get("spec")
+    config_overrides = args.get("config", {})
+
+    if not spec or not isinstance(spec, dict):
+        return {"error": "spec must be a non-empty dict"}
+
+    try:
+        from crucible.models.composer import ArchitectureSpec, SpecResolver, ComposedArchitecture
+        import types
+
+        parsed = ArchitectureSpec.from_dict(spec)
+
+        # Build an args namespace from config overrides with sensible defaults
+        defaults = {
+            "vocab_size": 50304, "model_dim": 512, "num_layers": 9,
+            "num_heads": 8, "num_kv_heads": 4, "mlp_mult": 2,
+            "rope_base": 10000.0, "qk_gain_init": 1.0,
+            "attention_variant": "standard", "residual_variant": "standard",
+            "tie_embeddings": True, "tied_embed_init_std": 0.02,
+            "logit_softcap": 30.0, "embed_bottleneck_dim": 0,
+            "spectral_embed_init": False, "activation": "relu_sq",
+            "model_family": spec.get("name", "preview"),
+        }
+        # Apply config overrides (convert string values to appropriate types)
+        for k, v in config_overrides.items():
+            key = k.lower()
+            if isinstance(v, str):
+                if v.lower() == "true":
+                    defaults[key] = True
+                elif v.lower() == "false":
+                    defaults[key] = False
+                else:
+                    try:
+                        defaults[key] = int(v)
+                    except ValueError:
+                        try:
+                            defaults[key] = float(v)
+                        except ValueError:
+                            defaults[key] = v
+            else:
+                defaults[key] = v
+        build_args = types.SimpleNamespace(**defaults)
+
+        resolver = SpecResolver(parsed, build_args)
+        resolved = resolver.resolve()
+        model = ComposedArchitecture(resolved, build_args)
+
+        # Count parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        # Collect layer structure
+        layers = []
+        for name, module in model.named_children():
+            param_count = sum(p.numel() for p in module.parameters())
+            layers.append({"name": name, "type": type(module).__name__, "params": param_count})
+
+        return {
+            "name": spec.get("name", "preview"),
+            "total_params": total_params,
+            "trainable_params": trainable_params,
+            "layers": layers,
+            "config_used": {k: v for k, v in defaults.items() if k != "model_family"},
+        }
+    except Exception as exc:
+        return {"error": f"Preview failed: {exc}"}
+
+
+def model_get_spec(args: dict[str, Any]) -> dict[str, Any]:
+    """Get YAML spec dict for a family, or null if code-defined."""
+    family = args.get("family")
+    if not family:
+        return {"error": "family is required"}
+
+    spec_dict = _load_spec_dict(family)
+    if spec_dict is not None:
+        return {"family": family, "kind": "spec", "spec": spec_dict}
+    return {"family": family, "kind": "code", "spec": None}
 
 
 # ---------------------------------------------------------------------------
@@ -1636,6 +2074,73 @@ def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
 # Dispatch table
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Queue management tools
+# ---------------------------------------------------------------------------
+
+
+def cancel_experiment(args: dict[str, Any]) -> dict[str, Any]:
+    """Cancel queued or running experiments by name, run_id, or wave."""
+    from crucible.fleet.queue import load_queue, save_queue
+
+    config = _get_config()
+    queue_path = config.project_root / "fleet_queue.jsonl"
+    queue = load_queue(queue_path)
+
+    run_id = args.get("run_id")
+    experiment_name = args.get("experiment_name")
+    wave = args.get("wave")
+
+    if not run_id and not experiment_name and not wave:
+        return {"error": "Provide at least one of: run_id, experiment_name, wave"}
+
+    cancelled = []
+    for entry in queue:
+        if entry.get("lease_state") in ("completed", "finished", "failed"):
+            continue
+        match = False
+        if run_id and entry.get("run_id") == run_id:
+            match = True
+        if experiment_name and entry.get("experiment_name") == experiment_name:
+            match = True
+        if wave and entry.get("wave") == wave:
+            match = True
+        if match:
+            entry["lease_state"] = "failed"
+            entry["result_status"] = "cancelled"
+            entry["ended_at"] = utc_now_iso()
+            cancelled.append(entry["experiment_name"])
+
+    save_queue(queue_path, queue)
+    return {"cancelled": cancelled, "count": len(cancelled)}
+
+
+def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
+    """Mark experiments as failed if assigned to nodes that no longer exist."""
+    from crucible.fleet.queue import load_queue, save_queue
+    from crucible.fleet.inventory import load_nodes
+
+    config = _get_config()
+    queue_path = config.project_root / "fleet_queue.jsonl"
+    queue = load_queue(queue_path)
+    nodes = load_nodes(config.project_root / config.nodes_file)
+    live_names = {n.get("name") for n in nodes}
+
+    cleared = []
+    for entry in queue:
+        if entry.get("lease_state") != "running":
+            continue
+        assigned = entry.get("assigned_node")
+        if assigned and assigned not in live_names:
+            entry["lease_state"] = "failed"
+            entry["result_status"] = "stale_node"
+            entry["ended_at"] = utc_now_iso()
+            cleared.append({"experiment": entry["experiment_name"], "stale_node": assigned})
+
+    save_queue(queue_path, queue)
+    return {"cleared": cleared, "count": len(cleared)}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -1697,6 +2202,20 @@ TOOL_DISPATCH: dict[str, Any] = {
     "model_add_architecture": model_add_architecture,
     "model_add_activation": model_add_activation,
     "model_generate_template": model_generate_template,
+    # Plugin promotion / import tools
+    "model_list_global_architectures": model_list_global_architectures,
+    "model_promote_architecture": model_promote_architecture,
+    "model_import_architecture": model_import_architecture,
+    # Composition tools
+    "model_compose": model_compose,
+    "model_from_template": model_from_template,
+    "model_list_stack_patterns": model_list_stack_patterns,
+    "model_list_block_types": model_list_block_types,
+    "model_preview_spec": model_preview_spec,
+    "model_get_spec": model_get_spec,
+    # Queue management tools
+    "cancel_experiment": cancel_experiment,
+    "clear_stale_queue": clear_stale_queue,
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,
