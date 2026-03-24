@@ -38,6 +38,8 @@ def _make_queue_item(
     name: str,
     lease_state: str = "queued",
     assigned_node: str | None = None,
+    priority: int = 0,
+    created_at: str = "2026-01-01T00:00:00Z",
 ) -> dict[str, Any]:
     return {
         "run_id": f"run_{name}",
@@ -48,6 +50,8 @@ def _make_queue_item(
         "tags": [],
         "lease_state": lease_state,
         "assigned_node": assigned_node,
+        "priority": priority,
+        "created_at": created_at,
         "wave": "wave1",
     }
 
@@ -101,6 +105,44 @@ class TestDispatch:
         )
         running = [r for r in result if r["lease_state"] == "running"]
         assert len(running) == 1
+
+
+    @patch("crucible.fleet.scheduler.remote_exec")
+    def test_dispatches_high_priority_first(self, mock_exec, tmp_path: Path):
+        """Higher priority items dispatch before lower, regardless of queue order."""
+        mock_exec.return_value = MagicMock(stdout="12345\n")
+        nodes = [_make_node("gpu-1")]
+        queue = [
+            _make_queue_item("low_prio", priority=0, created_at="2026-01-01T00:00:00Z"),
+            _make_queue_item("high_prio", priority=10, created_at="2026-01-02T00:00:00Z"),
+        ]
+        queue_path = tmp_path / "queue.jsonl"
+
+        result = dispatch(
+            nodes, queue, queue_path=queue_path, max_assignments=1,
+        )
+        running = [r for r in result if r["lease_state"] == "running"]
+        assert len(running) == 1
+        assert running[0]["experiment_name"] == "high_prio"
+
+    @patch("crucible.fleet.scheduler.remote_exec")
+    def test_skips_finished_items_in_queue(self, mock_exec, tmp_path: Path):
+        """Completed/failed items in the queue don't block dispatch."""
+        mock_exec.return_value = MagicMock(stdout="12345\n")
+        nodes = [_make_node("gpu-1")]
+        queue = [
+            _make_queue_item("old_done", lease_state="completed"),
+            _make_queue_item("old_failed", lease_state="failed"),
+            _make_queue_item("new_exp"),
+        ]
+        queue_path = tmp_path / "queue.jsonl"
+
+        result = dispatch(
+            nodes, queue, queue_path=queue_path, max_assignments=5,
+        )
+        running = [r for r in result if r["lease_state"] == "running"]
+        assert len(running) == 1
+        assert running[0]["experiment_name"] == "new_exp"
 
 
 class TestMergeResults:

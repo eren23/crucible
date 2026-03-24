@@ -1175,6 +1175,16 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
+    Tool(
+        name="purge_queue",
+        description=(
+            "Remove all completed/failed/finished items from the fleet queue.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {removed: int, remaining: int}\n"
+            "NEXT: get_queue_status to verify, enqueue_experiment or dispatch_experiments."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
     # -----------------------------------------------------------------------
     # Config tools
     # -----------------------------------------------------------------------

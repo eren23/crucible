@@ -12,6 +12,7 @@ from crucible.fleet.queue import (
     load_queue,
     save_queue,
     reset_queue,
+    purge_finished,
     enqueue_experiments,
     reconcile_queue_with_results,
     summarize_queue,
@@ -76,6 +77,47 @@ class TestQueuePersistence:
         save_queue(path, [{"x": 1}])
         reset_queue(path)
         assert load_queue(path) == []
+
+
+# ---------------------------------------------------------------------------
+# purge_finished
+# ---------------------------------------------------------------------------
+
+class TestPurgeFinished:
+    def test_removes_completed_and_failed(self, tmp_path):
+        path = tmp_path / "queue.jsonl"
+        rows = [
+            {"experiment_name": "keep1", "lease_state": "queued"},
+            {"experiment_name": "remove1", "lease_state": "completed"},
+            {"experiment_name": "keep2", "lease_state": "running"},
+            {"experiment_name": "remove2", "lease_state": "failed"},
+            {"experiment_name": "remove3", "lease_state": "finished"},
+            {"experiment_name": "keep3", "lease_state": "retryable"},
+        ]
+        save_queue(path, rows)
+        removed = purge_finished(path)
+        assert removed == 3
+        remaining = load_queue(path)
+        assert len(remaining) == 3
+        names = [r["experiment_name"] for r in remaining]
+        assert names == ["keep1", "keep2", "keep3"]
+
+    def test_noop_when_nothing_to_purge(self, tmp_path):
+        path = tmp_path / "queue.jsonl"
+        rows = [
+            {"experiment_name": "a", "lease_state": "queued"},
+            {"experiment_name": "b", "lease_state": "running"},
+        ]
+        save_queue(path, rows)
+        removed = purge_finished(path)
+        assert removed == 0
+        assert len(load_queue(path)) == 2
+
+    def test_purge_empty_queue(self, tmp_path):
+        path = tmp_path / "queue.jsonl"
+        save_queue(path, [])
+        removed = purge_finished(path)
+        assert removed == 0
 
 
 # ---------------------------------------------------------------------------

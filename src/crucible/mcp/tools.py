@@ -372,11 +372,20 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
 
         from crucible.fleet.manager import FleetManager
         from crucible.analysis.results import merged_results
+        from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
+        from crucible.core.io import read_jsonl
 
         fm = FleetManager(config)
         fm.collect()
         results = merged_results(config)
         completed = [r for r in results if r.get("status") == "completed"]
+
+        # Reconcile queue: mark finished experiments so nodes become available
+        queue_path = config.project_root / "fleet_queue.jsonl"
+        result_index = {r["id"]: r for r in results if "id" in r}
+        queue = reconcile_queue_with_results(load_queue(queue_path), result_index)
+        save_queue(queue_path, queue)
+
         return {
             "collected": True,
             "total_results": len(results),
@@ -2228,6 +2237,22 @@ def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
     return {"cleared": cleared, "count": len(cleared)}
 
 
+def purge_queue(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove all completed/failed/finished items from the fleet queue.
+
+    REQUIRES: Nothing.
+    RETURNS: {removed: int, remaining: int}
+    NEXT: get_queue_status to verify, enqueue_experiment or dispatch_experiments.
+    """
+    from crucible.fleet.queue import load_queue, purge_finished
+
+    config = _get_config()
+    queue_path = config.project_root / "fleet_queue.jsonl"
+    before = len(load_queue(queue_path))
+    removed = purge_finished(queue_path)
+    return {"removed": removed, "remaining": before - removed}
+
+
 # ---------------------------------------------------------------------------
 # Run logs tool
 # ---------------------------------------------------------------------------
@@ -2922,6 +2947,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     # Queue management tools
     "cancel_experiment": cancel_experiment,
     "clear_stale_queue": clear_stale_queue,
+    "purge_queue": purge_queue,
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,

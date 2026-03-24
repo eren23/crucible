@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (64 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (77 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -46,6 +46,10 @@ src/crucible/
 - `ResearcherError` for LLM / hypothesis failures
 - `HubError` for hub sync / track / finding promotion failures
 - `ApiError` for REST API server failures
+- `DataError` for data manifest / download failures
+- `StoreError` for version store failures
+- `ComposerError` for declarative architecture composition failures
+- `SearchTreeError` for tree search failures
 - Let unexpected errors propagate — don't catch and swallow
 
 ### Testing
@@ -160,12 +164,12 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (76 total)
+### MCP Tools (77 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
 
-Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`
+Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`, `purge_queue`
 
 **Tier 2 — Experiment Design:**
 `version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
@@ -238,7 +242,7 @@ Both `.py` and `.yaml` files are auto-discovered. `.py` takes precedence over `.
 - W&B integration requires `wandb` package and `WANDB_API_KEY`
 
 ## What NOT to do
-- Don't add new architectures to core — build plugins in `user_architectures/`
+- Don't add new architectures to core — build plugins in `.crucible/architectures/`
 - Don't build a full experiment tracking UI — the TUI and REST API cover agent/developer needs; use W&B/MLflow for dashboards
 - Don't build Kubernetes support — use SkyPilot when ready
 - Don't reinvent HPO math — integrate Optuna/Ax

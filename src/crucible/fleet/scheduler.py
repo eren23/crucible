@@ -110,11 +110,11 @@ def dispatch(
     """
     idle_nodes = [n for n in nodes if ready_state(n) == "ready"]
     assignments = 0
-    for item in queue:
+    dispatchable = [i for i in queue if i.get("lease_state") in {"queued", "retryable"}]
+    dispatchable.sort(key=lambda x: (-x.get("priority", 0), x.get("created_at", "")))
+    for item in dispatchable:
         if assignments >= max_assignments:
             break
-        if item.get("lease_state") not in {"queued", "retryable"}:
-            continue
         active_names = {
             row.get("assigned_node") or row.get("assigned_pod")
             for row in queue

@@ -18,7 +18,7 @@ Crucible combines LLM-driven hypothesis generation with fleet orchestration, ver
 ### Versioned Experiment Designs
 Every experiment design is a human-readable YAML file tracked with full version history. Agents iterate on designs, compare versions, and promote winners — all through MCP tools or the interactive TUI.
 
-### 76 MCP Tools
+### 77 MCP Tools
 Agents interact with Crucible over the Model Context Protocol. Browse experiments, generate hypotheses, design batches, compose architectures declaratively, run tree search over experiments, and trigger fleet runs — all without leaving the conversation.
 
 ### Interactive TUI
@@ -67,7 +67,7 @@ src/crucible/
   researcher/    LLM-driven autonomous research loop
   analysis/      Leaderboard, sensitivity, Pareto frontier
   data/          Manifest-driven HuggingFace data pipeline
-  mcp/           MCP server (64 tools for Claude agents)
+  mcp/           MCP server (77 tools for Claude agents)
   tui/           Interactive terminal UI (Textual)
   cli/           CLI entry points
 ```
@@ -78,7 +78,7 @@ src/crucible/
 
 - [Getting Started](getting-started) — Installation, project setup, first experiment
 - [TUI Guide](tui) — Interactive design browser walkthrough
-- [MCP Tools Reference](mcp-tools) — All 64 tools with schemas
+- [MCP Tools Reference](mcp-tools) — All 77 tools with schemas
 - [Architecture](architecture) — System design and module overview
 - [Plugins](plugins) — How to write architecture plugins
 - [Roadmap](roadmap) — What's done, what's next
