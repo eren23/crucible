@@ -62,7 +62,7 @@ src/crucible/
   core/          Config, I/O, types, logging, version store
   fleet/         Provider-abstracted fleet (RunPod, SSH)
   runner/        Experiment execution, output parsing, presets
-  training/      Training backends (torch) — factored from train_gpt.py
+  training/      Training backends (torch, generic) — modality-agnostic
   models/        Model zoo — components, architectures, declarative composer
   researcher/    LLM-driven autonomous research loop
   analysis/      Leaderboard, sensitivity, Pareto frontier
@@ -81,4 +81,5 @@ src/crucible/
 - [MCP Tools Reference](mcp-tools) — All 77 tools with schemas
 - [Architecture](architecture) — System design and module overview
 - [Plugins](plugins) — How to write architecture plugins
+- [Modality Guide](modality-guide) — Training diffusion models, world models, and beyond
 - [Roadmap](roadmap) — What's done, what's next

@@ -11,6 +11,7 @@ This file is a NEW backend -- it does NOT modify ``torch_backend.py``.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -37,6 +38,7 @@ def run_generic_training() -> None:
         DATA_ADAPTER        -- data adapter name (default: "token")
         TRAINING_OBJECTIVE  -- objective name (default: "cross_entropy")
         ITERATIONS          -- total training iterations
+        BATCH_SIZE          -- batch size for non-token modalities (default: 8)
         SEQ_LEN             -- sequence length (for token adapter)
         LR                  -- learning rate
         WEIGHT_DECAY        -- weight decay
@@ -45,9 +47,13 @@ def run_generic_training() -> None:
         NUM_LAYERS          -- number of layers
         NUM_HEADS           -- number of attention heads
         VOCAB_SIZE          -- vocabulary size
+        IMAGE_SIZE          -- image resolution for vision modalities (default: 32)
+        NUM_FRAMES          -- number of frames for video modalities (default: 4)
         MAX_WALLCLOCK_SECONDS -- wall-clock timeout
         LOG_INTERVAL        -- steps between log lines (default: 10)
         VAL_INTERVAL        -- steps between validation (default: 0 = off)
+        LR_SCHEDULE         -- "cosine" | "constant" (default: "cosine")
+        WARMUP_STEPS        -- LR warmup steps (default: 0)
     """
     import torch
 
@@ -62,12 +68,17 @@ def run_generic_training() -> None:
     data_adapter_name = _env("DATA_ADAPTER", "token")
     objective_name = _env("TRAINING_OBJECTIVE", "cross_entropy")
     iterations = _env_int("ITERATIONS", 400)
+    batch_size = _env_int("BATCH_SIZE", 8)
     lr = _env_float("LR", 3e-4)
     weight_decay = _env_float("WEIGHT_DECAY", 0.0)
     grad_accum_steps = _env_int("GRAD_ACCUM_STEPS", 1)
     max_wallclock = _env_int("MAX_WALLCLOCK_SECONDS", 0)
     log_interval = _env_int("LOG_INTERVAL", 10)
     val_interval = _env_int("VAL_INTERVAL", 0)
+    lr_schedule = _env("LR_SCHEDULE", "cosine")
+    warmup_steps = _env_int("WARMUP_STEPS", 0)
+    image_size = _env_int("IMAGE_SIZE", 32)
+    num_frames = _env_int("NUM_FRAMES", 4)
 
     # Build an args namespace for build_model (matches training contract)
     class _Args:
@@ -122,6 +133,9 @@ def run_generic_training() -> None:
 
     optimizer = torch.optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
 
+    # LR scheduler
+    scheduler = _build_scheduler(optimizer, lr_schedule, warmup_steps, iterations, lr)
+
     # Build data adapter (fallback to dummy batch if adapter unavailable)
     data_adapter = None
     try:
@@ -135,6 +149,10 @@ def run_generic_training() -> None:
     t0 = time.time()
     model.train()
 
+    last_train_loss = float("nan")
+    last_val_loss = float("nan")
+    last_val_metrics: dict[str, float] = {}
+
     for step in range(1, iterations + 1):
         # Wall-clock timeout
         if max_wallclock > 0 and (time.time() - t0) > max_wallclock:
@@ -144,16 +162,12 @@ def run_generic_training() -> None:
         optimizer.zero_grad(set_to_none=True)
 
         # Get batch from data adapter or fallback to dummy
-        if data_adapter is not None:
-            try:
-                batch = data_adapter.next_batch(
-                    seq_len=getattr(args, "seq_len", 128),
-                    device=device,
-                )
-            except Exception:
-                batch = _get_dummy_batch(model, device, args)
-        else:
-            batch = _get_dummy_batch(model, device, args)
+        batch = _get_batch(
+            data_adapter, model, device, args,
+            batch_size=batch_size,
+            image_size=image_size,
+            num_frames=num_frames,
+        )
 
         # Forward pass
         if hasattr(model, "training_step"):
@@ -167,10 +181,14 @@ def run_generic_training() -> None:
         loss = step_result["loss"]
         loss.backward()
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
+
+        loss_val = loss.item()
+        last_train_loss = loss_val
 
         # Logging
         if step % log_interval == 0 or step == 1:
-            loss_val = loss.item()
             # Standard format for backward compat
             print(f"step:{step}/{iterations} train_loss:{loss_val:.6f}", flush=True)
             # Generic metrics
@@ -179,12 +197,175 @@ def run_generic_training() -> None:
                 if key != "loss" and hasattr(val, "item"):
                     print(f"metric:{key}={val.item():.6f}", flush=True)
 
+        # Validation
+        if val_interval > 0 and (step % val_interval == 0 or step == iterations):
+            val_metrics = _run_validation(
+                model, objective, data_adapter, device, args,
+                batch_size=batch_size,
+                image_size=image_size,
+                num_frames=num_frames,
+            )
+            val_loss = val_metrics.get("val_loss", loss_val)
+            last_val_loss = val_loss
+            last_val_metrics = val_metrics
+            # Emit in LM-compatible format (val_bpb = val_loss when not LM)
+            val_bpb = val_metrics.get("val_bpb", val_loss)
+            print(
+                f"step:{step}/{iterations} val_loss:{val_loss:.6f} val_bpb:{val_bpb:.6f}",
+                flush=True,
+            )
+            for mk, mv in val_metrics.items():
+                print(f"metric:{mk}={mv:.6f}", flush=True)
+
+    # ---------------------------------------------------------------
+    # Final output
+    # ---------------------------------------------------------------
     elapsed_ms = int((time.time() - t0) * 1000)
     print(f"train_time:{elapsed_ms}ms", flush=True)
 
+    # Emit final result line so output parser's primary path matches.
+    # Use val_loss if available, otherwise fall back to last train_loss.
+    final_loss = last_val_loss if not math.isnan(last_val_loss) else last_train_loss
+    final_bpb = last_val_metrics.get("val_bpb", final_loss)
+    if not math.isnan(final_loss):
+        print(
+            f"final_generic val_loss:{final_loss:.6f} val_bpb:{final_bpb:.6f}",
+            flush=True,
+        )
+    # Also emit all final metrics in generic format
+    if last_val_metrics:
+        for mk, mv in last_val_metrics.items():
+            print(f"metric:{mk}={mv:.6f}", flush=True)
+    else:
+        print(f"metric:train_loss={last_train_loss:.6f}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# LR Scheduler
+# ---------------------------------------------------------------------------
+
+def _build_scheduler(
+    optimizer: Any,
+    schedule: str,
+    warmup_steps: int,
+    total_steps: int,
+    base_lr: float,
+) -> Any:
+    """Build a learning rate scheduler with optional warmup."""
+    import torch
+
+    if schedule == "constant" and warmup_steps <= 0:
+        return None
+
+    def lr_lambda(step: int) -> float:
+        # Warmup phase
+        if warmup_steps > 0 and step < warmup_steps:
+            return (step + 1) / warmup_steps
+        # Cosine decay after warmup
+        if schedule == "cosine":
+            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+        # Constant after warmup
+        return 1.0
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+def _run_validation(
+    model: Any,
+    objective: Any,
+    data_adapter: Any,
+    device: Any,
+    args: Any,
+    *,
+    batch_size: int = 8,
+    image_size: int = 32,
+    num_frames: int = 4,
+    num_val_steps: int = 5,
+) -> dict[str, float]:
+    """Run a short validation pass and return averaged metrics."""
+    import torch
+
+    model.eval()
+    accumulated: dict[str, float] = {}
+    count = 0
+
+    with torch.no_grad():
+        for _ in range(num_val_steps):
+            batch = _get_batch(
+                data_adapter, model, device, args,
+                batch_size=batch_size,
+                image_size=image_size,
+                num_frames=num_frames,
+            )
+            if hasattr(model, "validation_step"):
+                step_result = model.validation_step(**batch)
+            elif hasattr(model, "training_step"):
+                step_result = model.training_step(**batch)
+            elif objective is not None:
+                predictions = model(**batch)
+                step_result = objective.compute(predictions, batch)
+            else:
+                step_result = {"loss": torch.tensor(0.0, device=device)}
+
+            for key, val in step_result.items():
+                if hasattr(val, "item"):
+                    accumulated[key] = accumulated.get(key, 0.0) + val.item()
+            count += 1
+
+    model.train()
+
+    # Average and rename loss -> val_loss
+    result: dict[str, float] = {}
+    for key, total in accumulated.items():
+        avg = total / max(count, 1)
+        if key == "loss":
+            result["val_loss"] = avg
+        else:
+            result[key] = avg
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Batch helpers
+# ---------------------------------------------------------------------------
+
+def _get_batch(
+    data_adapter: Any,
+    model: Any,
+    device: Any,
+    args: Any,
+    *,
+    batch_size: int = 8,
+    image_size: int = 32,
+    num_frames: int = 4,
+) -> dict[str, Any]:
+    """Get a batch from data adapter, falling back to dummy data."""
+    if data_adapter is not None:
+        try:
+            return data_adapter.next_batch(
+                seq_len=getattr(args, "seq_len", 128),
+                batch_size=batch_size,
+                image_size=image_size,
+                num_frames=num_frames,
+                device=device,
+            )
+        except Exception:
+            pass
+    return _get_dummy_batch(model, device, args, batch_size, image_size, num_frames)
+
 
 def _get_dummy_batch(
-    model: Any, device: Any, args: Any
+    model: Any,
+    device: Any,
+    args: Any,
+    batch_size: int = 8,
+    image_size: int = 32,
+    num_frames: int = 4,
 ) -> dict[str, Any]:
     """Build a minimal batch dict for the model's modality."""
     import torch
@@ -192,11 +373,21 @@ def _get_dummy_batch(
     modality = getattr(model, "modality", lambda: "generic")()
     if modality == "lm":
         seq_len = getattr(args, "seq_len", 128)
-        batch_size = 1
         vocab = getattr(args, "vocab_size", 50257)
-        input_ids = torch.randint(0, vocab, (batch_size, seq_len), device=device)
-        target_ids = torch.randint(0, vocab, (batch_size, seq_len), device=device)
+        input_ids = torch.randint(0, vocab, (1, seq_len), device=device)
+        target_ids = torch.randint(0, vocab, (1, seq_len), device=device)
         return {"input_ids": input_ids, "target_ids": target_ids}
+    if modality in ("vision", "diffusion"):
+        channels = getattr(args, "image_channels", 3)
+        images = torch.randn(batch_size, channels, image_size, image_size, device=device)
+        return {"images": images}
+    if modality == "world_model":
+        channels = getattr(args, "image_channels", 3)
+        frames = torch.randn(
+            batch_size, num_frames, channels, image_size, image_size, device=device
+        )
+        actions = torch.randn(batch_size, num_frames - 1, 2, device=device)
+        return {"frames": frames, "actions": actions}
     # Generic fallback
     return {}
 

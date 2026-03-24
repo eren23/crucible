@@ -133,6 +133,38 @@ Both `.py` and `.yaml` files are auto-discovered. At the same scope, `.py` takes
 **Hub promotion:** Use `model_promote_architecture` to share a local plugin across projects.
 **Hub import:** Use `model_import_architecture` to pull a hub plugin into your project.
 
+## Non-LM Plugins (Diffusion, World Models, etc.)
+
+The plugin system works for **any modality**, not just transformers.  For
+non-LM architectures, inherit from `CrucibleModel` directly instead of
+`TiedEmbeddingLM`:
+
+```python
+from crucible.models.base import CrucibleModel
+from crucible.models.registry import register_model
+
+class MyDiffusionModel(CrucibleModel):
+    def forward(self, images, **kw):
+        # Your diffusion forward pass
+        return {"loss": loss, "noise_mse": loss}
+
+    @classmethod
+    def modality(cls):
+        return "diffusion"
+
+register_model("my_diffusion", lambda args: MyDiffusionModel(...))
+```
+
+Run with the **generic backend** instead of torch_backend:
+
+```bash
+MODEL_FAMILY=my_diffusion DATA_ADAPTER=my_data BATCH_SIZE=32 \
+    python -m crucible.training.generic_backend
+```
+
+See the [Modality Guide](modality-guide) for a full walkthrough with
+working examples (diffusion on MNIST, JEPA world model on bouncing balls).
+
 ## Important Notes
 
 - **Plugins sync to pods automatically** — `.crucible/architectures/` is included in rsync

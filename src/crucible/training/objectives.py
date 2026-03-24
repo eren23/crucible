@@ -124,6 +124,84 @@ class CompositeObjective(TrainingObjective):
 
 
 # ---------------------------------------------------------------------------
+# Diffusion objectives
+# ---------------------------------------------------------------------------
+
+class DiffusionLossObjective(TrainingObjective):
+    """Noise-prediction MSE for denoising diffusion models.
+
+    Expects:
+        predictions: ``{"noise_pred": Tensor}``
+        targets:     ``{"noise": Tensor}``
+
+    Returns ``{"loss": scalar, "noise_mse": scalar}``.
+    """
+
+    name = "diffusion"
+
+    def compute(
+        self, predictions: dict[str, Any], targets: dict[str, Any]
+    ) -> dict[str, Any]:
+        import torch.nn.functional as F
+
+        noise_pred = predictions["noise_pred"]
+        noise = targets["noise"]
+        mse = F.mse_loss(noise_pred, noise)
+        return {"loss": mse, "noise_mse": mse}
+
+    def metric_names(self) -> list[str]:
+        return ["noise_mse"]
+
+
+# ---------------------------------------------------------------------------
+# World model / JEPA objectives
+# ---------------------------------------------------------------------------
+
+class JEPAObjective(TrainingObjective):
+    """Joint Embedding Predictive Architecture loss.
+
+    Combines prediction MSE with variance regularization (VICReg-style).
+
+    Expects:
+        predictions: ``{"pred_embeddings": Tensor, "z_std": Tensor}``
+        targets:     ``{"target_embeddings": Tensor}``
+
+    ``z_std`` is the standard deviation of the encoder output across the
+    batch dimension -- the regularizer encourages it to stay above 1.0.
+
+    Returns ``{"loss": scalar, "pred_loss": scalar, "var_reg": scalar}``.
+    """
+
+    name = "jepa"
+
+    def __init__(self, var_weight: float = 0.1, var_target: float = 1.0):
+        self.var_weight = var_weight
+        self.var_target = var_target
+
+    def compute(
+        self, predictions: dict[str, Any], targets: dict[str, Any]
+    ) -> dict[str, Any]:
+        import torch
+        import torch.nn.functional as F
+
+        pred_emb = predictions["pred_embeddings"]
+        target_emb = targets["target_embeddings"]
+
+        # Prediction loss: MSE in embedding space
+        pred_loss = F.mse_loss(pred_emb, target_emb)
+
+        # Variance regularization: hinge loss pushing std above target
+        z_std = predictions["z_std"]  # [embed_dim] or [batch, embed_dim]
+        var_reg = torch.relu(self.var_target - z_std).mean()
+
+        loss = pred_loss + self.var_weight * var_reg
+        return {"loss": loss, "pred_loss": pred_loss, "var_reg": var_reg}
+
+    def metric_names(self) -> list[str]:
+        return ["pred_loss", "var_reg"]
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -150,3 +228,5 @@ register_objective("cross_entropy", CrossEntropyObjective)
 register_objective("mse", MSEObjective)
 register_objective("kl_divergence", KLDivergenceObjective)
 register_objective("composite", CompositeObjective)
+register_objective("diffusion", DiffusionLossObjective)
+register_objective("jepa", JEPAObjective)
