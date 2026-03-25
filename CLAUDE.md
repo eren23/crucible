@@ -12,7 +12,7 @@ src/crucible/
 ├── fleet/         # Provider-abstracted fleet management (RunPod, SSH)
 │   └── providers/ # Compute backends (runpod.py, ssh.py)
 ├── runner/        # Experiment execution, output parsing, presets, tracking, notes
-├── training/      # Training backends (torch) — extracted from train_gpt.py
+├── training/      # Training backends (torch, generic) — modality-agnostic pipeline
 ├── models/        # Model zoo — components, architectures, declarative composer
 │   ├── components/     # Reusable blocks (Attention, MLP, MoE, RMSNorm, etc.)
 │   ├── architectures/  # 4 built-in architectures + plugin auto-discovery
@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (64 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (82 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -46,6 +46,10 @@ src/crucible/
 - `ResearcherError` for LLM / hypothesis failures
 - `HubError` for hub sync / track / finding promotion failures
 - `ApiError` for REST API server failures
+- `DataError` for data manifest / download failures
+- `StoreError` for version store failures
+- `ComposerError` for declarative architecture composition failures
+- `SearchTreeError` for tree search failures
 - Let unexpected errors propagate — don't catch and swallow
 
 ### Testing
@@ -160,12 +164,12 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (76 total)
+### MCP Tools (77 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
 
-Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`
+Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`, `purge_queue`
 
 **Tier 2 — Experiment Design:**
 `version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
@@ -230,6 +234,21 @@ Both `.py` and `.yaml` files are auto-discovered. `.py` takes precedence over `.
 
 **What stays in core:** baseline, looped, convloop, prefix_memory — reference implementations from Parameter Golf. For new work, compose or build plugins.
 
+### Modality Extensibility
+
+Crucible supports training **any model type** (diffusion, world models, vision, RL, etc.) via the generic training backend. The 4 extension points:
+
+1. **Model**: Inherit `CrucibleModel` (not `TiedEmbeddingLM`), implement `forward(**batch) -> {"loss": tensor, ...}`
+2. **Data Adapter**: Implement `DataAdapter.next_batch()`, register with `register_data_adapter()`
+3. **Objective** (optional): Implement `TrainingObjective.compute()` or compute loss inside the model
+4. **Config**: Set `metrics.primary` + `metrics.direction` in `crucible.yaml`
+
+Built-in adapters: `token` (LM), `image_folder` (torchvision), `synthetic_images`, `synthetic_video` (bouncing balls).
+Built-in objectives: `cross_entropy`, `mse`, `kl_divergence`, `composite`, `diffusion`, `jepa`.
+
+Working examples in `examples/diffusion/` (DDPM on MNIST) and `examples/world_model/` (JEPA on bouncing balls).
+Full guide: `docs/modality-guide.md`.
+
 ### Known Limitations
 
 - Only RunPod provider is fully tested (SSH provider is pass-through for manual hosts)
@@ -238,7 +257,7 @@ Both `.py` and `.yaml` files are auto-discovered. `.py` takes precedence over `.
 - W&B integration requires `wandb` package and `WANDB_API_KEY`
 
 ## What NOT to do
-- Don't add new architectures to core — build plugins in `user_architectures/`
+- Don't add new architectures to core — build plugins in `.crucible/architectures/`
 - Don't build a full experiment tracking UI — the TUI and REST API cover agent/developer needs; use W&B/MLflow for dashboards
 - Don't build Kubernetes support — use SkyPilot when ready
 - Don't reinvent HPO math — integrate Optuna/Ax

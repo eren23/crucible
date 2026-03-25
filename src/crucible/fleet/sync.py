@@ -159,6 +159,84 @@ def sync_env_file(
 
 
 # ---------------------------------------------------------------------------
+# External project env var forwarding
+# ---------------------------------------------------------------------------
+
+ENV_FORWARD_DENYLIST = frozenset({
+    "RUNPOD_API_KEY", "ANTHROPIC_API_KEY", "SSH_PRIVATE_KEY",
+    "AWS_SECRET_ACCESS_KEY", "GCP_SERVICE_ACCOUNT_KEY",
+    "OPENAI_API_KEY", "HF_TOKEN",
+})
+
+_SENSITIVE_PATTERNS = ("_SECRET", "_PRIVATE", "_CREDENTIAL")
+
+
+def write_remote_env(
+    node: dict[str, Any],
+    env_forward: list[str],
+    env_set: dict[str, str],
+    workspace: str,
+    *,
+    local_env: dict[str, str] | None = None,
+) -> None:
+    """Write env vars to a .env file on the pod with safe quoting.
+
+    *env_forward*: keys to read from *local_env* (or os.environ).
+    *env_set*: explicit key-value pairs to write.
+    Raises ValueError if a denylisted key is requested.
+    """
+    import logging
+    import os
+
+    if local_env is not None:
+        source = local_env
+    else:
+        # Build source from os.environ + local .env files
+        source = dict(os.environ)
+        # Also read .env files from project root (they may not be in os.environ)
+        for env_file in [".env", ".env.local", ".env.runpod.local", ".env.lewm"]:
+            env_path = Path.cwd() / env_file
+            if env_path.exists():
+                for line in env_path.read_text().splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    if key and key not in source:
+                        source[key] = val
+    lines: list[str] = []
+
+    for key in env_forward:
+        if key in ENV_FORWARD_DENYLIST:
+            raise ValueError(
+                f"Refusing to forward denylisted key {key!r}. "
+                f"Remove it from env_forward in the project spec."
+            )
+        if any(pat in key.upper() for pat in _SENSITIVE_PATTERNS):
+            logging.warning(
+                "Forwarding potentially sensitive key %r to pod. "
+                "Ensure this is intentional.", key,
+            )
+        val = source.get(key, "")
+        if val:
+            lines.append(f"export {key}={shlex.quote(val)}")
+
+    for key, val in env_set.items():
+        lines.append(f"export {key}={shlex.quote(val)}")
+
+    if not lines:
+        return
+
+    env_content = "\n".join(lines) + "\n"
+    ws = shlex.quote(workspace)
+    # Write via heredoc to avoid quoting issues
+    heredoc = f"cat > {ws}/.env << 'CRUCIBLE_ENV_EOF'\n{env_content}CRUCIBLE_ENV_EOF"
+    remote_exec(node, heredoc)
+
+
+# ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
 

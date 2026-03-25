@@ -37,7 +37,7 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 - Research briefing (LLM session orientation with project context and findings)
 - REST API server (`crucible serve`) — 10 FastAPI endpoints wrapping MCP tools
 - W&B bridge with image logging and run annotation support
-- 76 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization)
+- 77 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization)
 - Interactive TUI for browsing experiment designs grouped by status
 
 ## What's Coming
@@ -133,7 +133,7 @@ crucible research start --budget-hours 10 --tier proxy --dry-run
 ### MCP Integration
 
 ```bash
-crucible mcp serve  # starts stdio MCP server for Claude (64 tools)
+crucible mcp serve  # starts stdio MCP server for Claude (77 tools)
 crucible serve      # starts REST API server (FastAPI, 10 endpoints)
 ```
 
@@ -206,7 +206,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing
 ├── analysis/      # Leaderboard, sensitivity, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server for Claude agent integration (64 tools)
+├── mcp/           # MCP server for Claude agent integration (77 tools)
 ├── training/      # Training backends (torch) — factored from train_gpt.py
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)

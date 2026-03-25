@@ -1,0 +1,65 @@
+# Crucible config for diffusion model example
+# Run: PYTHONPATH=src python -m crucible.training.generic_backend
+
+project:
+  name: diffusion-example
+  description: DDPM on MNIST — demonstrates non-LM training with Crucible
+
+training:
+  - backend: generic
+    script: src/crucible/training/generic_backend.py
+    modality: diffusion
+
+metrics:
+  primary: noise_mse
+  direction: minimize
+
+presets:
+  smoke:
+    MODEL_FAMILY: ddpm_unet
+    DATA_ADAPTER: mnist_images
+    TRAINING_OBJECTIVE: mse
+    ITERATIONS: "200"
+    BATCH_SIZE: "16"
+    IMAGE_SIZE: "28"
+    IMAGE_CHANNELS: "1"
+    MODEL_DIM: "32"
+    LR: "0.001"
+    LOG_INTERVAL: "10"
+    VAL_INTERVAL: "100"
+    MAX_WALLCLOCK_SECONDS: "60"
+    DIFFUSION_STEPS: "100"
+
+  screen:
+    MODEL_FAMILY: ddpm_unet
+    DATA_ADAPTER: mnist_images
+    TRAINING_OBJECTIVE: mse
+    ITERATIONS: "5000"
+    BATCH_SIZE: "64"
+    IMAGE_SIZE: "28"
+    IMAGE_CHANNELS: "1"
+    MODEL_DIM: "64"
+    LR: "0.0003"
+    LR_SCHEDULE: cosine
+    WARMUP_STEPS: "100"
+    LOG_INTERVAL: "50"
+    VAL_INTERVAL: "500"
+    MAX_WALLCLOCK_SECONDS: "3600"
+    DIFFUSION_STEPS: "1000"
+
+  proxy:
+    MODEL_FAMILY: ddpm_unet
+    DATA_ADAPTER: mnist_images
+    TRAINING_OBJECTIVE: mse
+    ITERATIONS: "20000"
+    BATCH_SIZE: "128"
+    IMAGE_SIZE: "28"
+    IMAGE_CHANNELS: "1"
+    MODEL_DIM: "64"
+    LR: "0.0003"
+    LR_SCHEDULE: cosine
+    WARMUP_STEPS: "500"
+    LOG_INTERVAL: "100"
+    VAL_INTERVAL: "2000"
+    MAX_WALLCLOCK_SECONDS: "7200"
+    DIFFUSION_STEPS: "1000"

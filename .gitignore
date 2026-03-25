@@ -59,3 +59,10 @@ final_model.*
 
 # mcp
 .mcp.json
+
+CLAUDE.md
+
+.env.lewm
+notebooks/
+wandb/
+videos

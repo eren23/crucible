@@ -372,31 +372,46 @@ def run_experiment(
             train_batch_tokens = int(
                 resolved_config.get("TRAIN_BATCH_TOKENS", "0") or "0"
             )
+            current_batch_size = int(
+                resolved_config.get("BATCH_SIZE", "0") or "0"
+            )
+            can_halve_tokens = train_batch_tokens >= 2
+            can_halve_batch = current_batch_size >= 2
             if (
                 not oom_retry_used
                 and failure_class == "oom_suspected"
                 and steps_completed < 20
-                and train_batch_tokens >= 2
+                and (can_halve_tokens or can_halve_batch)
             ):
-                reduced_tokens = max(1, train_batch_tokens // 2)
-                resolved_config["TRAIN_BATCH_TOKENS"] = str(reduced_tokens)
-                env["TRAIN_BATCH_TOKENS"] = str(reduced_tokens)
-                result["oom_retry_from_train_batch_tokens"] = train_batch_tokens
-                result["oom_retry_to_train_batch_tokens"] = reduced_tokens
+                retry_detail = ""
+                if can_halve_tokens:
+                    reduced_tokens = max(1, train_batch_tokens // 2)
+                    resolved_config["TRAIN_BATCH_TOKENS"] = str(reduced_tokens)
+                    env["TRAIN_BATCH_TOKENS"] = str(reduced_tokens)
+                    result["oom_retry_from_train_batch_tokens"] = train_batch_tokens
+                    result["oom_retry_to_train_batch_tokens"] = reduced_tokens
+                    retry_detail = (
+                        f"train_batch_tokens:{train_batch_tokens}->{reduced_tokens}"
+                    )
+                elif can_halve_batch:
+                    reduced_batch = max(1, current_batch_size // 2)
+                    resolved_config["BATCH_SIZE"] = str(reduced_batch)
+                    env["BATCH_SIZE"] = str(reduced_batch)
+                    result["oom_retry_from_batch_size"] = current_batch_size
+                    result["oom_retry_to_batch_size"] = reduced_batch
+                    retry_detail = (
+                        f"batch_size:{current_batch_size}->{reduced_batch}"
+                    )
                 oom_retry_used = True
                 tracker.update(
                     state="retrying",
                     phase="retrying",
                     failure_class=failure_class,
-                    last_output_line=(
-                        f"oom_retry train_batch_tokens:"
-                        f"{train_batch_tokens}->{reduced_tokens}"
-                    ),
+                    last_output_line=f"oom_retry {retry_detail}",
                 )
                 if stream_output:
                     print(
-                        f"[{exp_id}] oom_retry train_batch_tokens:"
-                        f"{train_batch_tokens}->{reduced_tokens}",
+                        f"[{exp_id}] oom_retry {retry_detail}",
                         flush=True,
                     )
                 continue  # Retry the while True loop

@@ -161,6 +161,119 @@ def bootstrap_node(
 
 
 # ---------------------------------------------------------------------------
+# External project bootstrap
+# ---------------------------------------------------------------------------
+
+def bootstrap_project(
+    node: dict[str, Any],
+    spec: Any,
+) -> dict[str, Any]:
+    """Bootstrap an external project on a node. Idempotent and safe to retry.
+
+    Steps: clone repo, create venv, install deps, forward env, run setup, mark ready.
+    All values passed to shell commands are quoted via shlex.quote.
+    """
+    import shlex as _shlex
+    from crucible.fleet.sync import write_remote_env
+
+    ws = _shlex.quote(spec.workspace)
+    name = node["name"]
+    branch_q = _shlex.quote(spec.branch)
+    repo_q = _shlex.quote(spec.repo)
+
+    # 1. Clone or update repo
+    log_step(f"{name}: cloning {spec.repo} (branch={spec.branch})")
+    clone_check = bootstrap_step(
+        node, "repo_check", f"test -d {ws}/.git && echo exists || echo missing",
+    )
+    if clone_check and "exists" in (clone_check.stdout or ""):
+        bootstrap_step(
+            node, "repo_update",
+            f"cd {ws} && git fetch origin && "
+            f"git checkout {branch_q} && "
+            f"git reset --hard origin/{branch_q}",
+        )
+    else:
+        depth = "--depth 1" if spec.shallow else ""
+        bootstrap_step(
+            node, "repo_clone",
+            f"git clone {depth} -b {branch_q} {repo_q} {ws}",
+        )
+
+    # 2. Create Python venv
+    if spec.python:
+        venv_check = bootstrap_step(
+            node, "venv_check",
+            f"test -f {ws}/.venv/bin/activate && echo exists || echo missing",
+        )
+        if venv_check and "missing" in (venv_check.stdout or ""):
+            log_step(f"{name}: creating Python {spec.python} venv")
+            bootstrap_step(
+                node, "install_uv",
+                "command -v uv >/dev/null 2>&1 || "
+                "(curl -LsSf https://astral.sh/uv/install.sh | sh)",
+            )
+            python_q = _shlex.quote(spec.python)
+            bootstrap_step(
+                node, "create_venv",
+                f'export PATH="$HOME/.local/bin:$PATH" && '
+                f"cd {ws} && uv venv --python={python_q} .venv",
+            )
+
+    # Activation prefix for subsequent commands
+    activate = f"cd {ws}"
+    if spec.python:
+        activate += " && source .venv/bin/activate"
+    uv_pfx = 'export PATH="$HOME/.local/bin:$PATH" && '
+
+    # 3. Install torch separately (with install_flags for index-url)
+    if spec.install_torch:
+        log_step(f"{name}: installing torch")
+        flags = spec.install_flags or ""
+        # Quote each package spec to prevent shell interpretation of < > chars
+        torch_pkgs = " ".join(_shlex.quote(p) for p in spec.install_torch.split())
+        bootstrap_step(
+            node, "install_torch",
+            f"{uv_pfx}{activate} && uv pip install {torch_pkgs} {flags}",
+        )
+
+    # 4. Install remaining deps
+    if spec.install:
+        log_step(f"{name}: installing {len(spec.install)} packages")
+        for i, pkg in enumerate(spec.install):
+            safe_label = pkg.split("[")[0].split(">")[0].split("=")[0].replace("-", "_")
+            bootstrap_step(
+                node, f"install_{safe_label}",
+                f'{uv_pfx}{activate} && uv pip install "{pkg}"',
+            )
+
+    # 5. Forward env vars
+    log_step(f"{name}: forwarding env vars")
+    write_remote_env(
+        node,
+        env_forward=spec.env_forward,
+        env_set=spec.env_set,
+        workspace=spec.workspace,
+    )
+
+    # 6. Run setup commands
+    for i, cmd in enumerate(spec.setup):
+        log_step(f"{name}: setup command {i + 1}/{len(spec.setup)}")
+        bootstrap_step(
+            node, f"setup_{i}",
+            f"{uv_pfx}{activate} && source {ws}/.env 2>/dev/null; {cmd}",
+        )
+
+    # 7. Mark ready
+    node["env_ready"] = True
+    node["state"] = "ready"
+    node["project"] = spec.name
+    node["last_seen_at"] = utc_now_iso()
+    log_success(f"{name}: project {spec.name!r} bootstrap complete")
+    return node
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap with retries (worker)
 # ---------------------------------------------------------------------------
 

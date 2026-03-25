@@ -40,6 +40,20 @@ def reset_queue(path: Path) -> None:
     save_queue(path, [])
 
 
+def purge_finished(path: Path) -> int:
+    """Remove completed/failed/finished items from the queue.
+
+    Keeps only items with lease_state in {queued, retryable, running}.
+    Returns the number of items removed.
+    """
+    rows = load_queue(path)
+    keep = [r for r in rows if r.get("lease_state") in {"queued", "retryable", "running"}]
+    removed = len(rows) - len(keep)
+    if removed:
+        save_queue(path, keep)
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Enqueue
 # ---------------------------------------------------------------------------

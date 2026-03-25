@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 76 MCP tools for AI agents. Start the server:
+Crucible exposes 77 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```

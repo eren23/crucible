@@ -253,3 +253,43 @@ def _resolve_wandb_url(run_id: str, config: Any) -> str | None:
         pass
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# External project WandB metric fetch
+# ---------------------------------------------------------------------------
+
+def fetch_wandb_metrics(
+    project: str,
+    entity: str | None = None,
+    run_name: str | None = None,
+) -> dict[str, float]:
+    """Fetch final metrics from WandB API for a completed run.
+
+    Returns a dict of metric names to float values from the run summary.
+    Returns empty dict if wandb is unavailable or no matching run is found.
+    """
+    try:
+        import wandb
+    except ImportError:
+        return {}
+
+    try:
+        api = wandb.Api()
+        path = f"{entity}/{project}" if entity else project
+        filters = {}
+        if run_name:
+            filters["display_name"] = run_name
+        runs = api.runs(path, filters=filters, per_page=5)
+        if not runs:
+            return {}
+        run = runs[0]
+        result: dict[str, float] = {}
+        for key, val in run.summary.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(val, (int, float)):
+                result[key] = float(val)
+        return result
+    except Exception:
+        return {}

@@ -372,11 +372,20 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
 
         from crucible.fleet.manager import FleetManager
         from crucible.analysis.results import merged_results
+        from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
+        from crucible.core.io import read_jsonl
 
         fm = FleetManager(config)
         fm.collect()
         results = merged_results(config)
         completed = [r for r in results if r.get("status") == "completed"]
+
+        # Reconcile queue: mark finished experiments so nodes become available
+        queue_path = config.project_root / "fleet_queue.jsonl"
+        result_index = {r["id"]: r for r in results if "id" in r}
+        queue = reconcile_queue_with_results(load_queue(queue_path), result_index)
+        save_queue(queue_path, queue)
+
         return {
             "collected": True,
             "total_results": len(results),
@@ -2228,6 +2237,22 @@ def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
     return {"cleared": cleared, "count": len(cleared)}
 
 
+def purge_queue(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove all completed/failed/finished items from the fleet queue.
+
+    REQUIRES: Nothing.
+    RETURNS: {removed: int, remaining: int}
+    NEXT: get_queue_status to verify, enqueue_experiment or dispatch_experiments.
+    """
+    from crucible.fleet.queue import load_queue, purge_finished
+
+    config = _get_config()
+    queue_path = config.project_root / "fleet_queue.jsonl"
+    before = len(load_queue(queue_path))
+    removed = purge_finished(queue_path)
+    return {"removed": removed, "remaining": before - removed}
+
+
 # ---------------------------------------------------------------------------
 # Run logs tool
 # ---------------------------------------------------------------------------
@@ -2847,6 +2872,283 @@ def config_get_modalities(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+# ---------------------------------------------------------------------------
+# External project tools
+# ---------------------------------------------------------------------------
+
+# Persistent registry for project runs (survives MCP server restarts)
+_PROJECT_RUNS_FILE = ".crucible/projects/runs.jsonl"
+
+
+def _save_project_run(run_id: str, data: dict[str, Any]) -> None:
+    """Persist a project run record to JSONL."""
+    config = _get_config()
+    runs_path = config.project_root / _PROJECT_RUNS_FILE
+    runs_path.parent.mkdir(parents=True, exist_ok=True)
+    from crucible.core.io import append_jsonl, _json_ready
+    record = {"run_id": run_id, **_json_ready(data)}
+    append_jsonl(runs_path, record)
+
+
+def _load_project_run(run_id: str) -> dict[str, Any] | None:
+    """Load a project run record from JSONL."""
+    config = _get_config()
+    runs_path = config.project_root / _PROJECT_RUNS_FILE
+    if not runs_path.exists():
+        return None
+    from crucible.core.io import read_jsonl
+    for record in read_jsonl(runs_path):
+        if record.get("run_id") == run_id:
+            return record
+    return None
+
+
+def list_projects(args: dict[str, Any]) -> dict[str, Any]:
+    """List all external project specs in .crucible/projects/."""
+    config = _get_config()
+    try:
+        from crucible.core.config import list_project_specs
+        specs = list_project_specs(config.project_root)
+        return {"projects": specs}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def provision_project(args: dict[str, Any]) -> dict[str, Any]:
+    """Provision nodes for an external project, applying pod overrides from the spec.
+
+    REQUIRES: RUNPOD_API_KEY in .env, project spec in .crucible/projects/.
+    RETURNS: {created, new_nodes: [{name, node_id}]}
+    NEXT: fleet_refresh (wait ~60s), then bootstrap_project.
+    """
+    config = _get_config()
+    try:
+        from crucible.core.config import load_project_spec
+        project_name = args["project_name"]
+        count = args.get("count", 1)
+        spec = load_project_spec(project_name, config.project_root)
+
+        from crucible.fleet.manager import FleetManager
+        fm = FleetManager(config)
+
+        # Apply pod overrides if present
+        provider_overrides: dict[str, Any] = {}
+        if spec.pod.image:
+            provider_overrides["image_name"] = spec.pod.image
+        if spec.pod.gpu_type:
+            provider_overrides["gpu_type_id"] = spec.pod.gpu_type
+        if spec.pod.container_disk:
+            provider_overrides["container_disk_gb"] = spec.pod.container_disk
+        if spec.pod.volume_disk:
+            provider_overrides["volume_gb"] = spec.pod.volume_disk
+
+        nodes = fm.provision(
+            count=count,
+            name_prefix=project_name[:12],
+            **provider_overrides,
+        )
+        return {
+            "created": len(nodes),
+            "new_nodes": [
+                {"name": n.get("name", ""), "node_id": n.get("node_id", "")}
+                for n in nodes
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
+    """Bootstrap an external project on fleet nodes: clone, venv, install, setup.
+
+    REQUIRES: Nodes with SSH (run fleet_refresh after provision_project).
+    RETURNS: {total, bootstrapped, nodes: [{name, state, project}]}
+    NEXT: run_project.
+    """
+    config = _get_config()
+    try:
+        from crucible.core.config import load_project_spec
+        from crucible.fleet.bootstrap import bootstrap_project as _bootstrap_project
+        from crucible.fleet.inventory import (
+            load_nodes_if_exists,
+            upsert_node_record,
+        )
+
+        project_name = args["project_name"]
+        spec = load_project_spec(project_name, config.project_root)
+        node_names = args.get("node_names")
+
+        nodes_file = config.project_root / config.nodes_file
+        all_nodes = load_nodes_if_exists(nodes_file) or []
+        ssh_nodes = [n for n in all_nodes if n.get("ssh_host")]
+
+        if node_names:
+            selected = set(node_names)
+            ssh_nodes = [n for n in ssh_nodes if n["name"] in selected]
+
+        if not ssh_nodes:
+            return {
+                "error": "No nodes with SSH found. Run fleet_refresh first.",
+                "total": 0, "bootstrapped": 0, "nodes": [],
+            }
+
+        results = []
+        for node in ssh_nodes:
+            # Apply workspace from spec
+            node["workspace_path"] = spec.workspace
+            try:
+                updated = _bootstrap_project(node, spec)
+                upsert_node_record(nodes_file, updated)
+                results.append(updated)
+            except Exception as exc:
+                node["state"] = "boot_failed"
+                node["error"] = str(exc)
+                upsert_node_record(nodes_file, node)
+                results.append(node)
+
+        bootstrapped = [n for n in results if n.get("state") == "ready"]
+        return {
+            "total": len(results),
+            "bootstrapped": len(bootstrapped),
+            "nodes": [
+                {
+                    "name": n.get("name", ""),
+                    "state": n.get("state", "unknown"),
+                    "project": n.get("project", ""),
+                }
+                for n in results
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def run_project(args: dict[str, Any]) -> dict[str, Any]:
+    """Launch training for an external project on bootstrapped nodes.
+
+    REQUIRES: Nodes bootstrapped via bootstrap_project.
+    RETURNS: {run_id, nodes: [{name, pid, status}]}
+    NEXT: get_fleet_status to monitor, collect_project_results when done.
+    """
+    config = _get_config()
+    try:
+        from crucible.core.config import load_project_spec
+        from crucible.fleet.project_runner import launch_project
+        from crucible.fleet.inventory import load_nodes_if_exists
+
+        project_name = args["project_name"]
+        spec = load_project_spec(project_name, config.project_root)
+        node_names = args.get("node_names")
+        overrides = args.get("overrides", {})
+        run_id = f"{project_name}_{int(__import__('time').time())}"
+
+        nodes_file = config.project_root / config.nodes_file
+        all_nodes = load_nodes_if_exists(nodes_file) or []
+        ready_nodes = [
+            n for n in all_nodes
+            if n.get("env_ready") and n.get("project") == project_name
+        ]
+
+        if node_names:
+            selected = set(node_names)
+            ready_nodes = [n for n in ready_nodes if n["name"] in selected]
+
+        if not ready_nodes:
+            return {
+                "error": f"No nodes bootstrapped for project {project_name!r}. "
+                         f"Run bootstrap_project first.",
+                "run_id": run_id, "nodes": [],
+            }
+
+        launched = []
+        for node in ready_nodes:
+            node["workspace_path"] = spec.workspace
+            try:
+                result = launch_project(node, spec, run_id, overrides=overrides)
+                # Persist for collect_project_results (survives restarts)
+                _save_project_run(run_id, {
+                    "node_name": node["name"],
+                    "ssh_host": node.get("ssh_host", ""),
+                    "ssh_port": node.get("ssh_port", 22),
+                    "workspace_path": spec.workspace,
+                    "project": spec.name,
+                    "pid": result["pid"],
+                })
+                launched.append({
+                    "name": node["name"],
+                    "pid": result["pid"],
+                    "status": "launched",
+                })
+            except Exception as exc:
+                launched.append({
+                    "name": node["name"],
+                    "pid": None,
+                    "status": f"failed: {exc}",
+                })
+
+        return {"run_id": run_id, "nodes": launched}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
+    """Collect results from an external project run.
+
+    REQUIRES: run_project has been called.
+    RETURNS: {status, metrics, log_tail, run_id}
+    """
+    config = _get_config()
+    try:
+        from crucible.fleet.project_runner import collect_project_result
+
+        run_id = args["run_id"]
+        run_info = _load_project_run(run_id)
+        if run_info is None:
+            return {"error": f"No run found for {run_id!r}. Was run_project called?"}
+
+        # Reconstruct node dict from persisted data
+        from crucible.fleet.inventory import load_nodes_if_exists
+        nodes = load_nodes_if_exists(config.project_root / config.nodes_file) or []
+        node = next((n for n in nodes if n["name"] == run_info["node_name"]), None)
+        if node is None:
+            node = {
+                "name": run_info["node_name"],
+                "ssh_host": run_info.get("ssh_host", ""),
+                "ssh_port": run_info.get("ssh_port", 22),
+            }
+        node["workspace_path"] = run_info.get("workspace_path", "/workspace/project")
+
+        from crucible.core.config import load_project_spec
+        spec = load_project_spec(run_info["project"], config.project_root)
+
+        result = collect_project_result(
+            node=node,
+            spec=spec,
+            run_id=run_id,
+            pid=run_info["pid"],
+            local_logs_dir=config.project_root / config.logs_dir,
+            results_file=config.project_root / config.fleet_results_file,
+        )
+
+        return {
+            "run_id": run_id,
+            "status": result["status"],
+            "metrics": result.get("result"),
+            "log_tail": result.get("log_tail", "")[-1000:],
+            "log_path": result.get("log_path", ""),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -2922,6 +3224,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     # Queue management tools
     "cancel_experiment": cancel_experiment,
     "clear_stale_queue": clear_stale_queue,
+    "purge_queue": purge_queue,
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,
@@ -2940,4 +3243,10 @@ TOOL_DISPATCH: dict[str, Any] = {
     "tree_list": tree_list,
     # Modalities tool (Phase 3)
     "config_get_modalities": config_get_modalities,
+    # External project tools
+    "list_projects": list_projects,
+    "provision_project": provision_project,
+    "bootstrap_project": bootstrap_project_tool,
+    "run_project": run_project,
+    "collect_project_results": collect_project_results,
 }
