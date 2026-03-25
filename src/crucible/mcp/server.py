@@ -1426,6 +1426,66 @@ TOOLS: list[Tool] = [
         description="List available training backends with their modality tags, data adapters, and training objectives.",
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
+    # -----------------------------------------------------------------------
+    # External project tools
+    # -----------------------------------------------------------------------
+    Tool(
+        name="list_projects",
+        description="List all external project specs in .crucible/projects/.\n\nREQUIRES: Nothing.\nRETURNS: {projects: [{name, repo, train, metrics_primary}]}\nNEXT: provision_project or bootstrap_project.",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="provision_project",
+        description="Provision nodes for an external project, applying pod overrides (GPU, image, disk) from the project spec.\n\nREQUIRES: RUNPOD_API_KEY, project spec in .crucible/projects/.\nRETURNS: {created, new_nodes: [{name, node_id}]}\nNEXT: fleet_refresh (wait ~60s), then bootstrap_project.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "Name of the project spec (without .yaml)."},
+                "count": {"type": "integer", "default": 1, "description": "Number of nodes."},
+            },
+            "required": ["project_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="bootstrap_project",
+        description="Bootstrap an external project on fleet nodes: clone repo, create venv, install deps, forward env vars, run setup commands. Long-running (2-10 min).\n\nREQUIRES: Nodes with SSH (run fleet_refresh after provision_project).\nRETURNS: {total, bootstrapped, nodes: [{name, state, project}]}\nNEXT: run_project.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "Name of the project spec."},
+                "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes. Empty = all."},
+            },
+            "required": ["project_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="run_project",
+        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with PID.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {run_id, nodes: [{name, pid, status}]}\nNEXT: get_fleet_status(include_metrics=true) to monitor GPU, collect_project_results when done.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "Name of the project spec."},
+                "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes. Empty = all ready."},
+                "overrides": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Env var overrides for this run."},
+            },
+            "required": ["project_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="collect_project_results",
+        description="Collect results from an external project run: rsync logs, parse metrics, fetch WandB data.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id, status, metrics, log_tail}\nNEXT: get_leaderboard if completed.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Run ID returned by run_project."},
+            },
+            "required": ["run_id"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 

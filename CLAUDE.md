@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (77 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (82 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)

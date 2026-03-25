@@ -177,6 +177,119 @@ def load_config(path: Path | None = None) -> ProjectConfig:
     )
 
 
+# ---------------------------------------------------------------------------
+# External project specs
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PodOverrides:
+    """Pod config overrides for external projects."""
+    image: str = ""
+    gpu_type: str = ""
+    container_disk: int = 0
+    volume_disk: int = 0
+
+
+@dataclass
+class ProjectMetrics:
+    """Metrics config for external project result collection."""
+    source: str = "wandb"       # "wandb" | "stdout"
+    primary: str = "val_loss"
+    direction: str = "minimize"
+
+
+@dataclass
+class ProjectSpec:
+    """Spec for running an external project on fleet pods."""
+    name: str
+    repo: str
+    branch: str = "main"
+    shallow: bool = True
+    workspace: str = "/workspace/project"
+    python: str = ""                         # empty = use system python
+    install: list[str] = field(default_factory=list)
+    install_flags: str = ""                  # global pip flags (e.g. --index-url)
+    install_torch: str = ""                  # separate torch install line
+    setup: list[str] = field(default_factory=list)
+    setup_timeout: int = 3600
+    train: str = ""
+    timeout: int = 0                         # training timeout, 0 = no limit
+    env_forward: list[str] = field(default_factory=list)
+    env_set: dict[str, str] = field(default_factory=dict)
+    pod: PodOverrides = field(default_factory=PodOverrides)
+    metrics: ProjectMetrics = field(default_factory=ProjectMetrics)
+
+
+def _build_pod_overrides(raw: dict[str, Any]) -> PodOverrides:
+    if not raw:
+        return PodOverrides()
+    return PodOverrides(
+        image=raw.get("image", ""),
+        gpu_type=raw.get("gpu_type", ""),
+        container_disk=raw.get("container_disk", 0),
+        volume_disk=raw.get("volume_disk", 0),
+    )
+
+
+def _build_project_metrics(raw: dict[str, Any]) -> ProjectMetrics:
+    if not raw:
+        return ProjectMetrics()
+    return ProjectMetrics(
+        source=raw.get("source", "wandb"),
+        primary=raw.get("primary", "val_loss"),
+        direction=raw.get("direction", "minimize"),
+    )
+
+
+def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpec:
+    """Load a project spec from ``.crucible/projects/<name>.yaml``."""
+    root = project_root or Path.cwd()
+    spec_path = root / ".crucible" / "projects" / f"{name}.yaml"
+    if not spec_path.exists():
+        raise FileNotFoundError(f"Project spec not found: {spec_path}")
+    raw = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
+    return ProjectSpec(
+        name=raw.get("name", name),
+        repo=raw.get("repo", ""),
+        branch=raw.get("branch", "main"),
+        shallow=raw.get("shallow", True),
+        workspace=raw.get("workspace", "/workspace/project"),
+        python=raw.get("python", ""),
+        install=raw.get("install", []),
+        install_flags=raw.get("install_flags", ""),
+        install_torch=raw.get("install_torch", ""),
+        setup=raw.get("setup", []),
+        setup_timeout=raw.get("setup_timeout", 3600),
+        train=raw.get("train", ""),
+        timeout=raw.get("timeout", 0),
+        env_forward=raw.get("env_forward", []),
+        env_set=raw.get("env_set", {}),
+        pod=_build_pod_overrides(raw.get("pod", {})),
+        metrics=_build_project_metrics(raw.get("metrics", {})),
+    )
+
+
+def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]:
+    """List all project specs in ``.crucible/projects/``."""
+    root = project_root or Path.cwd()
+    specs_dir = root / ".crucible" / "projects"
+    if not specs_dir.is_dir():
+        return []
+    results = []
+    for p in sorted(specs_dir.glob("*.yaml")):
+        try:
+            raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            results.append({
+                "name": raw.get("name", p.stem),
+                "repo": raw.get("repo", ""),
+                "train": raw.get("train", ""),
+                "metrics_primary": raw.get("metrics", {}).get("primary", "val_loss"),
+            })
+        except Exception:
+            continue
+    return results
+
+
 def find_config() -> Path | None:
     """Walk up from cwd looking for crucible.yaml."""
     current = Path.cwd().resolve()

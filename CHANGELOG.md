@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.2.1-alpha (2026-03-25)
+
+**Modality generalization + external project runner.** Crucible can now train any model type and run arbitrary codebases on fleet pods.
+
+### Added
+- **Modality-agnostic training**: Generic backend supports any model type (diffusion, vision, world models, RL)
+  - `DataAdapter` base class + 4 built-in adapters: `token`, `image_folder`, `synthetic_images`, `synthetic_video`
+  - `TrainingObjective` base class + 6 built-in objectives: `cross_entropy`, `mse`, `kl_divergence`, `composite`, `diffusion`, `jepa`
+  - Validation loop, cosine LR scheduler with warmup, `BATCH_SIZE` env var in generic backend
+- **Diffusion model example** (`examples/diffusion/`): Complete DDPM UNet on MNIST
+- **World model example** (`examples/world_model/`): JEPA encoder-predictor on synthetic bouncing balls with EMA target encoder
+- **External project runner**: Run any codebase on fleet pods via YAML project specs
+  - `ProjectSpec` config at `.crucible/projects/<name>.yaml`
+  - 5 MCP tools: `list_projects`, `provision_project`, `bootstrap_project`, `run_project`, `collect_project_results`
+  - Secure env var forwarding with denylist
+  - Persistent run tracking (survives MCP server restarts)
+  - Pod config overrides (GPU type, image, disk) per project
+- **Queue management**: `purge_queue` tool
+- **Modality guide** (`docs/modality-guide.md`): Complete extension walkthrough
+- **Le-WM inference script** (`examples/world_model/eval_lewm.py`): CEM planning evaluation CLI
+- **WandB metrics fetch**: `fetch_wandb_metrics()` for pulling results from WandB API
+- **82 MCP tools** total (up from 64)
+- **35 new tests** (865 total, up from 830)
+
+### Changed
+- `generic_backend.py`: Validation loop, LR scheduler, final result output, expanded dummy batches
+- OOM retry handles `BATCH_SIZE` (not just `TRAIN_BATCH_TOKENS`)
+- Updated docs: `CLAUDE.md`, `plugins.md`, `index.md`, `roadmap.md` with modality support
+
+### Fixed
+- Diffusion beta schedule capped at 0.999 to prevent NaN with small timestep counts
+- Model registration tests handle idempotent re-registration
+
+---
+
 ## v0.2.0-alpha (2026-03-22)
 
 **Experiment tracking experience.** Major additions for cross-project knowledge sharing, experiment annotation, and agent-friendly APIs.
