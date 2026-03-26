@@ -36,26 +36,42 @@ BOOTSTRAP_ATTEMPTS = 3
 # ---------------------------------------------------------------------------
 
 def _materialize_global_architectures(project_root: Path) -> None:
-    """Copy hub architecture plugins into .crucible/architectures/ so they get rsynced to pods."""
+    """Mirror hub architectures into .crucible/architectures/_hub/ for pod sync."""
     import shutil
     try:
+        from crucible.core.config import ProjectConfig, load_config
         from crucible.core.hub import HubStore
-        hub_dir = HubStore.discover()
+        cfg_path = project_root / "crucible.yaml"
+        cfg = load_config(cfg_path) if cfg_path.exists() else ProjectConfig(project_root=project_root)
+        hub_dir = HubStore.discover(config_hub_dir=getattr(cfg, "hub_dir", ""))
         if hub_dir is None:
             return
         plugins_dir = hub_dir / "architectures" / "plugins"
-        if not plugins_dir.is_dir():
+        specs_dir = hub_dir / "architectures" / "specs"
+        if not plugins_dir.is_dir() and not specs_dir.is_dir():
             return
-        target_dir = project_root / ".crucible" / "architectures"
+        arch_root = project_root / ".crucible" / "architectures"
+        target_dir = arch_root / "_hub"
         target_dir.mkdir(parents=True, exist_ok=True)
-        for py_file in plugins_dir.glob("*.py"):
-            if py_file.name.startswith("_"):
+
+        # Remove legacy top-level mirrors from the old _hub_<name>.py scheme.
+        for legacy in arch_root.glob("_hub_*.py"):
+            legacy.unlink(missing_ok=True)
+        for legacy in arch_root.glob("_hub_*.yaml"):
+            legacy.unlink(missing_ok=True)
+
+        # Rebuild the mirror directory so deletions in the hub propagate cleanly.
+        for existing in target_dir.glob("*"):
+            if existing.is_file():
+                existing.unlink()
+
+        for source_dir, pattern in ((plugins_dir, "*.py"), (specs_dir, "*.yaml")):
+            if not source_dir.is_dir():
                 continue
-            dest = target_dir / f"_hub_{py_file.name}"
-            src_content = py_file.read_text(encoding="utf-8")
-            if dest.exists() and dest.read_text(encoding="utf-8") == src_content:
-                continue
-            shutil.copy2(py_file, dest)
+            for src_file in source_dir.glob(pattern):
+                if src_file.name.startswith("_"):
+                    continue
+                shutil.copy2(src_file, target_dir / src_file.name)
     except Exception:
         pass  # Best-effort: don't fail bootstrap if hub is unavailable
 

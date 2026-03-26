@@ -29,19 +29,18 @@ Inspired by V-JEPA and Le-WM, scaled down for demonstration.
 cd examples/world_model
 
 # Register the model and adapter, then train
-PYTHONPATH=../../src MODEL_FAMILY=jepa_wm DATA_ADAPTER=bouncing_balls \
+MODEL_FAMILY=jepa_wm DATA_ADAPTER=bouncing_balls \
     BATCH_SIZE=8 ITERATIONS=500 IMAGE_SIZE=32 NUM_FRAMES=4 \
     MODEL_DIM=64 ACTION_DIM=2 BASE_CHANNELS=16 LR=0.001 \
     LOG_INTERVAL=10 \
-    python -m crucible.training.generic_backend
+    python train_generic.py
 ```
 
 ## Using presets
 
 ```bash
 # Smoke test (60s, 200 steps)
-PYTHONPATH=../../src python -c "
-import examples.world_model  # registers model + adapter
+python -c "
 from crucible.runner.experiment import run_experiment
 result = run_experiment(
     config={},

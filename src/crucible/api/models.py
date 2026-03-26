@@ -5,6 +5,8 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
+from crucible import __version__
+
 
 # ---------------------------------------------------------------------------
 # Experiments
@@ -108,5 +110,5 @@ class HealthResponse(BaseModel):
     """API health check response."""
 
     status: str = "ok"
-    version: str = "0.1.0"
+    version: str = __version__
     project: str = ""

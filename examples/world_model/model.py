@@ -12,8 +12,8 @@ Architecture:
 
 Usage::
 
-    MODEL_FAMILY=jepa_wm BATCH_SIZE=8 ITERATIONS=2000 NUM_FRAMES=4 \\
-        PYTHONPATH=src python -m crucible.training.generic_backend
+    MODEL_FAMILY=jepa_wm DATA_ADAPTER=bouncing_balls BATCH_SIZE=8 \\
+        ITERATIONS=2000 NUM_FRAMES=4 python train_generic.py
 """
 from __future__ import annotations
 

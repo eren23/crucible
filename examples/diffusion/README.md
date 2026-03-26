@@ -24,18 +24,17 @@ digits using Crucible's generic training backend.
 cd examples/diffusion
 
 # Register the model and adapter, then train
-PYTHONPATH=../../src MODEL_FAMILY=ddpm_unet DATA_ADAPTER=mnist_images \
+MODEL_FAMILY=ddpm_unet DATA_ADAPTER=mnist_images \
     BATCH_SIZE=32 ITERATIONS=500 IMAGE_CHANNELS=1 MODEL_DIM=32 \
     DIFFUSION_STEPS=100 LR=0.001 LOG_INTERVAL=10 \
-    python -m crucible.training.generic_backend
+    python train_generic.py
 ```
 
 ## Using presets
 
 ```bash
 # Smoke test (60s, 200 steps)
-PYTHONPATH=../../src python -c "
-import examples.diffusion  # registers model + adapter
+python -c "
 from crucible.runner.experiment import run_experiment
 result = run_experiment(
     config={},
@@ -53,7 +52,7 @@ print(f'Metrics: {result.get(\"result\", {})}')
 
 ```bash
 # Same Crucible workflow — just specify the backend and model
-PYTHONPATH=../../src python -c "
+python -c "
 from crucible.fleet.manager import FleetManager
 from crucible.core.config import load_config
 fm = FleetManager(load_config())

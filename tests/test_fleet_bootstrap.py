@@ -10,6 +10,7 @@ import pytest
 
 from crucible.fleet.bootstrap import (
     BOOTSTRAP_ATTEMPTS,
+    _materialize_global_architectures,
     bootstrap_node,
     bootstrap_node_worker,
 )
@@ -142,3 +143,46 @@ class TestBootstrapNodeWorker:
                 train_shards=1,
             )
         assert mock_bootstrap.call_count == BOOTSTRAP_ATTEMPTS
+
+
+class TestMaterializeGlobalArchitectures:
+    def test_mirrors_code_and_specs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.core.hub import HubStore
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / "crucible.yaml").write_text(f"hub_dir: {tmp_path / 'hub'}\n", encoding="utf-8")
+
+        hub = HubStore.init(hub_dir=tmp_path / "hub", name="test-hub")
+        hub.store_architecture(
+            name="demo_code",
+            code="from crucible.models.registry import register_model\nregister_model('demo_code', lambda a: None)\n",
+        )
+        hub.store_architecture(
+            name="demo_spec",
+            code="name: demo_spec\nbase: tied_embedding_lm\nembedding: {}\nblock: {}\nstack: {}\n",
+            kind="spec",
+        )
+
+        monkeypatch.delenv("CRUCIBLE_HUB_DIR", raising=False)
+        _materialize_global_architectures(project_root)
+
+        mirror_dir = project_root / ".crucible" / "architectures" / "_hub"
+        assert (mirror_dir / "demo_code.py").exists()
+        assert (mirror_dir / "demo_spec.yaml").exists()
+
+    def test_removes_legacy_prefixed_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.core.hub import HubStore
+
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        (project_root / "crucible.yaml").write_text(f"hub_dir: {tmp_path / 'hub'}\n", encoding="utf-8")
+        arch_root = project_root / ".crucible" / "architectures"
+        arch_root.mkdir(parents=True)
+        (arch_root / "_hub_old.py").write_text("# legacy\n", encoding="utf-8")
+
+        HubStore.init(hub_dir=tmp_path / "hub", name="test-hub")
+        monkeypatch.delenv("CRUCIBLE_HUB_DIR", raising=False)
+        _materialize_global_architectures(project_root)
+
+        assert not (arch_root / "_hub_old.py").exists()

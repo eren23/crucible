@@ -15,6 +15,15 @@ def _get_config() -> ProjectConfig:
     return load_config()
 
 
+def _get_hub_store() -> Any:
+    """Return a HubStore honoring project config hub_dir overrides."""
+    from crucible.core.hub import HubStore
+
+    config = _get_config()
+    hub_dir = HubStore.resolve_hub_dir(config_hub_dir=config.hub_dir)
+    return HubStore(hub_dir=hub_dir)
+
+
 def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
     """SSH to a node and collect GPU/memory/disk metrics."""
     from crucible.fleet.sync import remote_exec
@@ -1505,12 +1514,18 @@ def model_list_families(args: dict[str, Any]) -> dict[str, Any]:
             config = _get_config()
             specs_dir = config.project_root / "src" / "crucible" / "models" / "specs"
             arch_dir = config.project_root / config.store_dir / "architectures"
+            global_meta: dict[str, dict[str, Any]] = {}
+            try:
+                hub = _get_hub_store()
+                global_meta = {entry["name"]: entry for entry in hub.list_architectures()}
+            except Exception:
+                global_meta = {}
             for entry in families:
                 name = entry["name"]
-                has_spec = (
-                    (specs_dir / f"{name}.yaml").exists()
-                    or (arch_dir / f"{name}.yaml").exists()
-                )
+                if entry.get("source") == "global" and name in global_meta:
+                    entry["kind"] = global_meta[name].get("kind", "code")
+                    continue
+                has_spec = (specs_dir / f"{name}.yaml").exists() or (arch_dir / f"{name}.yaml").exists()
                 entry["kind"] = "spec" if has_spec else "code"
             return {"families": families}
         from crucible.models.registry import list_families
@@ -1611,8 +1626,7 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
 
     if scope == "global":
         try:
-            from crucible.core.hub import HubStore
-            hub = HubStore()
+            hub = _get_hub_store()
             result = hub.store_architecture(
                 name=name,
                 code=code,
@@ -1724,8 +1738,7 @@ def model_generate_template(args: dict[str, Any]) -> dict[str, Any]:
 def model_list_global_architectures(args: dict[str, Any]) -> dict[str, Any]:
     """List architecture plugins stored in the global hub."""
     try:
-        from crucible.core.hub import HubStore
-        hub = HubStore()
+        hub = _get_hub_store()
         return {"architectures": hub.list_architectures()}
     except Exception as exc:
         return {"architectures": [], "note": str(exc)}
@@ -1740,8 +1753,7 @@ def model_promote_architecture(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"Local plugin {name!r} not found at {plugin_path}"}
     code = plugin_path.read_text(encoding="utf-8")
     try:
-        from crucible.core.hub import HubStore
-        hub = HubStore()
+        hub = _get_hub_store()
         result = hub.store_architecture(name=name, code=code, source_project=config.name)
         return {"status": "promoted", "family": name, "metadata": result}
     except Exception as exc:
@@ -1752,22 +1764,28 @@ def model_import_architecture(args: dict[str, Any]) -> dict[str, Any]:
     """Import a global hub architecture into the project's user_architectures/ directory."""
     name = args["name"]
     try:
-        from crucible.core.hub import HubStore
-        hub = HubStore()
-        code = hub.get_architecture_code(name)
-        if code is None:
+        hub = _get_hub_store()
+        metadata = hub.get_architecture(name)
+        content = hub.get_architecture_content(name)
+        if metadata is None or content is None:
             return {"error": f"Architecture {name!r} not found in hub"}
         config = _get_config()
-        target = config.project_root / config.store_dir / "architectures" / f"{name}.py"
+        suffix = ".py" if metadata.get("kind", "code") == "code" else ".yaml"
+        target = config.project_root / config.store_dir / "architectures" / f"{name}{suffix}"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(code, encoding="utf-8")
+        target.write_text(content, encoding="utf-8")
         # Import into current process
         try:
             import importlib.util
-            spec = importlib.util.spec_from_file_location(f"user_arch_{name}", target)
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
+            if suffix == ".py":
+                spec = importlib.util.spec_from_file_location(f"user_arch_{name}", target)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+            else:
+                from crucible.models.composer import register_from_spec
+
+                register_from_spec(name, target, source="local")
         except Exception:
             pass
         from crucible.models.registry import list_families
@@ -1886,18 +1904,29 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     if scope == "global":
         try:
-            from crucible.core.hub import HubStore
-            hub = HubStore()
-            arch_dir = hub._arch_plugins_dir
+            hub = _get_hub_store()
         except Exception as exc:
             return {"error": f"Hub not available for global scope: {exc}"}
     else:
         arch_dir = config.project_root / config.store_dir / "architectures"
 
-    arch_dir.mkdir(parents=True, exist_ok=True)
-    path = arch_dir / f"{name}.yaml"
-    with open(path, "w") as f:
-        yaml.safe_dump(spec_dict, f, default_flow_style=False, sort_keys=False)
+    yaml_text = yaml.safe_dump(spec_dict, default_flow_style=False, sort_keys=False)
+    if scope == "global":
+        try:
+            result = hub.store_architecture(
+                name=name,
+                code=yaml_text,
+                source_project=config.name,
+                kind="spec",
+            )
+            path = hub.hub_dir / result["relative_path"]
+        except Exception as exc:
+            return {"error": f"Failed to store global architecture spec: {exc}"}
+    else:
+        arch_dir.mkdir(parents=True, exist_ok=True)
+        path = arch_dir / f"{name}.yaml"
+        with open(path, "w") as f:
+            f.write(yaml_text)
 
     # Register using register_from_spec
     try:
@@ -2363,9 +2392,19 @@ def model_fetch_architecture(args: dict[str, Any]) -> dict[str, Any]:
     search_paths.append(("local", local_arch_dir / f"{family}.yaml"))
 
     # Global (hub)
-    hub_dir = Path.home() / ".crucible-hub" / "architectures" / "plugins"
-    search_paths.append(("global", hub_dir / f"{family}.py"))
-    search_paths.append(("global", hub_dir / f"{family}.yaml"))
+    try:
+        hub = _get_hub_store()
+        metadata = hub.get_architecture(family)
+        if metadata is not None:
+            relative_path = metadata.get("relative_path")
+            if relative_path:
+                search_paths.append(("global", hub.hub_dir / relative_path))
+            elif metadata.get("kind", "code") == "spec":
+                search_paths.append(("global", hub._arch_specs_dir / f"{family}.yaml"))
+            else:
+                search_paths.append(("global", hub._arch_plugins_dir / f"{family}.py"))
+    except Exception:
+        pass
 
     # Builtin code
     import crucible.models.architectures as arch_pkg

@@ -8,6 +8,8 @@ Or directly:
 """
 from __future__ import annotations
 
+from crucible import __version__
+
 
 def create_app():
     """Create FastAPI app. Lazy-imports fastapi."""
@@ -18,7 +20,7 @@ def create_app():
 
     app = FastAPI(
         title="Crucible API",
-        version="0.1.0",
+        version=__version__,
         description="Lightweight API for ML experiment tracking",
     )
     app.middleware("http")(api_key_middleware)

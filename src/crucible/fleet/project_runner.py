@@ -41,12 +41,13 @@ def launch_project(
     activate = f"cd {ws}"
     if spec.python:
         activate += " && source .venv/bin/activate"
+    source_env = f"if [ -f {ws}/.env ]; then source {ws}/.env; fi"
 
     # Detached command via nohup + bash -c (so inline env vars work)
     train_cmd = spec.train
     cmd = (
         f"mkdir -p {log_dir} && "
-        f"{activate} && source {ws}/.env 2>/dev/null && "
+        f"{activate} && {source_env} && "
         f"{override_exports}"
         f"nohup bash -c {shlex.quote(train_cmd)} > {log_file} 2>&1 & echo $!"
     )

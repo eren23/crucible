@@ -26,13 +26,20 @@ except Exception:
 
 # --- Global hub architectures (source="global") ---
 # Loads both .py plugins and .yaml specs from the hub architectures directory.
+_hub_loaded = False
 try:
+    from crucible.core.config import load_config as _load_cfg_global
     from crucible.core.hub import HubStore
-    _hub_dir = HubStore.discover()
+    _cfg_global = _load_cfg_global()
+    _hub_dir = HubStore.discover(config_hub_dir=getattr(_cfg_global, "hub_dir", ""))
     if _hub_dir is not None:
-        _plugins_dir = _hub_dir / "architectures" / "plugins"
-        if _plugins_dir.is_dir():
-            _reg.load_global_architectures(_plugins_dir)
+        for _source_dir in (
+            _hub_dir / "architectures" / "plugins",
+            _hub_dir / "architectures" / "specs",
+        ):
+            if _source_dir.is_dir():
+                _reg.load_global_architectures(_source_dir, source="global")
+                _hub_loaded = True
 except Exception:
     pass
 
@@ -42,6 +49,9 @@ _reg._CURRENT_REGISTER_SOURCE = "local"
 try:
     from crucible.core.config import load_config as _load_cfg
     _cfg = _load_cfg()
+    _mirrored_global_arch_dir = _cfg.project_root / _cfg.store_dir / "architectures" / "_hub"
+    if not _hub_loaded and _mirrored_global_arch_dir.is_dir():
+        _reg.load_global_architectures(_mirrored_global_arch_dir, source="global")
     _local_arch_dir = _cfg.project_root / _cfg.store_dir / "architectures"
     if _local_arch_dir.is_dir():
         _reg.load_global_architectures(_local_arch_dir, source="local")

@@ -1,5 +1,5 @@
 # Crucible config for world model example
-# Run: PYTHONPATH=src python -m crucible.training.generic_backend
+# Run: python train_generic.py
 
 project:
   name: world-model-example
@@ -7,7 +7,7 @@ project:
 
 training:
   - backend: generic
-    script: src/crucible/training/generic_backend.py
+    script: train_generic.py
     modality: world_model
 
 metrics:

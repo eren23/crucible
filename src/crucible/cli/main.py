@@ -5,6 +5,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from crucible import __version__
+
 
 def main() -> None:
     from crucible.core.errors import CrucibleError
@@ -21,7 +23,7 @@ def _main() -> None:
         prog="crucible",
         description="Crucible — ML research platform for fleet orchestration, autonomous experimentation, and model development.",
     )
-    parser.add_argument("--version", action="version", version="crucible 0.1.0")
+    parser.add_argument("--version", action="version", version=f"crucible {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
