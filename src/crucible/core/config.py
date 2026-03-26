@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from crucible import __version__ as CRUCIBLE_VERSION
+
 
 @dataclass
 class ProviderConfig:
@@ -54,7 +56,7 @@ class ResearcherConfig:
 @dataclass
 class ProjectConfig:
     name: str = "crucible-project"
-    version: str = "0.1.0"
+    version: str = CRUCIBLE_VERSION
     project_root: Path = field(default_factory=Path.cwd)
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     data: DataConfig = field(default_factory=DataConfig)
@@ -63,6 +65,7 @@ class ProjectConfig:
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     store_dir: str = ".crucible"
+    compose_builtin_specs: bool = False
     auto_commit_versions: bool = False
     research_state_file: str = "research_state.jsonl"
     sync_excludes: list[str] = field(default_factory=lambda: [
@@ -148,7 +151,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
 
     return ProjectConfig(
         name=raw.get("name", "crucible-project"),
-        version=raw.get("version", "0.1.0"),
+        version=raw.get("version", CRUCIBLE_VERSION),
         project_root=project_root,
         provider=_build_provider(raw.get("provider", {})),
         data=_build_data(raw.get("data", {})),
@@ -157,6 +160,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         metrics=_build_metrics(raw.get("metrics", {})),
         researcher=_build_researcher(raw.get("researcher", {})),
         store_dir=raw.get("store_dir", ".crucible"),
+        compose_builtin_specs=raw.get("compose_builtin_specs", False),
         auto_commit_versions=raw.get("auto_commit_versions", False),
         research_state_file=raw.get("research_state_file", "research_state.jsonl"),
         sync_excludes=raw.get("sync_excludes", [
@@ -305,7 +309,7 @@ def generate_default_config() -> str:
     return """\
 # Crucible project configuration
 name: my-project
-version: "0.1.0"
+version: "{version}"
 
 # Compute provider
 provider:
@@ -367,4 +371,4 @@ sync_excludes:
 # Output paths
 results_file: experiments.jsonl
 logs_dir: logs
-"""
+""".format(version=CRUCIBLE_VERSION)

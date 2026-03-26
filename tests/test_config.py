@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from crucible import __version__ as CRUCIBLE_VERSION
 from crucible.core.config import (
     ProjectConfig,
     ProviderConfig,
@@ -41,7 +42,7 @@ class TestGenerateDefaultConfig:
     def test_parsed_fields(self):
         parsed = yaml.safe_load(generate_default_config())
         assert parsed["name"] == "my-project"
-        assert parsed["version"] == "0.1.0"
+        assert parsed["version"] == CRUCIBLE_VERSION
         assert parsed["provider"]["type"] == "ssh"
         assert isinstance(parsed["training"], list)
         assert len(parsed["training"]) >= 1
@@ -58,7 +59,7 @@ class TestProjectConfigDefaults:
 
     def test_default_version(self):
         cfg = ProjectConfig()
-        assert cfg.version == "0.1.0"
+        assert cfg.version == CRUCIBLE_VERSION
 
     def test_default_provider(self):
         cfg = ProjectConfig()
@@ -102,7 +103,7 @@ class TestLoadConfig:
         monkeypatch.chdir(tmp_path)
         cfg = load_config(path=None)
         assert cfg.name == "crucible-project"
-        assert cfg.version == "0.1.0"
+        assert cfg.version == CRUCIBLE_VERSION
 
     def test_load_from_yaml_file(self, tmp_path):
         yaml_path = tmp_path / "crucible.yaml"
@@ -154,7 +155,7 @@ class TestLoadConfig:
         yaml_path.write_text("name: partial\n", encoding="utf-8")
         cfg = load_config(yaml_path)
         assert cfg.name == "partial"
-        assert cfg.version == "0.1.0"
+        assert cfg.version == CRUCIBLE_VERSION
         assert cfg.training == []
 
 

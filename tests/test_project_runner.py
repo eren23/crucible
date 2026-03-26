@@ -61,6 +61,14 @@ class TestLaunchProject:
         assert "LR" in cmd
         assert "0.001" in cmd
 
+    @patch("crucible.fleet.project_runner.remote_exec")
+    def test_missing_env_file_does_not_block_launch(self, mock_exec):
+        mock_exec.return_value = MagicMock(returncode=0, stdout="111\n", stderr="")
+        launch_project(_make_node(), _make_spec(env_set={}), "run_envless")
+        cmd = mock_exec.call_args[0][1]
+        assert "if [ -f /workspace/test/.env ]; then source /workspace/test/.env; fi" in cmd
+        assert "nohup bash -c" in cmd
+
 
 class TestCheckProjectRunning:
     @patch("crucible.fleet.project_runner.remote_exec")

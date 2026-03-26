@@ -520,3 +520,51 @@ class TestPersistence:
     def test_track_scope_without_track_raises(self, hub):
         with pytest.raises(HubError, match="Track name required"):
             hub.store_finding({"title": "X"}, scope="track")
+
+
+# ---------------------------------------------------------------------------
+# Architecture storage
+# ---------------------------------------------------------------------------
+
+
+class TestArchitectures:
+    def test_store_code_architecture(self, hub):
+        record = hub.store_architecture(
+            name="code_arch",
+            code="from crucible.models.registry import register_model\nregister_model('code_arch', lambda a: None)\n",
+            source_project="proj-a",
+        )
+        assert record["name"] == "code_arch"
+        assert record["kind"] == "code"
+        assert record["relative_path"].endswith("architectures/plugins/code_arch.py")
+        assert hub.get_architecture_code("code_arch") is not None
+        assert hub.get_architecture_content("code_arch") is not None
+
+    def test_store_spec_architecture(self, hub):
+        record = hub.store_architecture(
+            name="spec_arch",
+            code="name: spec_arch\nbase: tied_embedding_lm\nembedding: {}\nblock: {}\nstack: {}\n",
+            source_project="proj-a",
+            kind="spec",
+        )
+        assert record["name"] == "spec_arch"
+        assert record["kind"] == "spec"
+        assert record["relative_path"].endswith("architectures/specs/spec_arch.yaml")
+        assert hub.get_architecture_code("spec_arch") is None
+        content = hub.get_architecture_content("spec_arch")
+        assert content is not None
+        assert "name: spec_arch" in content
+
+    def test_list_architectures_normalizes_old_records(self, hub):
+        registry_path = hub._arch_registry_path
+        registry_path.write_text(
+            '{"name": "legacy_arch", "added_at": "2024-01-01T00:00:00Z", "source_project": "", "tags": []}\n',
+            encoding="utf-8",
+        )
+        (hub._arch_plugins_dir / "legacy_arch.py").write_text(
+            "from crucible.models.registry import register_model\nregister_model('legacy_arch', lambda a: None)\n",
+            encoding="utf-8",
+        )
+        records = hub.list_architectures()
+        assert records[0]["kind"] == "code"
+        assert records[0]["relative_path"].endswith("architectures/plugins/legacy_arch.py")

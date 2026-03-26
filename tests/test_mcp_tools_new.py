@@ -179,6 +179,33 @@ class TestModelFetchArchitecture:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
+    def test_fetch_global_yaml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Global hub YAML specs are found via hub metadata."""
+        from crucible.core.hub import HubStore
+        from crucible.mcp.tools import model_fetch_architecture
+
+        hub_dir = tmp_path / "hub"
+        hub = HubStore.init(hub_dir=hub_dir, name="hub")
+        hub.store_architecture(
+            name="global_spec",
+            code="name: global_spec\nbase: tied_embedding_lm\nembedding: {}\nblock: {}\nstack: {}\n",
+            kind="spec",
+        )
+
+        FakeConfig = type(
+            "FakeConfig",
+            (),
+            {"project_root": tmp_path, "store_dir": ".crucible", "hub_dir": str(hub_dir)},
+        )
+
+        monkeypatch.setattr("crucible.mcp.tools._get_config", lambda: FakeConfig())
+
+        result = model_fetch_architecture({"family": "global_spec"})
+        assert result["family"] == "global_spec"
+        assert result["kind"] == "spec"
+        assert result["source"] == "global"
+        assert "name: global_spec" in result["content"]
+
     def test_py_takes_precedence_over_yaml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """When both .py and .yaml exist at same scope, .py wins."""
         from crucible.mcp.tools import model_fetch_architecture
@@ -197,6 +224,35 @@ class TestModelFetchArchitecture:
 
         result = model_fetch_architecture({"family": "dual"})
         assert result["kind"] == "code"  # .py takes precedence
+
+
+class TestModelImportArchitecture:
+    def test_imports_global_yaml(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.core.hub import HubStore
+        from crucible.mcp.tools import model_import_architecture
+
+        project = tmp_path / "project"
+        project.mkdir()
+        hub_dir = tmp_path / "hub"
+        hub = HubStore.init(hub_dir=hub_dir, name="hub")
+        hub.store_architecture(
+            name="global_spec",
+            code="name: global_spec\nbase: tied_embedding_lm\nembedding: {}\nblock: {}\nstack: {}\n",
+            kind="spec",
+        )
+
+        FakeConfig = type(
+            "FakeConfig",
+            (),
+            {"project_root": project, "store_dir": ".crucible", "hub_dir": str(hub_dir)},
+        )
+
+        monkeypatch.setattr("crucible.mcp.tools._get_config", lambda: FakeConfig())
+
+        result = model_import_architecture({"name": "global_spec"})
+        assert result["status"] == "imported"
+        assert result["path"].endswith("global_spec.yaml")
+        assert (project / ".crucible" / "architectures" / "global_spec.yaml").exists()
 
 
 # ---------------------------------------------------------------------------

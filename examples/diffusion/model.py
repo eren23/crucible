@@ -12,8 +12,8 @@ Architecture:
 
 Usage::
 
-    MODEL_FAMILY=ddpm_unet BATCH_SIZE=32 ITERATIONS=5000 \\
-        PYTHONPATH=src python -m crucible.training.generic_backend
+    MODEL_FAMILY=ddpm_unet DATA_ADAPTER=mnist_images BATCH_SIZE=32 \\
+        ITERATIONS=5000 python train_generic.py
 """
 from __future__ import annotations
 

@@ -112,13 +112,13 @@ def run_generic_training() -> None:
     total_params = sum(p.numel() for p in model.parameters())
     print(f"model_params:{total_params}", flush=True)
 
-    # Check if model has its own loss computation
-    has_compute_loss = hasattr(model, "compute_loss")
-
-    # Build objective only if model doesn't handle loss internally
     objective = None
-    if not has_compute_loss:
-        objective = build_objective(objective_name)
+    objective_build_error: Exception | None = None
+    if objective_name:
+        try:
+            objective = build_objective(objective_name)
+        except Exception as exc:
+            objective_build_error = exc
 
     # Parameter groups
     if hasattr(model, "param_groups"):
@@ -136,12 +136,11 @@ def run_generic_training() -> None:
     # LR scheduler
     scheduler = _build_scheduler(optimizer, lr_schedule, warmup_steps, iterations, lr)
 
-    # Build data adapter (fallback to dummy batch if adapter unavailable)
-    data_adapter = None
+    # Build data adapter eagerly so misconfiguration fails fast.
     try:
         data_adapter = build_data_adapter(data_adapter_name)
-    except Exception:
-        pass  # Will use _get_dummy_batch as fallback
+    except Exception as exc:
+        raise RuntimeError(f"Failed to build DATA_ADAPTER={data_adapter_name!r}: {exc}") from exc
 
     # ---------------------------------------------------------------
     # Training loop
@@ -161,7 +160,7 @@ def run_generic_training() -> None:
 
         optimizer.zero_grad(set_to_none=True)
 
-        # Get batch from data adapter or fallback to dummy
+        # Get batch from the configured data adapter.
         batch = _get_batch(
             data_adapter, model, device, args,
             batch_size=batch_size,
@@ -170,13 +169,14 @@ def run_generic_training() -> None:
         )
 
         # Forward pass
-        if hasattr(model, "training_step"):
-            step_result = model.training_step(**batch)
-        elif objective is not None:
-            predictions = model(**batch)
-            step_result = objective.compute(predictions, batch)
-        else:
-            step_result = {"loss": torch.tensor(0.0, device=device)}
+        step_result = _resolve_step_result(
+            model,
+            batch,
+            objective=objective,
+            objective_name=objective_name,
+            objective_build_error=objective_build_error,
+            stage="training",
+        )
 
         loss = step_result["loss"]
         loss.backward()
@@ -201,6 +201,8 @@ def run_generic_training() -> None:
         if val_interval > 0 and (step % val_interval == 0 or step == iterations):
             val_metrics = _run_validation(
                 model, objective, data_adapter, device, args,
+                objective_name=objective_name,
+                objective_build_error=objective_build_error,
                 batch_size=batch_size,
                 image_size=image_size,
                 num_frames=num_frames,
@@ -271,6 +273,46 @@ def _build_scheduler(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
+def _resolve_step_result(
+    model: Any,
+    batch: dict[str, Any],
+    *,
+    objective: Any,
+    objective_name: str,
+    objective_build_error: Exception | None,
+    stage: str,
+) -> dict[str, Any]:
+    """Return a step result dict guaranteed to contain a ``loss`` entry."""
+    if hasattr(model, f"{stage}_step"):
+        step_fn = getattr(model, f"{stage}_step")
+        step_result = step_fn(**batch)
+    elif stage == "validation" and hasattr(model, "training_step"):
+        step_result = model.training_step(**batch)
+    else:
+        step_result = model(**batch)
+
+    if not isinstance(step_result, dict):
+        raise TypeError(f"{stage}_step must return a dict, got {type(step_result).__name__}")
+    if "loss" in step_result:
+        return step_result
+    if objective is None:
+        if objective_build_error is not None:
+            raise RuntimeError(
+                f"{stage}_step returned no 'loss' and TRAINING_OBJECTIVE={objective_name!r} failed to build: "
+                f"{objective_build_error}"
+            ) from objective_build_error
+        raise KeyError(
+            f"{stage}_step returned no 'loss'. Either return a loss directly or configure a valid "
+            f"TRAINING_OBJECTIVE to consume the model outputs."
+        )
+    objective_result = objective.compute(step_result, batch)
+    if not isinstance(objective_result, dict) or "loss" not in objective_result:
+        raise KeyError(
+            f"TRAINING_OBJECTIVE={objective_name!r} did not produce a 'loss' during {stage}."
+        )
+    return objective_result
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -282,6 +324,8 @@ def _run_validation(
     device: Any,
     args: Any,
     *,
+    objective_name: str,
+    objective_build_error: Exception | None,
     batch_size: int = 8,
     image_size: int = 32,
     num_frames: int = 4,
@@ -302,15 +346,14 @@ def _run_validation(
                 image_size=image_size,
                 num_frames=num_frames,
             )
-            if hasattr(model, "validation_step"):
-                step_result = model.validation_step(**batch)
-            elif hasattr(model, "training_step"):
-                step_result = model.training_step(**batch)
-            elif objective is not None:
-                predictions = model(**batch)
-                step_result = objective.compute(predictions, batch)
-            else:
-                step_result = {"loss": torch.tensor(0.0, device=device)}
+            step_result = _resolve_step_result(
+                model,
+                batch,
+                objective=objective,
+                objective_name=objective_name,
+                objective_build_error=objective_build_error,
+                stage="validation",
+            )
 
             for key, val in step_result.items():
                 if hasattr(val, "item"):
@@ -344,19 +387,21 @@ def _get_batch(
     image_size: int = 32,
     num_frames: int = 4,
 ) -> dict[str, Any]:
-    """Get a batch from data adapter, falling back to dummy data."""
-    if data_adapter is not None:
-        try:
-            return data_adapter.next_batch(
-                seq_len=getattr(args, "seq_len", 128),
-                batch_size=batch_size,
-                image_size=image_size,
-                num_frames=num_frames,
-                device=device,
-            )
-        except Exception:
-            pass
-    return _get_dummy_batch(model, device, args, batch_size, image_size, num_frames)
+    """Get a batch from the configured data adapter."""
+    if data_adapter is None:
+        raise RuntimeError("No data adapter is configured for generic training.")
+    try:
+        return data_adapter.next_batch(
+            seq_len=getattr(args, "seq_len", 128),
+            batch_size=batch_size,
+            image_size=image_size,
+            num_frames=num_frames,
+            device=device,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"{type(data_adapter).__name__}.next_batch() failed: {exc}"
+        ) from exc
 
 
 def _get_dummy_batch(

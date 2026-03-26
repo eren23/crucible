@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from crucible import __version__ as CRUCIBLE_VERSION
 from crucible.core.config import ProjectConfig
 from crucible.researcher.briefing import build_briefing
 
@@ -17,7 +18,7 @@ from crucible.researcher.briefing import build_briefing
 
 SAMPLE_YAML = """\
 name: briefing-test
-version: "0.1.0"
+version: "{version}"
 
 metrics:
   primary: val_loss
@@ -32,7 +33,7 @@ fleet_results_file: experiments_fleet.jsonl
 logs_dir: logs
 store_dir: .crucible
 research_state_file: research_state.jsonl
-"""
+""".format(version=CRUCIBLE_VERSION)
 
 
 def _make_result(

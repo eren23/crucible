@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Hub/global architecture flows are now consistent across local MCP usage, fleet sync, and pod loading:
+  - global YAML architectures are stored and listed as specs, not mixed into the old plugin path
+  - mirrored hub assets sync to pods through `.crucible/architectures/_hub/`
+  - live RunPod validation confirmed both global YAML specs and global Python plugins load on remote nodes
+- Generic backend contract is stricter and safer:
+  - objective-based `CrucibleModel` runs now compute loss correctly when the model returns predictions instead of `loss`
+  - adapter failures now fail fast instead of falling back to dummy data
+  - live RunPod validation confirmed both the positive objective path and the fail-fast adapter path
+- External project launch no longer depends on a `.env` file existing in the workspace:
+  - `launch_project()` now conditionally sources `.env` only when present
+  - regression coverage added for env-less project specs
+
+### Added
+- Stronger integration coverage for release confidence:
+  - MCP server stdio protocol tests
+  - example-project `run_experiment()` integration tests
+  - architecture loading precedence integration tests
+  - fleet-style external project roundtrip tests
+
 ## v0.2.1-alpha (2026-03-25)
 
 **Modality generalization + external project runner.** Crucible can now train any model type and run arbitrary codebases on fleet pods.

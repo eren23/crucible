@@ -103,6 +103,10 @@ class HubStore:
         return self._architectures_dir / "plugins"
 
     @property
+    def _arch_specs_dir(self) -> Path:
+        return self._architectures_dir / "specs"
+
+    @property
     def _arch_registry_path(self) -> Path:
         return self._architectures_dir / "registry.jsonl"
 
@@ -141,16 +145,24 @@ class HubStore:
         return _DEFAULT_HUB_DIR
 
     @staticmethod
-    def discover() -> Path | None:
+    def discover(
+        *,
+        explicit: str | Path | None = None,
+        config_hub_dir: str | None = None,
+    ) -> Path | None:
         """Find hub dir. Returns None if not initialized."""
-        env = os.environ.get("CRUCIBLE_HUB_DIR")
-        if env:
-            p = Path(env)
+        candidates = [
+            explicit,
+            os.environ.get("CRUCIBLE_HUB_DIR"),
+            config_hub_dir,
+            _DEFAULT_HUB_DIR,
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            p = Path(candidate).expanduser()
             if (p / "hub.yaml").exists():
                 return p
-        default = _DEFAULT_HUB_DIR
-        if (default / "hub.yaml").exists():
-            return default
         return None
 
     @staticmethod
@@ -173,6 +185,7 @@ class HubStore:
         (hub_dir / "tracks").mkdir(exist_ok=True)
         (hub_dir / "global").mkdir(exist_ok=True)
         (hub_dir / "architectures" / "plugins").mkdir(parents=True, exist_ok=True)
+        (hub_dir / "architectures" / "specs").mkdir(parents=True, exist_ok=True)
 
         config = {
             "name": name or hub_dir.name,
@@ -688,20 +701,36 @@ class HubStore:
     # Architecture storage
     # ------------------------------------------------------------------
 
+    def _normalize_architecture_record(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Return a backward-compatible architecture metadata record."""
+        record = dict(entry)
+        kind = record.get("kind", "code")
+        if kind not in {"code", "spec"}:
+            raise HubError(f"Unsupported architecture kind: {kind!r}")
+        record["kind"] = kind
+        if "relative_path" not in record:
+            suffix = ".py" if kind == "code" else ".yaml"
+            directory = "plugins" if kind == "code" else "specs"
+            record["relative_path"] = str(Path("architectures") / directory / f"{record['name']}{suffix}")
+        return record
+
+    def _architecture_path_from_record(self, record: dict[str, Any]) -> Path:
+        normalized = self._normalize_architecture_record(record)
+        return self.hub_dir / normalized["relative_path"]
+
+    def _read_architecture_registry(self) -> list[dict[str, Any]]:
+        return [self._normalize_architecture_record(entry) for entry in read_jsonl(self._arch_registry_path)]
+
     def store_architecture(
         self,
         name: str,
         code: str,
         source_project: str = "",
         tags: list[str] | None = None,
+        *,
+        kind: str = "code",
     ) -> dict[str, Any]:
-        """Store an architecture plugin in the hub for cross-project reuse.
-
-        Validates the name is a valid Python identifier and the code contains
-        a ``register_model`` call. Rejects duplicates.
-
-        Returns the metadata dict written to the registry ledger.
-        """
+        """Store a code plugin or YAML spec in the hub for cross-project reuse."""
         self._require_init()
 
         if not name.isidentifier():
@@ -709,25 +738,31 @@ class HubStore:
                 f"Architecture name must be a valid Python identifier: {name!r}"
             )
 
-        if "register_model" not in code:
+        if kind not in {"code", "spec"}:
+            raise HubError(f"Architecture kind must be 'code' or 'spec', got {kind!r}")
+
+        if kind == "code" and "register_model" not in code:
             raise HubError(
                 f"Architecture code must contain a register_model call: {name!r}"
             )
 
         # Check for duplicates in the registry ledger
-        existing = read_jsonl(self._arch_registry_path)
+        existing = self._read_architecture_registry()
         for entry in existing:
             if entry.get("name") == name:
                 raise HubError(f"Architecture '{name}' already exists in the hub.")
 
-        # Write the plugin file
-        self._arch_plugins_dir.mkdir(parents=True, exist_ok=True)
-        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        suffix = ".py" if kind == "code" else ".yaml"
+        target_dir = self._arch_plugins_dir if kind == "code" else self._arch_specs_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        plugin_path = target_dir / f"{name}{suffix}"
         plugin_path.write_text(code, encoding="utf-8")
 
         # Build metadata record
         record: dict[str, Any] = {
             "name": name,
+            "kind": kind,
+            "relative_path": str(plugin_path.relative_to(self.hub_dir)),
             "added_at": utc_now_iso(),
             "source_project": source_project,
             "tags": tags or [],
@@ -744,7 +779,7 @@ class HubStore:
         Returns None if no architecture with that name exists.
         """
         self._require_init()
-        entries = read_jsonl(self._arch_registry_path)
+        entries = self._read_architecture_registry()
         for entry in entries:
             if entry.get("name") == name:
                 return entry
@@ -756,10 +791,24 @@ class HubStore:
         Returns the file contents, or None if the plugin file doesn't exist.
         """
         self._require_init()
-        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        record = self.get_architecture(name)
+        if record is not None and record.get("kind") != "code":
+            return None
+        plugin_path = self._architecture_path_from_record(record or {"name": name, "kind": "code"})
         if not plugin_path.exists():
             return None
         return plugin_path.read_text(encoding="utf-8")
+
+    def get_architecture_content(self, name: str) -> str | None:
+        """Read the stored source or YAML content for an architecture."""
+        self._require_init()
+        record = self.get_architecture(name)
+        if record is None:
+            return None
+        path = self._architecture_path_from_record(record)
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8")
 
     def list_architectures(self) -> list[dict[str, Any]]:
         """List all architecture entries from the registry ledger.
@@ -767,7 +816,7 @@ class HubStore:
         Returns an empty list if the ledger doesn't exist.
         """
         self._require_init()
-        return read_jsonl(self._arch_registry_path)
+        return self._read_architecture_registry()
 
     def remove_architecture(self, name: str) -> bool:
         """Remove an architecture from the hub.
@@ -779,14 +828,15 @@ class HubStore:
         self._require_init()
 
         # Remove from ledger
-        existing = read_jsonl(self._arch_registry_path)
+        existing = self._read_architecture_registry()
+        target = next((e for e in existing if e.get("name") == name), None)
         updated = [e for e in existing if e.get("name") != name]
         if len(updated) == len(existing):
             return False
         write_jsonl(self._arch_registry_path, updated)
 
-        # Delete the plugin file
-        plugin_path = self._arch_plugins_dir / f"{name}.py"
+        # Delete the stored asset file
+        plugin_path = self._architecture_path_from_record(target or {"name": name, "kind": "code"})
         if plugin_path.exists():
             plugin_path.unlink()
 
