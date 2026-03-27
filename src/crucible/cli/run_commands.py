@@ -7,6 +7,7 @@ from pathlib import Path
 
 from crucible.core.config import load_config
 from crucible.core.errors import CrucibleError
+from crucible.core.experiment_contract import validate_experiment_contract
 
 
 def handle_run(args: argparse.Namespace) -> None:
@@ -23,6 +24,12 @@ def _handle_run(args: argparse.Namespace) -> None:
 
     if cmd == "experiment":
         from crucible.runner.experiment import run_experiment
+
+        validate_experiment_contract(
+            config,
+            action="crucible run experiment",
+            execution_mode="local",
+        )
 
         overrides: dict[str, str] = {}
         for item in getattr(args, "overrides", None) or []:

@@ -83,6 +83,8 @@ Agents call `version_run_design` to execute a versioned design:
 }
 ```
 
+For an external-project example that starts from a fresh directory and runs through MCP, see [YOLO MCP Demo](yolo-mcp-demo).
+
 ## Analyze Results
 
 ```bash

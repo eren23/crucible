@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 77 MCP tools for AI agents. Start the server:
+Crucible exposes 85 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -514,3 +514,109 @@ Branching experiment exploration. Instead of running all experiments equally, or
 ### config_get_modalities
 
 Returns available training backends (torch, generic), registered data adapters (token), and training objectives (cross_entropy, mse, kl_divergence).
+
+---
+
+## Session Recipes (3 tools)
+
+Recipes capture successful experiment sessions as step-by-step playbooks. Save what you did, what worked, what broke, and how you fixed it. Other agents can follow a recipe to reproduce the session.
+
+| Tool | Description |
+|------|-------------|
+| `recipe_save` | Save a session recipe with steps, environment, gotchas, and results |
+| `recipe_list` | List all saved recipes (optionally filter by tag) |
+| `recipe_get` | Get full recipe details for reproduction |
+
+### recipe_save
+
+Save a reproducible session recipe. Validates name (lowercase slug), requires at least one step with a `tool` key.
+
+**Parameters:**
+- `name` (string, required) — Slug name, e.g. `yolo11-nano-coco128`
+- `title` (string) — Human-readable title
+- `goal` (string) — What this session aimed to achieve
+- `project_spec` (string) — Name of the project spec used (from `.crucible/projects/`)
+- `environment` (object) — Runtime environment: gpu, torch version, python, provider
+- `steps` (array, required) — Ordered MCP tool calls, each with `tool`, `args`, `note`
+- `results` (object) — Final metrics, W&B URLs, linked run IDs
+- `gotchas` (array) — Problems encountered: `{issue, fix}` pairs
+- `tags` (array[string]) — Searchable tags
+- `created_by` (string) — Who created this (default: `mcp-agent`)
+
+**Example:**
+```json
+{
+  "name": "yolo11-nano-coco128",
+  "title": "YOLOv11 Nano fine-tune on COCO128",
+  "goal": "Fine-tune YOLOv11n on COCO128 using RunPod RTX 4090",
+  "project_spec": "yolo11-demo",
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "torch": "2.6.0+cu124",
+    "python": "3.11",
+    "ultralytics": "8.4.30",
+    "provider": "runpod"
+  },
+  "steps": [
+    {"tool": "provision_project", "args": {"project_name": "yolo11-demo", "count": 1}, "note": "Spin up 1x RTX 4090"},
+    {"tool": "fleet_refresh", "args": {}, "note": "Wait ~45s then refresh for SSH endpoint"},
+    {"tool": "bootstrap_project", "args": {"project_name": "yolo11-demo"}, "note": "Clone repo, install deps"},
+    {"tool": "run_project", "args": {"project_name": "yolo11-demo", "overrides": {"MODEL": "yolo11n.pt", "EPOCHS": "100"}}, "note": "Launch training"},
+    {"tool": "collect_project_results", "args": {"run_id": "<from_run_project>"}, "note": "Rsync log, parse metrics"},
+    {"tool": "destroy_nodes", "args": {"node_names": ["yolo11-demo-01"]}, "note": "Kill pod"}
+  ],
+  "results": {"map50_95_b": 0.733, "precision_b": 0.909},
+  "gotchas": [
+    {"issue": "Ultralytics pulls torch cu130, incompatible with CUDA 12.8", "fix": "Pin torch 2.6.0+cu124 via install_torch"},
+    {"issue": "W&B disabled by default in Ultralytics 8.x", "fix": "Add yolo settings wandb=true before training"}
+  ],
+  "tags": ["yolo", "detection", "coco128", "4090"]
+}
+```
+
+### recipe_list
+
+List all saved recipes. Optionally filter by tag.
+
+**Parameters:**
+- `tag` (string, optional) — Filter recipes that have this tag
+
+**Example:**
+```json
+{}
+```
+
+```json
+{"tag": "yolo"}
+```
+
+**Returns:**
+```json
+{
+  "recipes": [
+    {"name": "yolo11-nano-coco128", "title": "YOLOv11 Nano fine-tune", "tags": ["yolo", "4090"], "goal": "..."}
+  ],
+  "total": 1
+}
+```
+
+### recipe_get
+
+Get the full recipe with all steps, environment, gotchas, and results. Pass the output to an agent to reproduce the session.
+
+**Parameters:**
+- `name` (string, required) — Recipe name from `recipe_list`
+
+**Example:**
+```json
+{"name": "yolo11-nano-coco128"}
+```
+
+### Workflow
+
+```
+1. Run experiments via MCP (provision → bootstrap → run → collect)
+2. recipe_save      → capture what worked + what broke
+3. recipe_list      → browse saved recipes
+4. recipe_get       → hand to another agent for reproduction
+```

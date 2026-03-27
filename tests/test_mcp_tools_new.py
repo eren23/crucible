@@ -378,8 +378,16 @@ class TestPreconditionChecks:
         class FakeConfig:
             project_root = tmp_path
             nodes_file = "nodes.json"
+            provider = type("Provider", (), {"type": "runpod"})()
+            wandb = type("Wandb", (), {"required": True, "project": "demo", "entity": "", "mode": "online"})()
+            execution_policy = type(
+                "Policy",
+                (),
+                {"require_remote": True, "required_provider": "runpod", "allow_local_dev": False},
+            )()
 
         monkeypatch.setattr("crucible.mcp.tools._get_config", lambda: FakeConfig())
+        monkeypatch.setenv("WANDB_API_KEY", "secret")
 
         result = dispatch_experiments({})
         assert "error" in result

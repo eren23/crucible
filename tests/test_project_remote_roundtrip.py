@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import yaml
 
-from crucible.core.config import ProjectConfig
+from crucible.core.config import ProjectConfig, WandbConfig
 from crucible.mcp.tools import collect_project_results, run_project
 
 
@@ -39,6 +39,7 @@ def test_run_project_and_collect_results_roundtrip(tmp_path: Path):
         nodes_file="nodes.json",
         logs_dir="logs",
         fleet_results_file="experiments_fleet.jsonl",
+        wandb=WandbConfig(project="demo-wandb"),
     )
 
     (project_root / "nodes.json").write_text(
@@ -79,9 +80,14 @@ def test_run_project_and_collect_results_roundtrip(tmp_path: Path):
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     with (
+        patch.dict("os.environ", {"WANDB_API_KEY": "secret"}, clear=False),
         patch("crucible.mcp.tools._get_config", return_value=cfg),
         patch("crucible.fleet.project_runner.remote_exec", side_effect=fake_remote_exec),
         patch("crucible.fleet.project_runner._run", side_effect=fake_run),
+        patch("crucible.runner.wandb.fetch_wandb_run_info", return_value={
+            "url": "https://wandb.ai/team/demo-wandb/runs/abc123",
+            "metrics": {"val_loss": 0.2, "accuracy": 0.8},
+        }),
     ):
         launched = run_project({"project_name": "demo", "overrides": {"EPOCHS": "1"}})
         assert "error" not in launched
@@ -93,11 +99,15 @@ def test_run_project_and_collect_results_roundtrip(tmp_path: Path):
     assert any("nohup bash -c" in command for command in observed_commands)
     assert any("if [ -f /workspace/demo/.env ]; then source /workspace/demo/.env; fi" in command for command in observed_commands)
     assert any("export EPOCHS=1" in command for command in observed_commands)
+    assert any("export WANDB_RUN_NAME=" in command for command in observed_commands)
+    assert any("export WANDB_PROJECT=demo-wandb" in command for command in observed_commands)
 
     assert collected["run_id"] == run_id
     assert collected["status"] == "completed"
-    assert collected["metrics"]["val_loss"] == 0.25
-    assert collected["metrics"]["accuracy"] == 0.75
+    assert collected["metrics"]["val_loss"] == 0.2
+    assert collected["metrics"]["accuracy"] == 0.8
+    assert collected["wandb"]["run_name"] == run_id
+    assert collected["contract_status"] == "compliant"
     assert (project_root / "logs" / f"{run_id}.log").exists()
 
     fleet_results = project_root / "experiments_fleet.jsonl"

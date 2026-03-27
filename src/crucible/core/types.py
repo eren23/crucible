@@ -85,6 +85,10 @@ class ExperimentResult(TypedDict, total=False):
     returncode: int | None
     duration_s: float | None
     code_fingerprint: str | None
+    execution_provider: str | None
+    remote_node: str | None
+    contract_status: str | None
+    wandb: dict[str, Any] | None
 
 
 class NodeRecord(TypedDict, total=False):
@@ -123,6 +127,9 @@ class QueueItem(TypedDict, total=False):
     started_at: str | None
     ended_at: str | None
     result_status: str | None
+    execution_provider: str | None
+    contract_status: str | None
+    wandb: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,8 @@ from crucible.core.config import (
     DataConfig,
     TrainingConfig,
     ResearcherConfig,
+    WandbConfig,
+    ExecutionPolicyConfig,
     load_config,
     find_config,
     generate_default_config,
@@ -43,7 +45,9 @@ class TestGenerateDefaultConfig:
         parsed = yaml.safe_load(generate_default_config())
         assert parsed["name"] == "my-project"
         assert parsed["version"] == CRUCIBLE_VERSION
-        assert parsed["provider"]["type"] == "ssh"
+        assert parsed["provider"]["type"] == "runpod"
+        assert parsed["wandb"]["required"] is True
+        assert parsed["execution_policy"]["require_remote"] is True
         assert isinstance(parsed["training"], list)
         assert len(parsed["training"]) >= 1
 
@@ -64,7 +68,7 @@ class TestProjectConfigDefaults:
     def test_default_provider(self):
         cfg = ProjectConfig()
         assert isinstance(cfg.provider, ProviderConfig)
-        assert cfg.provider.type == "ssh"
+        assert cfg.provider.type == "runpod"
 
     def test_default_training_is_empty_list(self):
         cfg = ProjectConfig()
@@ -92,6 +96,19 @@ class TestProjectConfigDefaults:
         assert isinstance(cfg.researcher, ResearcherConfig)
         assert cfg.researcher.budget_hours == 10.0
         assert cfg.researcher.max_iterations == 20
+
+    def test_default_wandb(self):
+        cfg = ProjectConfig()
+        assert isinstance(cfg.wandb, WandbConfig)
+        assert cfg.wandb.required is True
+        assert cfg.wandb.mode == "online"
+
+    def test_default_execution_policy(self):
+        cfg = ProjectConfig()
+        assert isinstance(cfg.execution_policy, ExecutionPolicyConfig)
+        assert cfg.execution_policy.require_remote is True
+        assert cfg.execution_policy.required_provider == "runpod"
+        assert cfg.execution_policy.allow_local_dev is False
 
 
 # ---------------------------------------------------------------------------

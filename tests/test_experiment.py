@@ -113,3 +113,29 @@ class TestRunExperiment:
         assert env_passed.get("RUN_PRESET") == "smoke"
         # Smoke preset should set MAX_WALLCLOCK_SECONDS
         assert "MAX_WALLCLOCK_SECONDS" in env_passed
+        assert result["contract_status"] == "compliant"
+
+    @patch("crucible.runner.experiment.subprocess.Popen")
+    @patch("crucible.runner.experiment.WandbLogger")
+    def test_enforced_contract_requires_wandb_init(self, mock_wandb_cls, mock_popen, project_dir: Path):
+        from crucible.runner.experiment import run_experiment
+
+        train_script = project_dir / "train.py"
+        train_script.write_text("print('done')")
+
+        mock_wandb = MagicMock()
+        mock_wandb.enabled = False
+        mock_wandb.error = "init failed"
+        mock_wandb_cls.create.return_value = mock_wandb
+
+        with pytest.raises(Exception, match="RunPod\\+W&B contract required"):
+            run_experiment(
+                config={"CRUCIBLE_ENFORCE_CONTRACT": "1", "WANDB_PROJECT": "demo"},
+                name="test-exp",
+                backend="torch",
+                preset="smoke",
+                project_root=str(project_dir),
+                stream_output=False,
+                timeout_seconds=5,
+            )
+        mock_popen.assert_not_called()

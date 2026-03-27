@@ -1486,6 +1486,90 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # Recipe tools
+    Tool(
+        name="recipe_save",
+        description=(
+            "Save a session recipe — a step-by-step reproduction guide capturing what MCP tools were called, "
+            "what configs/versions worked, gotchas encountered, and final results. "
+            "Other agents can follow this recipe to reproduce the session.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {saved, path, name}\n"
+            "NEXT: recipe_list to see all recipes, recipe_get to retrieve one."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Slug name for the recipe (e.g., 'yolo11-nano-coco128')."},
+                "title": {"type": "string", "description": "Human-readable title."},
+                "goal": {"type": "string", "description": "What this session aimed to achieve."},
+                "project_spec": {"type": "string", "description": "Name of the project spec used (from .crucible/projects/)."},
+                "environment": {"type": "object", "description": "Runtime environment: gpu, torch version, python, provider, etc."},
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string"},
+                            "args": {"type": "object"},
+                            "note": {"type": "string"},
+                        },
+                    },
+                    "description": "Ordered list of MCP tool calls with args and notes.",
+                },
+                "results": {"type": "object", "description": "Final metrics, W&B URLs, linked run IDs."},
+                "gotchas": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "issue": {"type": "string"},
+                            "fix": {"type": "string"},
+                        },
+                    },
+                    "description": "Problems encountered and how they were fixed.",
+                },
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Searchable tags."},
+                "created_by": {"type": "string", "description": "Who created this recipe (default: mcp-agent)."},
+            },
+            "required": ["name", "steps"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="recipe_list",
+        description=(
+            "List all saved session recipes.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {recipes: [{name, title, created_at, tags, project_spec, goal}]}\n"
+            "NEXT: recipe_get for full details."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tag": {"type": "string", "description": "Filter recipes by tag."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="recipe_get",
+        description=(
+            "Get a saved session recipe with full step-by-step details, configs, gotchas, and results. "
+            "Pass this to an agent to reproduce the session.\n\n"
+            "REQUIRES: Recipe exists.\n"
+            "RETURNS: Full recipe with steps, environment, gotchas, results.\n"
+            "NEXT: Follow the steps to reproduce."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Recipe name (from recipe_list)."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 

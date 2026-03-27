@@ -97,6 +97,9 @@ def enqueue_experiments(
                 "started_at": None,
                 "ended_at": None,
                 "result_status": None,
+                "execution_provider": exp.get("execution_provider"),
+                "contract_status": exp.get("contract_status"),
+                "wandb": exp.get("wandb"),
             }
         )
     if added:

@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Mapping, TYPE_CHECKING
 
 from crucible.core.io import _json_ready, read_jsonl
 
@@ -56,13 +56,15 @@ class WandbLogger:
         tracker: "RunTracker | None" = None,
         job_type: str | None = None,
         tags: list[str] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> "WandbLogger":
         """Create a WandbLogger, initialising a W&B run if configured.
 
         Returns an inert logger if WANDB_PROJECT is unset or wandb is
         not installed -- callers never need to check availability.
         """
-        project = os.environ.get("WANDB_PROJECT", "").strip()
+        env_map = env or os.environ
+        project = env_map.get("WANDB_PROJECT", "").strip()
         if not project:
             if tracker is not None:
                 tracker.update(
@@ -84,20 +86,20 @@ class WandbLogger:
 
         env_tags = [
             tag.strip()
-            for tag in os.environ.get("WANDB_TAGS", "").split(",")
+            for tag in env_map.get("WANDB_TAGS", "").split(",")
             if tag.strip()
         ]
         final_tags = list(dict.fromkeys([backend, *(tags or []), *env_tags]))
 
         kwargs: dict[str, Any] = {
             "project": project,
-            "entity": os.environ.get("WANDB_ENTITY") or None,
-            "name": os.environ.get("WANDB_RUN_NAME", run_id),
-            "group": os.environ.get("WANDB_RUN_GROUP") or None,
-            "job_type": os.environ.get("WANDB_JOB_TYPE") or job_type,
+            "entity": env_map.get("WANDB_ENTITY") or None,
+            "name": env_map.get("WANDB_RUN_NAME", run_id),
+            "group": env_map.get("WANDB_RUN_GROUP") or None,
+            "job_type": env_map.get("WANDB_JOB_TYPE") or job_type,
             "tags": final_tags or None,
             "config": _json_ready(config),
-            "mode": os.environ.get("WANDB_MODE") or None,
+            "mode": env_map.get("WANDB_MODE") or None,
             "reinit": True,
         }
         try:
@@ -118,8 +120,9 @@ class WandbLogger:
                     "enabled": True,
                     "url": logger.url,
                     "project": project,
-                    "entity": os.environ.get("WANDB_ENTITY") or None,
-                    "mode": os.environ.get("WANDB_MODE") or "online",
+                    "entity": env_map.get("WANDB_ENTITY") or None,
+                    "mode": env_map.get("WANDB_MODE") or "online",
+                    "run_name": env_map.get("WANDB_RUN_NAME", run_id),
                 },
                 heartbeat=False,
             )
@@ -275,15 +278,9 @@ def fetch_wandb_metrics(
         return {}
 
     try:
-        api = wandb.Api()
-        path = f"{entity}/{project}" if entity else project
-        filters = {}
-        if run_name:
-            filters["display_name"] = run_name
-        runs = api.runs(path, filters=filters, per_page=5)
-        if not runs:
+        run = _fetch_wandb_run(project=project, entity=entity, run_name=run_name)
+        if run is None:
             return {}
-        run = runs[0]
         result: dict[str, float] = {}
         for key, val in run.summary.items():
             if key.startswith("_"):
@@ -293,3 +290,51 @@ def fetch_wandb_metrics(
         return result
     except Exception:
         return {}
+
+
+def fetch_wandb_run_info(
+    project: str,
+    entity: str | None = None,
+    run_name: str | None = None,
+) -> dict[str, Any]:
+    """Fetch metrics + URL for a completed W&B run."""
+    try:
+        run = _fetch_wandb_run(project=project, entity=entity, run_name=run_name)
+        if run is None:
+            return {}
+        metrics: dict[str, float] = {}
+        for key, val in run.summary.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(val, (int, float)):
+                metrics[key] = float(val)
+        return {
+            "url": getattr(run, "url", None),
+            "run_name": getattr(run, "name", None) or getattr(run, "display_name", None),
+            "metrics": metrics,
+        }
+    except Exception:
+        return {}
+
+
+def _fetch_wandb_run(
+    *,
+    project: str,
+    entity: str | None = None,
+    run_name: str | None = None,
+) -> Any | None:
+    """Fetch a single W&B run, preferring the supplied display name."""
+    try:
+        import wandb
+    except ImportError:
+        return None
+
+    api = wandb.Api()
+    path = f"{entity}/{project}" if entity else project
+    filters = {}
+    if run_name:
+        filters["display_name"] = run_name
+    runs = api.runs(path, filters=filters, per_page=5)
+    if not runs:
+        return None
+    return runs[0]

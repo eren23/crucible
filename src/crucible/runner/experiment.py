@@ -30,6 +30,7 @@ from crucible.core.errors import RunnerError
 from crucible.core.io import append_jsonl, _json_ready
 from crucible.core.log import log_info, log_warn
 from crucible.core.config import ProjectConfig, load_config
+from crucible.core.experiment_contract import contract_metadata
 from crucible.runner.output_parser import (
     OutputParser,
     classify_failure,
@@ -219,6 +220,14 @@ def run_experiment(
     env = os.environ.copy()
     env.update(resolved_config)
     env["PYTHONUNBUFFERED"] = "1"
+    if project_config.wandb.project and not env.get("WANDB_PROJECT"):
+        env["WANDB_PROJECT"] = project_config.wandb.project
+    if project_config.wandb.entity and not env.get("WANDB_ENTITY"):
+        env["WANDB_ENTITY"] = project_config.wandb.entity
+    if project_config.wandb.mode and not env.get("WANDB_MODE"):
+        env["WANDB_MODE"] = project_config.wandb.mode
+    env.setdefault("WANDB_RUN_NAME", exp_id)
+    env.setdefault("CRUCIBLE_EXECUTION_PROVIDER", project_config.provider.type.lower())
 
     tracker.update(
         state="queued",
@@ -231,6 +240,18 @@ def run_experiment(
         pid=None,
     )
 
+    contract = contract_metadata(
+        project_config,
+        env=env,
+        remote_node=env.get("CRUCIBLE_REMOTE_NODE") or None,
+    )
+    tracker.update(
+        execution_provider=contract["execution_provider"],
+        remote_node=contract["remote_node"],
+        contract_status=contract["contract_status"],
+        heartbeat=False,
+    )
+
     # -- Init W&B logger (inert if WANDB_PROJECT unset) --
     wandb_logger = WandbLogger.create(
         run_id=exp_id,
@@ -238,7 +259,12 @@ def run_experiment(
         backend=backend,
         tracker=tracker,
         tags=tags,
+        env=env,
     )
+    if env.get("CRUCIBLE_ENFORCE_CONTRACT") == "1" and not wandb_logger.enabled:
+        raise RunnerError(
+            f"RunPod+W&B contract required, but W&B initialization failed: {wandb_logger.error or 'WANDB_PROJECT unset'}"
+        )
     if wandb_logger.enabled:
         wandb_logger.update_config({
             "crucible_run_id": exp_id,
@@ -263,6 +289,10 @@ def run_experiment(
         "log_path": str(tracker.log_path.resolve()),
         "status_path": str(tracker.status_path.resolve()),
         "manifest_path": str(tracker.manifest_path.resolve()),
+        "execution_provider": contract["execution_provider"],
+        "remote_node": contract["remote_node"],
+        "contract_status": contract["contract_status"],
+        "wandb": contract["wandb"],
     }
 
     oom_retry_used = False
@@ -285,6 +315,10 @@ def run_experiment(
                     "runner_python": python,
                     "oom_retry_used": oom_retry_used,
                     "parent_run_id": config.get("PARENT_RUN_ID") or None,
+                    "execution_provider": contract["execution_provider"],
+                    "remote_node": contract["remote_node"],
+                    "contract_status": contract["contract_status"],
+                    "wandb": contract["wandb"],
                 },
             )
 
@@ -498,6 +532,18 @@ def run_experiment(
             wandb_logger.update_summary(result["result"])
         exit_code = 0 if result["status"] == "completed" else 1
         wandb_logger.finish(exit_code=exit_code)
+        result["wandb"] = {
+            **contract["wandb"],
+            "enabled": True,
+            "url": wandb_logger.url,
+            "run_name": env.get("WANDB_RUN_NAME", exp_id),
+        }
+    else:
+        result["wandb"] = {
+            **contract["wandb"],
+            "enabled": False,
+            "run_name": env.get("WANDB_RUN_NAME", exp_id),
+        }
 
     # -- Persist result --
     append_jsonl(results_path, result)
