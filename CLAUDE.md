@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (85 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (100 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -164,7 +164,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (85 total)
+### MCP Tools (100 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -198,6 +198,16 @@ Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, and agen
 
 **Tier 9 — Session Recipes:**
 `recipe_save`, `recipe_list`, `recipe_get` — Save and retrieve step-by-step session playbooks. Captures MCP tool sequence, environment versions, gotchas with fixes, and results. Other agents follow a recipe to reproduce a successful session.
+
+**Tier 10 — Plugin Registry (unified plugin system):**
+`optimizer_list_available`, `optimizer_add`, `optimizer_get_config_schema` — Optimizer plugins (adam, adamw, muon, sgd, rmsprop + custom).
+`scheduler_list_available`, `scheduler_add`, `scheduler_get_config_schema` — LR scheduler plugins (cosine, constant, linear, cosine_restarts + custom).
+`provider_list_available`, `provider_add` — Fleet provider plugins (runpod, ssh + custom).
+`logger_list_available`, `logger_add` — Logging backend plugins (wandb, console, jsonl + custom).
+`callback_list_available`, `callback_add` — Training callback plugins (grad_clip, nan_detector, early_stopping + custom).
+`composer_add_block_type`, `composer_add_stack_pattern`, `composer_add_augmentation` — Composer extension plugins.
+
+All plugin types use a unified `PluginRegistry` with 3-tier precedence (builtin < global < local). Plugins are auto-discovered from `.crucible/plugins/{type}/*.py` (local) and `~/.crucible-hub/plugins/{type}/*.py` (global).
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 
@@ -251,6 +261,30 @@ Built-in objectives: `cross_entropy`, `mse`, `kl_divergence`, `composite`, `diff
 
 Working examples in `examples/diffusion/` (DDPM on MNIST) and `examples/world_model/` (JEPA on bouncing balls).
 Full guide: `docs/modality-guide.md`.
+
+### Unified Plugin System
+
+All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-tier precedence:
+- **Builtin** (lowest): shipped with Crucible core
+- **Global**: `~/.crucible-hub/plugins/{type}/*.py`
+- **Local** (highest): `.crucible/plugins/{type}/*.py`
+
+| Plugin Type | Registry Module | Builtins |
+|-------------|-----------------|----------|
+| Optimizers | `training/optimizers.py` | adam, adamw, muon, sgd, rmsprop |
+| Schedulers | `training/schedulers.py` | cosine, constant, linear, cosine_restarts |
+| Fleet Providers | `fleet/provider_registry.py` | runpod, ssh |
+| Loggers | `runner/loggers.py` | wandb, console, jsonl |
+| Callbacks | `training/callbacks.py` | grad_clip, nan_detector, early_stopping |
+| Data Adapters | `training/data_adapters.py` | token, image_folder, synthetic_images, synthetic_video |
+| Objectives | `training/objectives.py` | cross_entropy, mse, kl_divergence, composite, diffusion, jepa |
+| Architectures | `models/registry.py` | baseline, looped, convloop, prefix_memory |
+| Block Types | `models/composer.py` | attention_block, prefix_memory_block |
+| Stack Patterns | `models/composer.py` | sequential, encoder_decoder_skip, looped, prefix_memory_stack |
+| Augmentations | `models/composer.py` | smear_gate, bigram_hash, trigram_hash |
+| Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
+
+**Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.
 
 ### Known Limitations
 

@@ -105,6 +105,14 @@ class TestGetRunLogs:
 # ---------------------------------------------------------------------------
 
 
+_has_torch = True
+try:
+    import torch as _torch
+except ImportError:
+    _has_torch = False
+
+
+@pytest.mark.skipif(not _has_torch, reason="torch not installed")
 class TestModelFetchArchitecture:
     def test_fetch_local_python(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Local .py architecture files are found first."""

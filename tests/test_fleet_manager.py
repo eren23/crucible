@@ -36,14 +36,14 @@ class TestBuildProvider:
         provider = FleetManager._build_provider(fleet_config)
         assert isinstance(provider, SSHProvider)
 
-    def test_unknown_type_falls_back_to_ssh(self, fleet_config: ProjectConfig):
-        """Unrecognized provider type falls back to SSHProvider."""
+    def test_unknown_type_raises_plugin_error(self, fleet_config: ProjectConfig):
+        """Unrecognized provider type raises PluginError."""
         from crucible.fleet.manager import FleetManager
-        from crucible.fleet.providers.ssh import SSHProvider
+        from crucible.core.errors import PluginError
 
         fleet_config.provider.type = "kubernetes"
-        provider = FleetManager._build_provider(fleet_config)
-        assert isinstance(provider, SSHProvider)
+        with pytest.raises(PluginError, match="Unknown fleet provider"):
+            FleetManager._build_provider(fleet_config)
 
 
 class TestProvision:

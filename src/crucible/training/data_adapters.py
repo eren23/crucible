@@ -234,25 +234,43 @@ class SyntheticVideoAdapter(DataAdapter):
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Registry (PluginRegistry-backed, with backward-compatible API)
 # ---------------------------------------------------------------------------
 
-DATA_ADAPTER_REGISTRY: dict[str, type[DataAdapter]] = {}
+from crucible.core.plugin_registry import PluginRegistry
+
+_ADAPTER_REGISTRY = PluginRegistry[type["DataAdapter"]]("data_adapter")
+DATA_ADAPTER_REGISTRY: dict[str, type["DataAdapter"]] = _ADAPTER_REGISTRY._registry  # backward compat
 
 
-def register_data_adapter(name: str, cls: type[DataAdapter]) -> None:
-    """Register a data adapter class under *name*."""
-    DATA_ADAPTER_REGISTRY[name] = cls
+def register_data_adapter(name: str, cls: type["DataAdapter"], *, source: str = "builtin") -> None:
+    """Register a data adapter class under *name*.
+
+    Supports 3-tier precedence (builtin < global < local) via *source*.
+    The plain dict ``DATA_ADAPTER_REGISTRY`` remains available for
+    backward compatibility.
+    """
+    _ADAPTER_REGISTRY.register(name, cls, source=source)
 
 
-def build_data_adapter(name: str, **kwargs: Any) -> DataAdapter:
+def build_data_adapter(name: str, **kwargs: Any) -> "DataAdapter":
     """Instantiate a registered data adapter by name."""
-    cls = DATA_ADAPTER_REGISTRY.get(name)
+    cls = _ADAPTER_REGISTRY.get(name)
     if cls is None:
         raise KeyError(
-            f"Unknown data adapter '{name}'. Available: {sorted(DATA_ADAPTER_REGISTRY)}"
+            f"Unknown data adapter '{name}'. Available: {sorted(_ADAPTER_REGISTRY.list_plugins())}"
         )
     return cls(**kwargs)
+
+
+def list_data_adapters() -> list[str]:
+    """Return sorted list of registered data adapter names."""
+    return _ADAPTER_REGISTRY.list_plugins()
+
+
+def list_data_adapters_detailed() -> list[dict[str, str]]:
+    """Return data adapters with source metadata."""
+    return _ADAPTER_REGISTRY.list_plugins_detailed()
 
 
 # Register built-ins

@@ -1,10 +1,17 @@
-"""Project-level integration tests for packaged example projects."""
+"""Project-level integration tests for packaged example projects.
+
+Requires torch — skipped when unavailable.
+"""
 from __future__ import annotations
 
 import os
 import shutil
 import textwrap
 from pathlib import Path
+
+import pytest
+
+torch = pytest.importorskip("torch")
 
 from crucible.core.config import load_config
 from crucible.runner.experiment import run_experiment

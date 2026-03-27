@@ -1570,6 +1570,214 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ---- Plugin registry tools ----
+    Tool(
+        name="optimizer_list_available",
+        description=(
+            "List all registered optimizer plugins (builtin + global + local).\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {optimizers: [{name, source}, ...]}\n"
+            "NEXT: optimizer_add to register a new optimizer."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="optimizer_add",
+        description=(
+            "Register a new optimizer plugin from Python code. The code should import "
+            "register_optimizer from crucible.training.optimizers and call it.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}\n"
+            "NEXT: optimizer_list_available to verify."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin name (e.g., 'lion', 'sophia')."},
+                "code": {"type": "string", "description": "Python source that calls register_optimizer()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="optimizer_get_config_schema",
+        description="Get the parameter schema for a named optimizer.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Optimizer name."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="scheduler_list_available",
+        description=(
+            "List all registered LR scheduler plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {schedulers: [{name, source}, ...]}\n"
+            "NEXT: scheduler_add to register a new scheduler."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="scheduler_add",
+        description=(
+            "Register a new LR scheduler plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin name (e.g., 'polynomial', 'warmup_cosine')."},
+                "code": {"type": "string", "description": "Python source that calls register_scheduler()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="scheduler_get_config_schema",
+        description="Get the parameter schema for a named scheduler.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Scheduler name."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="provider_list_available",
+        description=(
+            "List all registered fleet provider plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {providers: [{name, source}, ...]}\n"
+            "NEXT: provider_add to register a new cloud provider."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="provider_add",
+        description=(
+            "Register a new fleet provider plugin from Python code. The code should "
+            "subclass FleetProvider and call register_provider().\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Provider name (e.g., 'lambda_labs', 'modal')."},
+                "code": {"type": "string", "description": "Python source that calls register_provider()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="logger_list_available",
+        description=(
+            "List all registered logging backend plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {loggers: [{name, source}, ...]}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="logger_add",
+        description=(
+            "Register a new logging backend plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Logger name (e.g., 'tensorboard', 'neptune')."},
+                "code": {"type": "string", "description": "Python source that calls register_logger()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="callback_list_available",
+        description=(
+            "List all registered training callback plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {callbacks: [{name, source}, ...]}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="callback_add",
+        description=(
+            "Register a new training callback plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Callback name (e.g., 'checkpoint', 'lr_finder')."},
+                "code": {"type": "string", "description": "Python source that calls register_callback()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_block_type",
+        description=(
+            "Register a new composer block type from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Block type name."},
+                "code": {"type": "string", "description": "Python source registering the block type."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_stack_pattern",
+        description=(
+            "Register a new composer stack pattern from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Stack pattern name."},
+                "code": {"type": "string", "description": "Python source registering the stack pattern."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_augmentation",
+        description=(
+            "Register a new composer augmentation from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Augmentation name."},
+                "code": {"type": "string", "description": "Python source registering the augmentation."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
