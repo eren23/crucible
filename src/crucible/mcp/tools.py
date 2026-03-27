@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.errors import CrucibleError
+from crucible.core.experiment_contract import (
+    contract_metadata,
+    resolve_wandb_settings,
+    validate_experiment_contract,
+)
 from crucible.core.io import read_jsonl
 from crucible.core.log import utc_now_iso
 
@@ -22,6 +28,39 @@ def _get_hub_store() -> Any:
     config = _get_config()
     hub_dir = HubStore.resolve_hub_dir(config_hub_dir=config.hub_dir)
     return HubStore(hub_dir=hub_dir)
+
+
+def _queue_contract_fields(config: ProjectConfig) -> dict[str, Any]:
+    metadata = validate_experiment_contract(
+        config,
+        action="MCP experiment enqueue",
+        execution_mode="remote",
+    )
+    return {
+        "execution_provider": metadata["execution_provider"],
+        "contract_status": metadata["contract_status"],
+        "wandb": metadata["wandb"],
+    }
+
+
+def _project_contract_env(config: ProjectConfig, spec: Any) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update({k: str(v) for k, v in getattr(spec, "env_set", {}).items()})
+    wandb = resolve_wandb_settings(config, env=env)
+    validate_experiment_contract(
+        config,
+        action=f"external project {spec.name}",
+        execution_mode="remote",
+        env=env,
+    )
+    merged: dict[str, str] = {}
+    if wandb["project"]:
+        merged["WANDB_PROJECT"] = wandb["project"]
+    if wandb["entity"]:
+        merged["WANDB_ENTITY"] = str(wandb["entity"])
+    if wandb["mode"]:
+        merged["WANDB_MODE"] = wandb["mode"]
+    return merged
 
 
 def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +168,7 @@ def get_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
                 primary: res.get(primary),
                 "steps_completed": res.get("steps_completed"),
                 "model_bytes": r.get("model_bytes"),
+                "contract_status": r.get("contract_status", "legacy_missing_contract"),
             }
             if secondary:
                 entry[secondary] = res.get(secondary)
@@ -161,12 +201,14 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import enqueue_experiments
 
+        contract = _queue_contract_fields(config)
         experiment = {
             "name": args["name"],
             "config": args["config"],
             "tier": args.get("tier", "proxy"),
             "backend": args.get("backend", "torch"),
             "tags": args.get("tags", []),
+            **contract,
         }
         added = enqueue_experiments(
             config.project_root / "fleet_queue.jsonl",
@@ -191,6 +233,8 @@ def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
 
         for row in merged_results(config):
             if row.get("id") == run_id or row.get("run_id") == run_id:
+                row = dict(row)
+                row["contract_status"] = row.get("contract_status", "legacy_missing_contract")
                 return {"found": True, "result": row}
         return {"found": False, "run_id": run_id}
     except CrucibleError as exc:
@@ -344,6 +388,11 @@ def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
     """Dispatch queued experiments to idle bootstrapped nodes. Run after bootstrap_nodes + enqueue."""
     config = _get_config()
     try:
+        validate_experiment_contract(
+            config,
+            action="MCP dispatch_experiments",
+            execution_mode="remote",
+        )
         # Precondition: bootstrapped nodes must exist
         from crucible.fleet.inventory import load_nodes_if_exists
         nodes_check = load_nodes_if_exists(config.project_root / config.nodes_file)
@@ -664,6 +713,7 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import enqueue_experiments
 
+        contract = _queue_contract_fields(config)
         batch = args.get("batch", [])
         wave_name = args.get("wave_name", "")
         if not wave_name:
@@ -672,7 +722,7 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
         experiments = []
         for exp in batch:
             exp.setdefault("wave", wave_name)
-            experiments.append(exp)
+            experiments.append({**exp, **contract})
 
         added = enqueue_experiments(
             config.project_root / "fleet_queue.jsonl",
@@ -953,6 +1003,7 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.fleet.queue import enqueue_experiments
         from crucible.runner.design import design_to_experiment_config
 
+        contract = _queue_contract_fields(config)
         store = _get_store()
         design_name = args["design_name"]
 
@@ -977,6 +1028,7 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
             "tier": exp_config.get("tier", "proxy"),
             "backend": exp_config.get("backend", "torch"),
             "tags": exp_config.get("tags", []),
+            **contract,
         }
         added = enqueue_experiments(
             config.project_root / "fleet_queue.jsonl",
@@ -2174,6 +2226,17 @@ def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
                 "budget_hours": config.researcher.budget_hours,
                 "max_iterations": config.researcher.max_iterations,
             },
+            "wandb": {
+                "required": config.wandb.required,
+                "project": config.wandb.project,
+                "entity": config.wandb.entity,
+                "mode": config.wandb.mode,
+            },
+            "execution_policy": {
+                "require_remote": config.execution_policy.require_remote,
+                "required_provider": config.execution_policy.required_provider,
+                "allow_local_dev": config.execution_policy.allow_local_dev,
+            },
             "training": [
                 {"backend": t.backend, "script": t.script}
                 for t in config.training
@@ -2752,6 +2815,7 @@ def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.fleet.queue import enqueue_experiments
         from crucible.researcher.search_tree import SearchTree
 
+        contract = _queue_contract_fields(config)
         name = args["name"]
         tree_dir = _get_tree_dir(config, name)
         tree = SearchTree.load(tree_dir)
@@ -2779,6 +2843,7 @@ def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
                 "tier": tier,
                 "backend": backend,
                 "tags": node.get("tags", []) + [f"tree:{name}", f"node:{node['node_id']}"],
+                **contract,
             })
 
         queue_path = config.project_root / "fleet_queue.jsonl"
@@ -2966,6 +3031,7 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
         project_name = args["project_name"]
         count = args.get("count", 1)
         spec = load_project_spec(project_name, config.project_root)
+        _project_contract_env(config, spec)
 
         from crucible.fleet.manager import FleetManager
         fm = FleetManager(config)
@@ -3082,7 +3148,10 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         project_name = args["project_name"]
         spec = load_project_spec(project_name, config.project_root)
         node_names = args.get("node_names")
-        overrides = args.get("overrides", {})
+        overrides = dict(args.get("overrides", {}))
+        contract_env = _project_contract_env(config, spec)
+        overrides.update(contract_env)
+        spec.env_set.update(contract_env)
         run_id = f"{project_name}_{int(__import__('time').time())}"
 
         nodes_file = config.project_root / config.nodes_file
@@ -3107,8 +3176,16 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         for node in ready_nodes:
             node["workspace_path"] = spec.workspace
             try:
-                result = launch_project(node, spec, run_id, overrides=overrides)
+                launch_overrides = {
+                    **overrides,
+                    "WANDB_RUN_NAME": run_id,
+                    "CRUCIBLE_REMOTE_NODE": node["name"],
+                    "CRUCIBLE_EXECUTION_PROVIDER": config.provider.type.lower(),
+                    "CRUCIBLE_ENFORCE_CONTRACT": "1",
+                }
+                result = launch_project(node, spec, run_id, overrides=launch_overrides)
                 # Persist for collect_project_results (survives restarts)
+                contract = contract_metadata(config, env={**os.environ, **launch_overrides}, remote_node=node["name"])
                 _save_project_run(run_id, {
                     "node_name": node["name"],
                     "ssh_host": node.get("ssh_host", ""),
@@ -3116,6 +3193,13 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
                     "workspace_path": spec.workspace,
                     "project": spec.name,
                     "pid": result["pid"],
+                    "execution_provider": contract["execution_provider"],
+                    "remote_node": node["name"],
+                    "contract_status": contract["contract_status"],
+                    "wandb": {
+                        **contract["wandb"],
+                        "run_name": run_id,
+                    },
                 })
                 launched.append({
                     "name": node["name"],
@@ -3165,6 +3249,13 @@ def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
 
         from crucible.core.config import load_project_spec
         spec = load_project_spec(run_info["project"], config.project_root)
+        if run_info.get("wandb"):
+            if run_info["wandb"].get("project"):
+                spec.env_set["WANDB_PROJECT"] = run_info["wandb"]["project"]
+            if run_info["wandb"].get("entity"):
+                spec.env_set["WANDB_ENTITY"] = run_info["wandb"]["entity"]
+            if run_info["wandb"].get("mode"):
+                spec.env_set["WANDB_MODE"] = run_info["wandb"]["mode"]
 
         result = collect_project_result(
             node=node,
@@ -3174,14 +3265,200 @@ def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
             local_logs_dir=config.project_root / config.logs_dir,
             results_file=config.project_root / config.fleet_results_file,
         )
+        if run_info.get("wandb"):
+            merged_wandb = dict(run_info["wandb"])
+            for key, value in (result.get("wandb") or {}).items():
+                if value is not None:
+                    merged_wandb[key] = value
+            result["wandb"] = merged_wandb
+        if run_info.get("execution_provider"):
+            result["execution_provider"] = run_info["execution_provider"]
+        if run_info.get("remote_node"):
+            result["remote_node"] = run_info["remote_node"]
+        if run_info.get("contract_status") and result.get("contract_status") == "compliant":
+            result["contract_status"] = run_info["contract_status"]
 
-        return {
+        response = {
             "run_id": run_id,
             "status": result["status"],
             "metrics": result.get("result"),
             "log_tail": result.get("log_tail", "")[-1000:],
             "log_path": result.get("log_path", ""),
+            "wandb": result.get("wandb"),
+            "contract_status": result.get("contract_status", "legacy_missing_contract"),
         }
+        if response["status"] != "running" and response["contract_status"] != "compliant":
+            response["error"] = (
+                f"Experiment completed without a compliant W&B run "
+                f"(contract_status={response['contract_status']})."
+            )
+        return response
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Recipe tools — save / list / get session playbooks
+# ---------------------------------------------------------------------------
+
+_RECIPE_NAME_RE = None  # lazy-compiled
+
+
+def _validate_recipe_name(name: str) -> str | None:
+    """Return None if valid, or an error message."""
+    import re
+
+    global _RECIPE_NAME_RE
+    if _RECIPE_NAME_RE is None:
+        _RECIPE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
+    if not _RECIPE_NAME_RE.match(name):
+        return (
+            f"Invalid recipe name {name!r}. "
+            "Use lowercase alphanumeric, hyphens, and underscores (max 128 chars). "
+            "Must start with a letter or digit."
+        )
+    return None
+
+
+def _recipes_dir(config: Any) -> Path:
+    return config.project_root / config.store_dir / "recipes"
+
+
+def recipe_save(args: dict[str, Any]) -> dict[str, Any]:
+    """Save a session recipe — a step-by-step reproduction guide.
+
+    REQUIRES: Nothing.
+    RETURNS: {saved, path, name, overwritten}
+    NEXT: recipe_list to see all recipes, recipe_get to retrieve one.
+    """
+    import yaml
+    from crucible.core.errors import RecipeError
+
+    config = _get_config()
+    try:
+        name = args.get("name", "")
+        if not name:
+            raise RecipeError("Recipe name is required.")
+
+        err = _validate_recipe_name(name)
+        if err:
+            raise RecipeError(err)
+
+        steps = args.get("steps", [])
+        if not steps:
+            raise RecipeError("At least one step is required.")
+
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict) or "tool" not in step:
+                raise RecipeError(
+                    f"Step {i} must be a dict with at least a 'tool' key."
+                )
+
+        recipes_dir = _recipes_dir(config)
+        recipes_dir.mkdir(parents=True, exist_ok=True)
+
+        path = recipes_dir / f"{name}.yaml"
+        overwritten = path.exists()
+
+        recipe = {
+            "name": name,
+            "title": args.get("title", ""),
+            "created_at": utc_now_iso(),
+            "created_by": args.get("created_by", "mcp-agent"),
+            "goal": args.get("goal", ""),
+            "project_spec": args.get("project_spec", ""),
+            "environment": args.get("environment", {}),
+            "steps": steps,
+            "results": args.get("results", {}),
+            "gotchas": args.get("gotchas", []),
+            "tags": args.get("tags", []),
+        }
+
+        path.write_text(
+            yaml.safe_dump(recipe, default_flow_style=False, sort_keys=False)
+        )
+
+        return {"saved": True, "path": str(path), "name": name, "overwritten": overwritten}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List all saved session recipes.
+
+    REQUIRES: Nothing.
+    RETURNS: {recipes: [{name, title, created_at, tags, project_spec, goal}], total}
+    NEXT: recipe_get for full details.
+    """
+    import yaml
+
+    config = _get_config()
+    try:
+        recipes_dir = _recipes_dir(config)
+        if not recipes_dir.exists():
+            return {"recipes": [], "total": 0}
+
+        tag_filter = args.get("tag")
+        recipes = []
+        for path in sorted(recipes_dir.glob("*.yaml")):
+            try:
+                data = yaml.safe_load(path.read_text())
+                if not isinstance(data, dict):
+                    continue
+            except Exception:
+                continue
+
+            tags = data.get("tags", [])
+            if tag_filter and tag_filter not in tags:
+                continue
+
+            recipes.append({
+                "name": data.get("name", path.stem),
+                "title": data.get("title", ""),
+                "created_at": data.get("created_at", ""),
+                "tags": tags,
+                "project_spec": data.get("project_spec", ""),
+                "goal": data.get("goal", ""),
+            })
+
+        return {"recipes": recipes, "total": len(recipes)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
+    """Get a saved session recipe with full step-by-step details.
+
+    REQUIRES: Recipe exists.
+    RETURNS: Full recipe with steps, environment, gotchas, results.
+    NEXT: Follow the steps to reproduce.
+    """
+    import yaml
+    from crucible.core.errors import RecipeError
+
+    config = _get_config()
+    try:
+        name = args.get("name", "")
+        if not name:
+            raise RecipeError("Recipe name is required.")
+
+        path = _recipes_dir(config) / f"{name}.yaml"
+        if not path.exists():
+            raise RecipeError(
+                f"Recipe {name!r} not found. Use recipe_list to see available recipes."
+            )
+
+        data = yaml.safe_load(path.read_text())
+        if not isinstance(data, dict):
+            raise RecipeError(f"Recipe {name!r} has invalid format.")
+
+        return data
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
@@ -3288,4 +3565,8 @@ TOOL_DISPATCH: dict[str, Any] = {
     "bootstrap_project": bootstrap_project_tool,
     "run_project": run_project,
     "collect_project_results": collect_project_results,
+    # Recipe tools
+    "recipe_save": recipe_save,
+    "recipe_list": recipe_list,
+    "recipe_get": recipe_get,
 }

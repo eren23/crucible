@@ -72,6 +72,9 @@ def launch_experiment(
     ]
     for tag in item.get("tags", []):
         cmd += ["--tag", tag]
+    cmd += ["--set", f"CRUCIBLE_REMOTE_NODE={node['name']}"]
+    cmd += ["--set", f"CRUCIBLE_EXECUTION_PROVIDER={node.get('provider', 'runpod')}"]
+    cmd += ["--set", "CRUCIBLE_ENFORCE_CONTRACT=1"]
     for key, value in item["config"].items():
         cmd += ["--set", f"{key}={value}"]
 

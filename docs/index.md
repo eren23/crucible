@@ -77,6 +77,7 @@ src/crucible/
 ## Pages
 
 - [Getting Started](getting-started) — Installation, project setup, first experiment
+- [YOLO MCP Demo](yolo-mcp-demo) — Empty-dir external-project fine-tuning via MCP
 - [TUI Guide](tui) — Interactive design browser walkthrough
 - [MCP Tools Reference](mcp-tools) — All 82 tools with schemas
 - [Architecture](architecture) — System design and module overview

@@ -8,6 +8,7 @@ from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import ConfigError
+from crucible.core.experiment_contract import validate_experiment_contract
 from crucible.core.io import atomic_write_json, read_jsonl
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.bootstrap import (
@@ -223,6 +224,11 @@ class FleetManager:
         max_assignments: int = 8,
     ) -> list[dict[str, Any]]:
         """Dispatch queued experiments to idle ready nodes."""
+        validate_experiment_contract(
+            self.config,
+            action="fleet.dispatch",
+            execution_mode="remote",
+        )
         if nodes is None:
             nodes = load_nodes_snapshot(self.nodes_file)
         queue = load_queue(self.queue_path)

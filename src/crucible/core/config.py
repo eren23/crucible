@@ -12,8 +12,8 @@ from crucible import __version__ as CRUCIBLE_VERSION
 
 @dataclass
 class ProviderConfig:
-    type: str = "ssh"  # "runpod" | "ssh"
-    ssh_key: str = "~/.ssh/id_ed25519"
+    type: str = "runpod"  # "runpod" | "ssh"
+    ssh_key: str = "~/.ssh/id_ed25519_runpod"
     image: str = ""
     gpu_types: list[str] = field(default_factory=list)
     defaults: dict[str, Any] = field(default_factory=dict)
@@ -54,6 +54,21 @@ class ResearcherConfig:
 
 
 @dataclass
+class WandbConfig:
+    required: bool = True
+    project: str = ""
+    entity: str = ""
+    mode: str = "online"
+
+
+@dataclass
+class ExecutionPolicyConfig:
+    require_remote: bool = True
+    required_provider: str = "runpod"
+    allow_local_dev: bool = False
+
+
+@dataclass
 class ProjectConfig:
     name: str = "crucible-project"
     version: str = CRUCIBLE_VERSION
@@ -64,6 +79,8 @@ class ProjectConfig:
     presets: dict[str, dict[str, str]] = field(default_factory=dict)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+    execution_policy: ExecutionPolicyConfig = field(default_factory=ExecutionPolicyConfig)
     store_dir: str = ".crucible"
     compose_builtin_specs: bool = False
     auto_commit_versions: bool = False
@@ -139,6 +156,23 @@ def _build_researcher(raw: dict[str, Any]) -> ResearcherConfig:
     )
 
 
+def _build_wandb(raw: dict[str, Any]) -> WandbConfig:
+    return WandbConfig(
+        required=raw.get("required", True),
+        project=raw.get("project", ""),
+        entity=raw.get("entity", ""),
+        mode=raw.get("mode", "online"),
+    )
+
+
+def _build_execution_policy(raw: dict[str, Any]) -> ExecutionPolicyConfig:
+    return ExecutionPolicyConfig(
+        require_remote=raw.get("require_remote", True),
+        required_provider=raw.get("required_provider", "runpod"),
+        allow_local_dev=raw.get("allow_local_dev", False),
+    )
+
+
 def load_config(path: Path | None = None) -> ProjectConfig:
     """Load a crucible.yaml file and return a ProjectConfig."""
     if path is None:
@@ -159,6 +193,8 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         presets=raw.get("presets", {}),
         metrics=_build_metrics(raw.get("metrics", {})),
         researcher=_build_researcher(raw.get("researcher", {})),
+        wandb=_build_wandb(raw.get("wandb", {})),
+        execution_policy=_build_execution_policy(raw.get("execution_policy", {})),
         store_dir=raw.get("store_dir", ".crucible"),
         compose_builtin_specs=raw.get("compose_builtin_specs", False),
         auto_commit_versions=raw.get("auto_commit_versions", False),
@@ -313,8 +349,8 @@ version: "{version}"
 
 # Compute provider
 provider:
-  type: ssh                              # "runpod" | "ssh"
-  ssh_key: ~/.ssh/id_ed25519
+  type: runpod                           # "runpod" | "ssh"
+  ssh_key: ~/.ssh/id_ed25519_runpod
   # image: runpod/pytorch:...            # container image (RunPod only)
   # gpu_types: ["NVIDIA GeForce RTX 4090"]
 
@@ -351,6 +387,19 @@ researcher:
   model: claude-sonnet-4-6-20250514
   budget_hours: 10.0
   program_file: program.md
+
+# Weights & Biases
+wandb:
+  required: true
+  project: ""                            # or set WANDB_PROJECT in env
+  entity: ""                             # optional team/entity
+  mode: online                           # "online" | "offline" | "disabled"
+
+# Experiment execution policy
+execution_policy:
+  require_remote: true
+  required_provider: runpod
+  allow_local_dev: false
 
 # Version store
 # store_dir: .crucible                    # version store directory

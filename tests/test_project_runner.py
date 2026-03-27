@@ -60,6 +60,8 @@ class TestLaunchProject:
         cmd = mock_exec.call_args[0][1]
         assert "LR" in cmd
         assert "0.001" in cmd
+        assert "WANDB_RUN_NAME" in cmd
+        assert "CRUCIBLE_ENFORCE_CONTRACT" in cmd
 
     @patch("crucible.fleet.project_runner.remote_exec")
     def test_missing_env_file_does_not_block_launch(self, mock_exec):
@@ -128,3 +130,44 @@ class TestCollectProjectResult:
             run_id="run_2", pid=888, local_logs_dir=logs,
         )
         assert result["status"] == "running"
+
+    @patch("crucible.runner.wandb.fetch_wandb_run_info")
+    @patch("crucible.fleet.project_runner._run")
+    @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
+    @patch("crucible.fleet.project_runner.check_project_running", return_value=False)
+    def test_fetches_wandb_by_run_name(self, mock_check, mock_rsync, mock_run, mock_fetch, tmp_path):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        (logs / "run_w.log").write_text("metric:val_loss=0.25\n", encoding="utf-8")
+        mock_fetch.return_value = {
+            "url": "https://wandb.ai/team/proj/runs/abc123",
+            "metrics": {"val_loss": 0.2},
+        }
+
+        result = collect_project_result(
+            node=_make_node(),
+            spec=_make_spec(env_set={"WANDB_PROJECT": "proj"}, metrics=SimpleNamespace(source="stdout", primary="val_loss", direction="minimize")),
+            run_id="run_w",
+            pid=777,
+            local_logs_dir=logs,
+        )
+        assert result["wandb"]["url"] == "https://wandb.ai/team/proj/runs/abc123"
+        assert result["result"]["val_loss"] == pytest.approx(0.2)
+        mock_fetch.assert_called_once_with(project="proj", entity=None, run_name="run_w")
+
+    @patch("crucible.fleet.project_runner._run")
+    @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
+    @patch("crucible.fleet.project_runner.check_project_running", return_value=False)
+    def test_marks_contract_failed_when_wandb_missing(self, mock_check, mock_rsync, mock_run, tmp_path):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        (logs / "run_missing.log").write_text("metric:val_loss=0.25\n", encoding="utf-8")
+
+        result = collect_project_result(
+            node=_make_node(),
+            spec=_make_spec(env_set={"WANDB_PROJECT": "proj"}, metrics=SimpleNamespace(source="stdout", primary="val_loss", direction="minimize")),
+            run_id="run_missing",
+            pid=778,
+            local_logs_dir=logs,
+        )
+        assert result["contract_status"] == "wandb_missing"

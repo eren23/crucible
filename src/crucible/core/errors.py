@@ -30,3 +30,6 @@ class ComposerError(CrucibleError):
 
 class SearchTreeError(CrucibleError):
     """Search tree creation, expansion, pruning, or persistence failures."""
+
+class RecipeError(CrucibleError):
+    """Recipe save, retrieval, or validation failures."""

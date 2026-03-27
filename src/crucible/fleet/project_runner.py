@@ -32,9 +32,16 @@ def launch_project(
     name = node["name"]
 
     # Build env var exports for overrides (all values quoted)
+    effective_overrides = dict(overrides or {})
+    effective_overrides.setdefault("WANDB_RUN_NAME", run_id)
+    effective_overrides.setdefault("CRUCIBLE_RUN_ID", run_id)
+    effective_overrides.setdefault("CRUCIBLE_REMOTE_NODE", name)
+    effective_overrides.setdefault("CRUCIBLE_EXECUTION_PROVIDER", node.get("provider", "runpod"))
+    effective_overrides.setdefault("CRUCIBLE_ENFORCE_CONTRACT", "1")
+
     override_exports = ""
-    if overrides:
-        parts = [f"export {k}={shlex.quote(v)}" for k, v in overrides.items()]
+    if effective_overrides:
+        parts = [f"export {k}={shlex.quote(str(v))}" for k, v in effective_overrides.items()]
         override_exports = " && ".join(parts) + " && "
 
     # Activation + env sourcing
@@ -75,6 +82,7 @@ def launch_project(
         "pid": pid,
         "node": name,
         "project": spec.name,
+        "wandb_run_name": effective_overrides.get("WANDB_RUN_NAME", run_id),
         "start_time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -140,21 +148,28 @@ def collect_project_result(
 
     # Fetch WandB metrics if configured
     wandb_metrics: dict[str, float] = {}
-    if spec.metrics.source == "wandb" and not still_running:
+    wandb_info: dict[str, Any] = {}
+    wandb_required = bool(spec.env_set.get("WANDB_PROJECT"))
+    if wandb_required and not still_running:
         try:
-            from crucible.runner.wandb import fetch_wandb_metrics
+            from crucible.runner.wandb import fetch_wandb_run_info
             wandb_project = spec.env_set.get("WANDB_PROJECT", "")
             wandb_entity = spec.env_set.get("WANDB_ENTITY", "")
             if wandb_project:
-                wandb_metrics = fetch_wandb_metrics(
+                wandb_info = fetch_wandb_run_info(
                     project=wandb_project,
                     entity=wandb_entity or None,
+                    run_name=run_id,
                 )
+                wandb_metrics = wandb_info.get("metrics", {})
         except Exception as exc:
             log_warn(f"{name}: WandB metric fetch failed: {exc}")
 
     # Merge: WandB takes precedence over stdout
     merged = {**stdout_metrics, **wandb_metrics}
+    contract_status = "compliant"
+    if wandb_required and not still_running and not wandb_info:
+        contract_status = "wandb_missing"
 
     result: dict[str, Any] = {
         "id": run_id,
@@ -167,6 +182,18 @@ def collect_project_result(
         "returncode": None if still_running else 0,
         "log_path": str(local_log),
         "config": {},
+        "execution_provider": node.get("provider", "runpod"),
+        "remote_node": name,
+        "contract_status": contract_status,
+        "wandb": {
+            "required": wandb_required,
+            "project": spec.env_set.get("WANDB_PROJECT", "") or None,
+            "entity": spec.env_set.get("WANDB_ENTITY", "") or None,
+            "mode": spec.env_set.get("WANDB_MODE", "online"),
+            "run_name": run_id,
+            "url": wandb_info.get("url"),
+            "enabled": bool(wandb_info),
+        },
     }
 
     # Persist if training is done
