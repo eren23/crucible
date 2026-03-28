@@ -1,16 +1,26 @@
+# Crucible project configuration for the YOLO MCP demo.
+#
+# This file tells Crucible which compute provider to use, where to find
+# SSH keys, and how to rank experiment results.
+
 name: yolo-mcp-demo
 version: "0.2.1-alpha"
 
+# Compute provider -- RunPod provisions GPU pods on demand.
+# Make sure RUNPOD_API_KEY is set in your .env file.
 provider:
   type: runpod
-  ssh_key: ~/.ssh/id_ed25519_runpod
+  ssh_key: ~/.ssh/id_ed25519_runpod      # SSH key registered with RunPod
   gpu_types:
-    - "NVIDIA GeForce RTX 4090"
+    - "NVIDIA GeForce RTX 4090"           # Override per-project in the project spec
 
+# Metrics -- how Crucible ranks experiments on the leaderboard.
+# For YOLO, mAP50-95 is the standard detection metric (higher is better).
 metrics:
   primary: map50_95_b
   direction: maximize
 
+# Result storage -- local JSONL files that hold experiment outcomes.
 results_file: experiments.jsonl
 fleet_results_file: experiments_fleet.jsonl
 logs_dir: logs

@@ -273,6 +273,6 @@ class TestToolDispatchWiring:
             assert tool_name in TOOL_DISPATCH, f"{tool_name} missing from TOOL_DISPATCH"
             assert callable(TOOL_DISPATCH[tool_name])
 
-    def test_dispatch_count_is_112(self):
+    def test_dispatch_count_is_114(self):
         from crucible.mcp.tools import TOOL_DISPATCH
-        assert len(TOOL_DISPATCH) == 112
+        assert len(TOOL_DISPATCH) == 114

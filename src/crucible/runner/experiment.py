@@ -39,7 +39,7 @@ from crucible.runner.output_parser import (
 )
 from crucible.runner.presets import get_preset
 from crucible.runner.tracker import RunTracker
-from crucible.runner.wandb import WandbLogger
+from crucible.runner.wandb_logger import WandbLogger
 
 
 # ---------------------------------------------------------------------------

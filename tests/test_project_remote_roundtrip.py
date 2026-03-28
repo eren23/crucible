@@ -84,7 +84,7 @@ def test_run_project_and_collect_results_roundtrip(tmp_path: Path):
         patch("crucible.mcp.tools._get_config", return_value=cfg),
         patch("crucible.fleet.project_runner.remote_exec", side_effect=fake_remote_exec),
         patch("crucible.fleet.project_runner._run", side_effect=fake_run),
-        patch("crucible.runner.wandb.fetch_wandb_run_info", return_value={
+        patch("crucible.runner.wandb_logger.fetch_wandb_run_info", return_value={
             "url": "https://wandb.ai/team/demo-wandb/runs/abc123",
             "metrics": {"val_loss": 0.2, "accuracy": 0.8},
         }),
