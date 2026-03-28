@@ -6,19 +6,24 @@ Crucible is alpha software. Contributions are welcome — especially the kinds l
 
 ### 1. Compute Providers
 
-We need backends beyond RunPod and SSH. Each provider implements the `FleetProvider` interface:
+We need backends beyond RunPod and SSH. Each provider implements the `FleetProvider` interface and registers via the plugin system:
 
 ```python
-class FleetProvider(ABC):
+from crucible.fleet.provider_registry import register_provider
+from crucible.fleet.provider import FleetProvider
+
+class MyProvider(FleetProvider):
     def provision(self, *, count, name_prefix, **kwargs) -> list[dict]: ...
     def destroy(self, nodes, *, selected_names=None) -> list[dict]: ...
     def refresh(self, nodes) -> list[dict]: ...
     def wait_ready(self, nodes, *, timeout_seconds=900) -> list[dict]: ...
+
+register_provider("my_cloud", lambda **kw: MyProvider(**kw), source="local")
 ```
 
 Wanted: **Modal**, **Lambda**, **Vast.ai**, **SkyPilot** (wraps all of these)
 
-See `src/crucible/fleet/providers/runpod.py` for the reference implementation.
+See `src/crucible/fleet/providers/runpod.py` for the reference implementation. Plugins go in `.crucible/plugins/providers/`.
 
 ### 2. Search Strategies
 
@@ -29,7 +34,43 @@ The autonomous researcher currently uses LLM-driven hypothesis generation. We wa
 - **Grid/Random** — Simple baselines
 - **Hybrid** — LLM for exploration + mathematical methods for exploitation
 
-### 3. Training Script Examples
+### 3. Plugins (Optimizers, Schedulers, Callbacks, Loggers, etc.)
+
+Crucible has a unified plugin system with 12 pluggable types. Contributing a plugin is two files:
+
+```
+.crucible/plugins/optimizers/my_optimizer.py   # the code
+.crucible/plugins/optimizers/my_optimizer.yaml # metadata (optional)
+```
+
+The `.py` file calls `register_*()` at module level:
+```python
+from crucible.training.optimizers import register_optimizer
+
+def _my_factory(params, **kwargs):
+    return MyOptimizer(params, **kwargs)
+
+register_optimizer("my_optimizer", _my_factory, source="local")
+```
+
+To share plugins via community taps, see the [Community Taps](#5-community-taps) section.
+
+### 4. Community Taps
+
+A tap is a git repo containing plugins. To create one:
+
+1. Create a repo with this structure:
+   ```
+   optimizers/my_opt/
+     plugin.yaml    # name, type, version, description, author, tags
+     my_opt.py      # the plugin code
+   ```
+
+2. Others install with: `crucible tap add <your-repo-url> && crucible tap install my_opt`
+
+To contribute to an existing tap: fork it, add your plugin, open a PR.
+
+### 5. Training Script Examples
 
 Show Crucible working with different ML frameworks. An example needs:
 - A training script that follows the [training contract](README.md#training-contract)

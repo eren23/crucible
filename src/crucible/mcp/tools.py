@@ -3651,6 +3651,166 @@ def composer_add_augmentation(args: dict[str, Any]) -> dict[str, Any]:
     return _plugin_add_common(args, "augmentations")
 
 
+# ---------------------------------------------------------------------------
+# Community tap tools
+# ---------------------------------------------------------------------------
+
+
+def _get_tap_manager() -> Any:
+    from crucible.core.tap import TapManager
+    hub = _get_hub()
+    if hub is None:
+        return None
+    return TapManager(hub.hub_dir)
+
+
+def hub_tap_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Add a community plugin tap (git repo).\n\nREQUIRES: url.\nRETURNS: {name, url, added_at}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized. Run crucible hub init first."}
+    try:
+        return tm.add_tap(args.get("url", ""), name=args.get("name", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_remove(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove a tap.\n\nREQUIRES: name.\nRETURNS: {removed: true}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        tm.remove_tap(args.get("name", ""))
+        return {"removed": True}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List configured taps.\n\nREQUIRES: nothing.\nRETURNS: {taps: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    return {"taps": tm.list_taps()}
+
+
+def hub_tap_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Pull latest from taps.\n\nREQUIRES: nothing (optional name).\nRETURNS: {synced, errors}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.sync_tap(args.get("name", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search for plugins across all taps.\n\nREQUIRES: nothing (optional query, type).\nRETURNS: {results: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    results = tm.search(args.get("query", ""), plugin_type=args.get("type", ""))
+    return {"results": results, "total": len(results)}
+
+
+def hub_install(args: dict[str, Any]) -> dict[str, Any]:
+    """Install a plugin from a tap.\n\nREQUIRES: name.\nRETURNS: {status, name, type, version, tap, path}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.install(args.get("name", ""), tap=args.get("tap", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_uninstall(args: dict[str, Any]) -> dict[str, Any]:
+    """Uninstall a tap plugin.\n\nREQUIRES: name.\nRETURNS: {removed: true}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        tm.uninstall(args.get("name", ""))
+        return {"removed": True}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_installed(args: dict[str, Any]) -> dict[str, Any]:
+    """List installed tap plugins.\n\nREQUIRES: nothing (optional type).\nRETURNS: {packages: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    packages = tm.list_installed(plugin_type=args.get("type", ""))
+    return {"packages": packages, "total": len(packages)}
+
+
+def hub_publish(args: dict[str, Any]) -> dict[str, Any]:
+    """Publish a local plugin to a tap repo.\n\nREQUIRES: name, type, tap.\nRETURNS: {status, path, next_steps}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        config = _get_config()
+        return tm.publish(
+            args.get("name", ""),
+            args.get("type", ""),
+            args.get("tap", ""),
+            project_root=config.project_root,
+            store_dir=config.store_dir,
+            plugins_subdir=config.plugins.local_dir,
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_push(args: dict[str, Any]) -> dict[str, Any]:
+    """Push a tap repo to its remote.\n\nREQUIRES: tap name.\nRETURNS: {status, tap}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.push(args.get("tap", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_submit_pr(args: dict[str, Any]) -> dict[str, Any]:
+    """Open a PR from a tap fork to its upstream (requires gh CLI, falls back to manual instructions).\n\nREQUIRES: tap name.\nRETURNS: {status, pr_url | instructions}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.submit_pr(
+            args.get("tap", ""),
+            title=args.get("title", ""),
+            body=args.get("body", ""),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_package_info(args: dict[str, Any]) -> dict[str, Any]:
+    """Get detailed info about a package.\n\nREQUIRES: name.\nRETURNS: manifest + installed status"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    info = tm.get_package_info(args.get("name", ""))
+    if info is None:
+        return {"error": f"Package {args.get('name', '')!r} not found in any tap"}
+    return info
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -3771,4 +3931,17 @@ TOOL_DISPATCH: dict[str, Any] = {
     "composer_add_block_type": composer_add_block_type,
     "composer_add_stack_pattern": composer_add_stack_pattern,
     "composer_add_augmentation": composer_add_augmentation,
+    # Community tap tools
+    "hub_tap_add": hub_tap_add,
+    "hub_tap_remove": hub_tap_remove,
+    "hub_tap_list": hub_tap_list,
+    "hub_tap_sync": hub_tap_sync,
+    "hub_search": hub_search,
+    "hub_install": hub_install,
+    "hub_uninstall": hub_uninstall,
+    "hub_installed": hub_installed,
+    "hub_publish": hub_publish,
+    "hub_tap_push": hub_tap_push,
+    "hub_submit_pr": hub_submit_pr,
+    "hub_package_info": hub_package_info,
 }

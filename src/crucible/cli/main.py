@@ -150,6 +150,40 @@ def _main() -> None:
     hub_sub.add_parser("sync", help="Sync hub via git")
     hub_sub.add_parser("status", help="Show hub status")
 
+    # ── tap ──
+    tap_parser = subparsers.add_parser("tap", help="Community plugin taps")
+    tap_sub = tap_parser.add_subparsers(dest="tap_command")
+    ta = tap_sub.add_parser("add", help="Add a plugin tap")
+    ta.add_argument("url")
+    ta.add_argument("--name", default="")
+    tr = tap_sub.add_parser("remove", help="Remove a tap")
+    tr.add_argument("name")
+    tap_sub.add_parser("list", help="List configured taps")
+    tsy = tap_sub.add_parser("sync", help="Sync tap repos")
+    tsy.add_argument("--name", default="")
+    tsr = tap_sub.add_parser("search", help="Search for plugins")
+    tsr.add_argument("query")
+    tsr.add_argument("--type", default="")
+    ti = tap_sub.add_parser("install", help="Install a plugin")
+    ti.add_argument("name")
+    ti.add_argument("--tap", default="")
+    tu = tap_sub.add_parser("uninstall", help="Uninstall a plugin")
+    tu.add_argument("name")
+    tins = tap_sub.add_parser("installed", help="List installed plugins")
+    tins.add_argument("--type", default="")
+    tpub = tap_sub.add_parser("publish", help="Publish a local plugin")
+    tpub.add_argument("name")
+    tpub.add_argument("--type", required=True)
+    tpub.add_argument("--tap", required=True)
+    tinfo = tap_sub.add_parser("info", help="Show plugin details")
+    tinfo.add_argument("name")
+    tpush = tap_sub.add_parser("push", help="Push tap repo to remote")
+    tpush.add_argument("tap")
+    tpr = tap_sub.add_parser("submit-pr", help="Open PR from tap fork to upstream")
+    tpr.add_argument("tap")
+    tpr.add_argument("--title", default="")
+    tpr.add_argument("--body", default="")
+
     # ── track ──
     track_parser = subparsers.add_parser("track", help="Research track management")
     track_sub = track_parser.add_subparsers(dest="track_command")
@@ -238,6 +272,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.hub_commands import handle_hub
 
         handle_hub(args)
+    elif args.command == "tap":
+        from crucible.cli.tap_commands import handle_tap
+
+        handle_tap(args)
     elif args.command == "track":
         from crucible.cli.track_commands import handle_track
 

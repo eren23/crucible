@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (100 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (112 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -50,6 +50,8 @@ src/crucible/
 - `StoreError` for version store failures
 - `ComposerError` for declarative architecture composition failures
 - `SearchTreeError` for tree search failures
+- `PluginError` for plugin registration / discovery / build failures
+- `TapError` for tap clone / sync / install / publish failures
 - Let unexpected errors propagate — don't catch and swallow
 
 ### Testing
@@ -75,7 +77,7 @@ External training scripts interface with Crucible via:
 
 ### CLI
 - Entry point: `crucible` (via pyproject.toml console_scripts)
-- Subcommands: `fleet`, `run`, `analyze`, `research`, `data`, `mcp`, `models`, `hub`, `track`, `note`, `serve`, `tui`, `store`
+- Subcommands: `fleet`, `run`, `analyze`, `research`, `data`, `mcp`, `models`, `hub`, `tap`, `track`, `note`, `serve`, `tui`, `store`
 - Each subcommand group has its own file in `cli/`
 
 ## Common Commands
@@ -164,7 +166,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-### MCP Tools (100 total)
+### MCP Tools (112 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -208,6 +210,14 @@ Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, and agen
 `composer_add_block_type`, `composer_add_stack_pattern`, `composer_add_augmentation` — Composer extension plugins.
 
 All plugin types use a unified `PluginRegistry` with 3-tier precedence (builtin < global < local). Plugins are auto-discovered from `.crucible/plugins/{type}/*.py` (local) and `~/.crucible-hub/plugins/{type}/*.py` (global).
+
+**Tier 11 — Community Taps (plugin sharing):**
+`hub_tap_add`, `hub_tap_remove`, `hub_tap_list`, `hub_tap_sync` — Manage git-based tap repositories.
+`hub_search`, `hub_install`, `hub_uninstall`, `hub_installed` — Search, install, and manage community plugins.
+`hub_publish`, `hub_tap_push`, `hub_submit_pr` — Publish plugins to taps, push, and open PRs.
+`hub_package_info` — Get detailed package metadata and install status.
+
+Taps are git repos containing plugins with `plugin.yaml` manifests. Install copies to `~/.crucible-hub/plugins/` (auto-discovered). Publish commits to a tap's local clone; user pushes or opens PR.
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 
@@ -285,6 +295,34 @@ All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-
 | Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
 
 **Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.
+
+### Community Taps
+
+Taps are git repos that serve as community plugin registries. Managed by `TapManager` in `core/tap.py`.
+
+```bash
+crucible tap add https://github.com/user/crucible-community-tap
+crucible tap search lion
+crucible tap install lion        # copies to ~/.crucible-hub/plugins/optimizers/
+crucible tap publish my_opt --type optimizers --tap my-tap
+crucible tap push my-tap
+crucible tap submit-pr my-tap    # opens PR via gh CLI
+```
+
+**Hub layout:**
+- `~/.crucible-hub/taps.yaml` — configured taps
+- `~/.crucible-hub/installed.yaml` — installed packages ledger
+- `~/.crucible-hub/taps/{name}/` — cloned tap repos (shallow)
+- `~/.crucible-hub/plugins/{type}/` — installed plugins (auto-discovered)
+
+**Tap repo layout:**
+```
+optimizers/lion/
+  plugin.yaml    # name, type, version, description, author, tags, benchmarks
+  lion.py        # the plugin code
+```
+
+**Security:** Plugin names validated against `[a-zA-Z0-9][a-zA-Z0-9_-]*`. Symlink escape guards on all file operations. Atomic YAML writes (write-then-rename).
 
 ### Known Limitations
 

@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 85 MCP tools for AI agents. Start the server:
+Crucible exposes 112 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -619,4 +619,62 @@ Get the full recipe with all steps, environment, gotchas, and results. Pass the 
 2. recipe_save      → capture what worked + what broke
 3. recipe_list      → browse saved recipes
 4. recipe_get       → hand to another agent for reproduction
+```
+
+---
+
+## Plugin Registry (15 tools)
+
+Unified plugin system for all extensible components. Each plugin type supports `list_available`, `add`, and optionally `get_config_schema`.
+
+| Tool | Description |
+|------|-------------|
+| `optimizer_list_available` | List registered optimizers (adam, adamw, muon, sgd, rmsprop + custom) |
+| `optimizer_add` | Register a new optimizer from Python code |
+| `optimizer_get_config_schema` | Get parameter schema for a named optimizer |
+| `scheduler_list_available` | List registered LR schedulers (cosine, constant, linear, cosine_restarts + custom) |
+| `scheduler_add` | Register a new scheduler from Python code |
+| `scheduler_get_config_schema` | Get parameter schema for a named scheduler |
+| `provider_list_available` | List registered fleet providers (runpod, ssh + custom) |
+| `provider_add` | Register a new fleet provider from Python code |
+| `logger_list_available` | List registered logging backends (wandb, console, jsonl + custom) |
+| `logger_add` | Register a new logging backend from Python code |
+| `callback_list_available` | List registered training callbacks (grad_clip, nan_detector, early_stopping + custom) |
+| `callback_add` | Register a new training callback from Python code |
+| `composer_add_block_type` | Register a new composer block type |
+| `composer_add_stack_pattern` | Register a new composer stack wiring pattern |
+| `composer_add_augmentation` | Register a new composer augmentation |
+
+All plugins use 3-tier precedence: builtin < global (`~/.crucible-hub/plugins/`) < local (`.crucible/plugins/`).
+
+---
+
+## Community Taps (12 tools)
+
+Homebrew-style plugin sharing via git repositories.
+
+| Tool | Description |
+|------|-------------|
+| `hub_tap_add` | Add a tap (clone a git repo containing plugins) |
+| `hub_tap_remove` | Remove a tap and its cloned repo |
+| `hub_tap_list` | List all configured taps |
+| `hub_tap_sync` | Pull latest from one or all taps |
+| `hub_search` | Search for plugins across all taps |
+| `hub_install` | Install a plugin from a tap into the hub |
+| `hub_uninstall` | Remove an installed tap plugin |
+| `hub_installed` | List all installed tap plugins |
+| `hub_publish` | Publish a local plugin to a tap repo |
+| `hub_tap_push` | Push a tap repo to its remote |
+| `hub_submit_pr` | Open a PR from a tap fork (via gh CLI) |
+| `hub_package_info` | Get detailed package metadata and install status |
+
+### Workflow
+
+```
+1. hub_tap_add       → clone a community tap repo
+2. hub_search        → find plugins by name/description/tag
+3. hub_install       → copies .py to ~/.crucible-hub/plugins/ (auto-discovered)
+4. hub_publish       → copy local plugin to tap, commit
+5. hub_tap_push      → push tap to remote
+6. hub_submit_pr     → open PR to upstream (if fork)
 ```

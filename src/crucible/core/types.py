@@ -241,3 +241,39 @@ class SearchTreeMeta(TypedDict, total=False):
     best_metric: float | None
     created_at: str
     updated_at: str
+
+
+# ---------------------------------------------------------------------------
+# Community tap types
+# ---------------------------------------------------------------------------
+
+
+class PluginManifest(TypedDict, total=False):
+    """Metadata for a plugin package in a tap."""
+    name: str              # e.g. "lion"
+    type: str              # e.g. "optimizers"
+    version: str           # semver "1.0.0"
+    description: str
+    author: str
+    tags: list[str]
+    requires: list[str]    # pip deps beyond crucible
+    benchmarks: dict[str, Any]
+    tested_with: str       # e.g. "crucible>=0.2.1"
+
+
+class InstalledPackage(TypedDict, total=False):
+    """Record of an installed tap plugin."""
+    name: str
+    type: str
+    version: str
+    tap: str               # tap name it came from
+    installed_at: str      # ISO timestamp
+    sha: str               # git commit SHA of tap at install time
+
+
+class TapInfo(TypedDict, total=False):
+    """Metadata for a configured tap."""
+    name: str
+    url: str
+    added_at: str
+    last_synced: str

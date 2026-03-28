@@ -37,7 +37,9 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 - Research briefing (LLM session orientation with project context and findings)
 - REST API server (`crucible serve`) — 10 FastAPI endpoints wrapping MCP tools
 - W&B bridge with image logging and run annotation support
-- 77 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization)
+- 112 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization, plugin system, community taps)
+- Unified plugin system — 12 pluggable component types (optimizers, schedulers, callbacks, loggers, providers, architectures, data adapters, objectives, and more) with 3-tier precedence and auto-discovery
+- Community taps — Homebrew-style git-based plugin sharing (`crucible tap add`, `search`, `install`, `publish`)
 - Interactive TUI for browsing experiment designs grouped by status
 
 ## What's Coming
@@ -45,7 +47,6 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 - SkyPilot provider (20+ cloud support)
 - Optuna/Ax integration (mathematical HPO alongside LLM-driven search)
 - Code-level search (LLM modifies training scripts, not just configs)
-- Research strategy plugins (custom loop phases)
 - PyPI release
 
 ## Quick Start
@@ -133,7 +134,7 @@ crucible research start --budget-hours 10 --tier proxy --dry-run
 ### MCP Integration
 
 ```bash
-crucible mcp serve  # starts stdio MCP server for Claude (77 tools)
+crucible mcp serve  # starts stdio MCP server for Claude (112 tools)
 crucible serve      # starts REST API server (FastAPI, 10 endpoints)
 ```
 
@@ -206,7 +207,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing
 ├── analysis/      # Leaderboard, sensitivity, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server for Claude agent integration (77 tools)
+├── mcp/           # MCP server for Claude agent integration (112 tools)
 ├── training/      # Training backends (torch) — factored from train_gpt.py
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)

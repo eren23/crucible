@@ -36,3 +36,6 @@ class RecipeError(CrucibleError):
 
 class PluginError(CrucibleError):
     """Plugin registration, discovery, or build failures."""
+
+class TapError(CrucibleError):
+    """Tap clone, sync, install, search, or publish failures."""
