@@ -202,25 +202,41 @@ class JEPAObjective(TrainingObjective):
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Registry (PluginRegistry-backed, with backward-compatible API)
 # ---------------------------------------------------------------------------
 
-OBJECTIVE_REGISTRY: dict[str, type[TrainingObjective]] = {}
+from crucible.core.plugin_registry import PluginRegistry
+
+_OBJECTIVE_REGISTRY = PluginRegistry[type["TrainingObjective"]]("objective")
+OBJECTIVE_REGISTRY: dict[str, type["TrainingObjective"]] = _OBJECTIVE_REGISTRY._registry  # backward compat
 
 
-def register_objective(name: str, cls: type[TrainingObjective]) -> None:
-    """Register an objective class under *name*."""
-    OBJECTIVE_REGISTRY[name] = cls
+def register_objective(name: str, cls: type["TrainingObjective"], *, source: str = "builtin") -> None:
+    """Register an objective class under *name*.
+
+    Supports 3-tier precedence (builtin < global < local) via *source*.
+    """
+    _OBJECTIVE_REGISTRY.register(name, cls, source=source)
 
 
-def build_objective(name: str, **kwargs: Any) -> TrainingObjective:
+def build_objective(name: str, **kwargs: Any) -> "TrainingObjective":
     """Instantiate a registered objective by name."""
-    cls = OBJECTIVE_REGISTRY.get(name)
+    cls = _OBJECTIVE_REGISTRY.get(name)
     if cls is None:
         raise KeyError(
-            f"Unknown objective '{name}'. Available: {sorted(OBJECTIVE_REGISTRY)}"
+            f"Unknown objective '{name}'. Available: {sorted(_OBJECTIVE_REGISTRY.list_plugins())}"
         )
     return cls(**kwargs)
+
+
+def list_objectives() -> list[str]:
+    """Return sorted list of registered objective names."""
+    return _OBJECTIVE_REGISTRY.list_plugins()
+
+
+def list_objectives_detailed() -> list[dict[str, str]]:
+    """Return objectives with source metadata."""
+    return _OBJECTIVE_REGISTRY.list_plugins_detailed()
 
 
 # Register built-ins

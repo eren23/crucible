@@ -3465,6 +3465,352 @@ def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+# ---------------------------------------------------------------------------
+# Plugin registry tools (optimizers, schedulers, providers, loggers, callbacks,
+# composer block types, stack patterns, augmentations)
+# ---------------------------------------------------------------------------
+
+
+def _plugin_add_common(args: dict[str, Any], plugin_type: str) -> dict[str, Any]:
+    """Common logic for all plugin-add tools: save code to disk and load via importlib."""
+    import importlib.util
+    import sys as _sys
+
+    name = args.get("name", "")
+    code = args.get("code", "")
+    if not name or not code:
+        return {"error": "Both 'name' and 'code' are required."}
+    try:
+        config = _get_config()
+        plugin_dir = config.project_root / config.store_dir / config.plugins.local_dir / plugin_type
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        path = plugin_dir / f"{name}.py"
+        path.write_text(code, encoding="utf-8")
+
+        # Load via importlib (same mechanism as PluginRegistry.load_plugins
+        # and model_add_architecture) so the module lands in sys.modules and
+        # won't double-execute on restart/rediscovery.
+        module_name = f"_crucible_plugin_{plugin_type}_local_{name}"
+        _sys.modules.pop(module_name, None)  # allow re-registration
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            return {"error": f"Could not create module spec for {path}"}
+        mod = importlib.util.module_from_spec(spec)
+        _sys.modules[module_name] = mod
+        spec.loader.exec_module(mod)
+
+        return {"status": "registered", "name": name, "plugin_type": plugin_type,
+                "path": str(path)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def optimizer_list_available(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered optimizer plugins.
+
+    REQUIRES: nothing
+    RETURNS: {optimizers: [{name, source}, ...]}
+    """
+    from crucible.training.optimizers import list_optimizers_detailed
+    return {"optimizers": list_optimizers_detailed()}
+
+
+def optimizer_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new optimizer plugin from code at runtime.
+
+    REQUIRES: name (str), code (str — Python source that calls register_optimizer)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "optimizers")
+
+
+def optimizer_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
+    """Get the config schema for a named optimizer.
+
+    REQUIRES: name (str)
+    RETURNS: {name, schema}
+    """
+    from crucible.training.optimizers import OPTIMIZER_REGISTRY
+    name = args.get("name", "")
+    return {"name": name, "schema": OPTIMIZER_REGISTRY.get_schema(name)}
+
+
+def scheduler_list_available(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered scheduler plugins.
+
+    REQUIRES: nothing
+    RETURNS: {schedulers: [{name, source}, ...]}
+    """
+    from crucible.training.schedulers import list_schedulers_detailed
+    return {"schedulers": list_schedulers_detailed()}
+
+
+def scheduler_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new scheduler plugin from code at runtime.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "schedulers")
+
+
+def scheduler_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
+    """Get the config schema for a named scheduler.
+
+    REQUIRES: name (str)
+    RETURNS: {name, schema}
+    """
+    from crucible.training.schedulers import SCHEDULER_REGISTRY
+    name = args.get("name", "")
+    return {"name": name, "schema": SCHEDULER_REGISTRY.get_schema(name)}
+
+
+def provider_list_available(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered fleet provider plugins.
+
+    REQUIRES: nothing
+    RETURNS: {providers: [{name, source}, ...]}
+    """
+    from crucible.fleet.provider_registry import list_providers_detailed
+    return {"providers": list_providers_detailed()}
+
+
+def provider_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new fleet provider plugin from code at runtime.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "providers")
+
+
+def logger_list_available(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered logging backend plugins.
+
+    REQUIRES: nothing
+    RETURNS: {loggers: [{name, source}, ...]}
+    """
+    from crucible.runner.loggers import list_loggers_detailed
+    return {"loggers": list_loggers_detailed()}
+
+
+def logger_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new logging backend plugin from code at runtime.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "loggers")
+
+
+def callback_list_available(args: dict[str, Any]) -> dict[str, Any]:
+    """List all registered training callback plugins.
+
+    REQUIRES: nothing
+    RETURNS: {callbacks: [{name, source}, ...]}
+    """
+    from crucible.training.callbacks import list_callbacks_detailed
+    return {"callbacks": list_callbacks_detailed()}
+
+
+def callback_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new training callback plugin from code at runtime.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "callbacks")
+
+
+def composer_add_block_type(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new composer block type from code.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "block_types")
+
+
+def composer_add_stack_pattern(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new composer stack pattern from code.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "stack_patterns")
+
+
+def composer_add_augmentation(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new composer augmentation from code.
+
+    REQUIRES: name (str), code (str)
+    RETURNS: {status, name, path}
+    """
+    return _plugin_add_common(args, "augmentations")
+
+
+# ---------------------------------------------------------------------------
+# Community tap tools
+# ---------------------------------------------------------------------------
+
+
+def _get_tap_manager() -> Any:
+    from crucible.core.tap import TapManager
+    hub = _get_hub()
+    if hub is None:
+        return None
+    return TapManager(hub.hub_dir)
+
+
+def hub_tap_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Add a community plugin tap (git repo).\n\nREQUIRES: url.\nRETURNS: {name, url, added_at}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized. Run crucible hub init first."}
+    try:
+        return tm.add_tap(args.get("url", ""), name=args.get("name", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_remove(args: dict[str, Any]) -> dict[str, Any]:
+    """Remove a tap.\n\nREQUIRES: name.\nRETURNS: {removed: true}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        tm.remove_tap(args.get("name", ""))
+        return {"removed": True}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List configured taps.\n\nREQUIRES: nothing.\nRETURNS: {taps: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    return {"taps": tm.list_taps()}
+
+
+def hub_tap_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Pull latest from taps.\n\nREQUIRES: nothing (optional name).\nRETURNS: {synced, errors}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.sync_tap(args.get("name", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search for plugins across all taps.\n\nREQUIRES: nothing (optional query, type).\nRETURNS: {results: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    results = tm.search(args.get("query", ""), plugin_type=args.get("type", ""))
+    return {"results": results, "total": len(results)}
+
+
+def hub_install(args: dict[str, Any]) -> dict[str, Any]:
+    """Install a plugin from a tap.\n\nREQUIRES: name.\nRETURNS: {status, name, type, version, tap, path}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.install(args.get("name", ""), tap=args.get("tap", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_uninstall(args: dict[str, Any]) -> dict[str, Any]:
+    """Uninstall a tap plugin.\n\nREQUIRES: name.\nRETURNS: {removed: true}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        tm.uninstall(args.get("name", ""))
+        return {"removed": True}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_installed(args: dict[str, Any]) -> dict[str, Any]:
+    """List installed tap plugins.\n\nREQUIRES: nothing (optional type).\nRETURNS: {packages: [...]}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    packages = tm.list_installed(plugin_type=args.get("type", ""))
+    return {"packages": packages, "total": len(packages)}
+
+
+def hub_publish(args: dict[str, Any]) -> dict[str, Any]:
+    """Publish a local plugin to a tap repo.\n\nREQUIRES: name, type, tap.\nRETURNS: {status, path, next_steps}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        config = _get_config()
+        return tm.publish(
+            args.get("name", ""),
+            args.get("type", ""),
+            args.get("tap", ""),
+            project_root=config.project_root,
+            store_dir=config.store_dir,
+            plugins_subdir=config.plugins.local_dir,
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def hub_tap_push(args: dict[str, Any]) -> dict[str, Any]:
+    """Push a tap repo to its remote.\n\nREQUIRES: tap name.\nRETURNS: {status, tap}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.push(args.get("tap", ""))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_submit_pr(args: dict[str, Any]) -> dict[str, Any]:
+    """Open a PR from a tap fork to its upstream (requires gh CLI, falls back to manual instructions).\n\nREQUIRES: tap name.\nRETURNS: {status, pr_url | instructions}"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    try:
+        return tm.submit_pr(
+            args.get("tap", ""),
+            title=args.get("title", ""),
+            body=args.get("body", ""),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hub_package_info(args: dict[str, Any]) -> dict[str, Any]:
+    """Get detailed info about a package.\n\nREQUIRES: name.\nRETURNS: manifest + installed status"""
+    tm = _get_tap_manager()
+    if tm is None:
+        return {"error": "Hub not initialized."}
+    info = tm.get_package_info(args.get("name", ""))
+    if info is None:
+        return {"error": f"Package {args.get('name', '')!r} not found in any tap"}
+    return info
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -3569,4 +3915,33 @@ TOOL_DISPATCH: dict[str, Any] = {
     "recipe_save": recipe_save,
     "recipe_list": recipe_list,
     "recipe_get": recipe_get,
+    # Plugin registry tools
+    "optimizer_list_available": optimizer_list_available,
+    "optimizer_add": optimizer_add,
+    "optimizer_get_config_schema": optimizer_get_config_schema,
+    "scheduler_list_available": scheduler_list_available,
+    "scheduler_add": scheduler_add,
+    "scheduler_get_config_schema": scheduler_get_config_schema,
+    "provider_list_available": provider_list_available,
+    "provider_add": provider_add,
+    "logger_list_available": logger_list_available,
+    "logger_add": logger_add,
+    "callback_list_available": callback_list_available,
+    "callback_add": callback_add,
+    "composer_add_block_type": composer_add_block_type,
+    "composer_add_stack_pattern": composer_add_stack_pattern,
+    "composer_add_augmentation": composer_add_augmentation,
+    # Community tap tools
+    "hub_tap_add": hub_tap_add,
+    "hub_tap_remove": hub_tap_remove,
+    "hub_tap_list": hub_tap_list,
+    "hub_tap_sync": hub_tap_sync,
+    "hub_search": hub_search,
+    "hub_install": hub_install,
+    "hub_uninstall": hub_uninstall,
+    "hub_installed": hub_installed,
+    "hub_publish": hub_publish,
+    "hub_tap_push": hub_tap_push,
+    "hub_submit_pr": hub_submit_pr,
+    "hub_package_info": hub_package_info,
 }

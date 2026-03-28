@@ -1570,6 +1570,349 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ---- Plugin registry tools ----
+    Tool(
+        name="optimizer_list_available",
+        description=(
+            "List all registered optimizer plugins (builtin + global + local).\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {optimizers: [{name, source}, ...]}\n"
+            "NEXT: optimizer_add to register a new optimizer."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="optimizer_add",
+        description=(
+            "Register a new optimizer plugin from Python code. The code should import "
+            "register_optimizer from crucible.training.optimizers and call it.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}\n"
+            "NEXT: optimizer_list_available to verify."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin name (e.g., 'lion', 'sophia')."},
+                "code": {"type": "string", "description": "Python source that calls register_optimizer()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="optimizer_get_config_schema",
+        description="Get the parameter schema for a named optimizer.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Optimizer name."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="scheduler_list_available",
+        description=(
+            "List all registered LR scheduler plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {schedulers: [{name, source}, ...]}\n"
+            "NEXT: scheduler_add to register a new scheduler."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="scheduler_add",
+        description=(
+            "Register a new LR scheduler plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin name (e.g., 'polynomial', 'warmup_cosine')."},
+                "code": {"type": "string", "description": "Python source that calls register_scheduler()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="scheduler_get_config_schema",
+        description="Get the parameter schema for a named scheduler.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Scheduler name."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="provider_list_available",
+        description=(
+            "List all registered fleet provider plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {providers: [{name, source}, ...]}\n"
+            "NEXT: provider_add to register a new cloud provider."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="provider_add",
+        description=(
+            "Register a new fleet provider plugin from Python code. The code should "
+            "subclass FleetProvider and call register_provider().\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Provider name (e.g., 'lambda_labs', 'modal')."},
+                "code": {"type": "string", "description": "Python source that calls register_provider()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="logger_list_available",
+        description=(
+            "List all registered logging backend plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {loggers: [{name, source}, ...]}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="logger_add",
+        description=(
+            "Register a new logging backend plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Logger name (e.g., 'tensorboard', 'neptune')."},
+                "code": {"type": "string", "description": "Python source that calls register_logger()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="callback_list_available",
+        description=(
+            "List all registered training callback plugins.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {callbacks: [{name, source}, ...]}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="callback_add",
+        description=(
+            "Register a new training callback plugin from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Callback name (e.g., 'checkpoint', 'lr_finder')."},
+                "code": {"type": "string", "description": "Python source that calls register_callback()."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_block_type",
+        description=(
+            "Register a new composer block type from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Block type name."},
+                "code": {"type": "string", "description": "Python source registering the block type."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_stack_pattern",
+        description=(
+            "Register a new composer stack pattern from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Stack pattern name."},
+                "code": {"type": "string", "description": "Python source registering the stack pattern."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="composer_add_augmentation",
+        description=(
+            "Register a new composer augmentation from Python code.\n\n"
+            "REQUIRES: name (str), code (str).\n"
+            "RETURNS: {status, name, path}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Augmentation name."},
+                "code": {"type": "string", "description": "Python source registering the augmentation."},
+            },
+            "required": ["name", "code"],
+            "additionalProperties": False,
+        },
+    ),
+    # ---- Community tap tools ----
+    Tool(
+        name="hub_tap_add",
+        description="Add a community plugin tap (git repo).\n\nREQUIRES: url.\nRETURNS: {name, url, added_at}\nNEXT: hub_tap_sync to pull latest, hub_search to find plugins.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Git URL of the tap repository."},
+                "name": {"type": "string", "description": "Override tap name (derived from URL if omitted)."},
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_tap_remove",
+        description="Remove a tap and its cloned repo.\n\nREQUIRES: name.\nRETURNS: {removed: true}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Tap name to remove."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_tap_list",
+        description="List all configured taps.\n\nREQUIRES: nothing.\nRETURNS: {taps: [{name, url, added_at, last_synced}]}",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="hub_tap_sync",
+        description="Pull latest from one or all taps.\n\nREQUIRES: nothing (optional name).\nRETURNS: {synced: [...], errors: [...]}\nNEXT: hub_search to find new plugins.",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Specific tap to sync. Syncs all if omitted."}},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_search",
+        description="Search for plugins across all taps by name, description, or tags.\n\nREQUIRES: nothing (optional query, type).\nRETURNS: {results: [{name, type, version, description, author, tap}]}\nNEXT: hub_install to install a found plugin.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query (matches name, description, tags, author)."},
+                "type": {"type": "string", "description": "Filter by plugin type (e.g. 'optimizers', 'callbacks')."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_install",
+        description="Install a community plugin from a tap into the hub's global plugins directory.\n\nREQUIRES: name. Hub initialized. At least one tap added.\nRETURNS: {status, name, type, version, tap, path}\nNEXT: optimizer_list_available (or similar) to verify the plugin loaded.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Plugin name to install."},
+                "tap": {"type": "string", "description": "Specific tap to install from. Searches all if omitted."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_uninstall",
+        description="Remove an installed tap plugin.\n\nREQUIRES: name.\nRETURNS: {removed: true}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Plugin name to uninstall."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_installed",
+        description="List all installed tap plugins.\n\nREQUIRES: nothing (optional type filter).\nRETURNS: {packages: [{name, type, version, tap, installed_at}]}",
+        inputSchema={
+            "type": "object",
+            "properties": {"type": {"type": "string", "description": "Filter by plugin type."}},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_publish",
+        description="Publish a local plugin to a tap repository. Commits to the tap repo; user pushes manually.\n\nREQUIRES: name, type, tap.\nRETURNS: {status, path, note}",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Local plugin name to publish."},
+                "type": {"type": "string", "description": "Plugin type (e.g. 'optimizers')."},
+                "tap": {"type": "string", "description": "Target tap name."},
+            },
+            "required": ["name", "type", "tap"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_tap_push",
+        description="Push a tap repo to its git remote after publishing.\n\nREQUIRES: tap name.\nRETURNS: {status, tap}\nNEXT: hub_submit_pr to open a PR if this is a fork.",
+        inputSchema={
+            "type": "object",
+            "properties": {"tap": {"type": "string", "description": "Tap name to push."}},
+            "required": ["tap"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_submit_pr",
+        description=(
+            "Open a GitHub PR from a tap fork to its upstream. Uses gh CLI if available, "
+            "falls back to manual instructions.\n\n"
+            "REQUIRES: tap name. Optional: title, body.\n"
+            "RETURNS: {status, pr_url} or {status: 'manual', instructions}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tap": {"type": "string", "description": "Tap name."},
+                "title": {"type": "string", "description": "PR title."},
+                "body": {"type": "string", "description": "PR body/description."},
+            },
+            "required": ["tap"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hub_package_info",
+        description="Get detailed info about a package including manifest and install status.\n\nREQUIRES: name.\nRETURNS: full manifest + {installed: bool}",
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Package name."}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 

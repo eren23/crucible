@@ -265,13 +265,26 @@ def main() -> None:
         else:
             scalar_params.append(p)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
-    optimizer_tok = torch.optim.Adam(
+
+    # Pluggable per-group optimizers — env vars override defaults.
+    from crucible.training.optimizers import build_optimizer
+    _embed_opt = os.environ.get("EMBED_OPTIMIZER", "adam")
+    _matrix_opt = os.environ.get("MATRIX_OPTIMIZER", "muon")
+    _scalar_opt = os.environ.get("SCALAR_OPTIMIZER", "adamw")
+    _head_opt = os.environ.get("HEAD_OPTIMIZER", "adam")
+
+    # Adam-family kwargs — only forwarded when using adam/adamw to avoid
+    # TypeError on optimizers that don't accept betas/eps/fused.
+    _ADAM_FAMILY = {"adam", "adamw"}
+    _adam_kw = dict(betas=(args.beta1, args.beta2), eps=args.adam_eps, fused=True)
+
+    optimizer_tok = build_optimizer(
+        _embed_opt,
         [{"params": token_params, "lr": token_lr, "base_lr": token_lr}],
-        betas=(args.beta1, args.beta2),
-        eps=args.adam_eps,
-        fused=True,
+        **(_adam_kw if _embed_opt in _ADAM_FAMILY else {}),
     )
-    optimizer_muon = Muon(
+    optimizer_muon = build_optimizer(
+        _matrix_opt,
         matrix_params,
         lr=args.matrix_lr,
         momentum=args.muon_momentum,
@@ -280,20 +293,18 @@ def main() -> None:
     )
     for group in optimizer_muon.param_groups:
         group["base_lr"] = args.matrix_lr
-    optimizer_scalar = torch.optim.AdamW(
+    optimizer_scalar = build_optimizer(
+        _scalar_opt,
         [{"params": scalar_params, "lr": args.scalar_lr, "base_lr": args.scalar_lr}],
-        betas=(args.beta1, args.beta2),
-        eps=args.adam_eps,
         weight_decay=args.adam_weight_decay,
-        fused=True,
+        **(_adam_kw if _scalar_opt in _ADAM_FAMILY else {}),
     )
     optimizers: list[torch.optim.Optimizer] = [optimizer_tok, optimizer_muon, optimizer_scalar]
     if head_params:
-        optimizer_head = torch.optim.Adam(
+        optimizer_head = build_optimizer(
+            _head_opt,
             [{"params": head_params, "lr": args.head_lr, "base_lr": args.head_lr}],
-            betas=(args.beta1, args.beta2),
-            eps=args.adam_eps,
-            fused=True,
+            **(_adam_kw if _head_opt in _ADAM_FAMILY else {}),
         )
         optimizers.insert(1, optimizer_head)
 

@@ -34,6 +34,10 @@ class TrainingConfig:
     backend: str = "torch"  # "torch" | "mlx" | custom
     python: str = "python3"
     modality: str = "lm"    # "lm" | "vision" | "diffusion" | "rl" | "generic"
+    optimizer: str = ""          # default optimizer (env var OPTIMIZER overrides)
+    lr_schedule: str = ""        # default LR schedule (env var LR_SCHEDULE overrides)
+    logging_backends: str = ""   # comma-separated logger names (env var LOGGING_BACKEND overrides)
+    callbacks: str = ""          # comma-separated callback names (env var CALLBACKS overrides)
 
 
 @dataclass
@@ -69,6 +73,13 @@ class ExecutionPolicyConfig:
 
 
 @dataclass
+class PluginsConfig:
+    discover: bool = True           # auto-discover plugins from .crucible/plugins/ and hub
+    local_dir: str = "plugins"      # subdirectory under store_dir for local plugins
+    hub_discover: bool = True       # also discover from ~/.crucible-hub/plugins/
+
+
+@dataclass
 class ProjectConfig:
     name: str = "crucible-project"
     version: str = CRUCIBLE_VERSION
@@ -81,6 +92,7 @@ class ProjectConfig:
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     execution_policy: ExecutionPolicyConfig = field(default_factory=ExecutionPolicyConfig)
+    plugins: PluginsConfig = field(default_factory=PluginsConfig)
     store_dir: str = ".crucible"
     compose_builtin_specs: bool = False
     auto_commit_versions: bool = False
@@ -132,9 +144,21 @@ def _build_training(raw: list[dict[str, Any]]) -> list[TrainingConfig]:
             backend=t.get("backend", "torch"),
             python=t.get("python", "python3"),
             modality=t.get("modality", "lm"),
+            optimizer=t.get("optimizer", ""),
+            lr_schedule=t.get("lr_schedule", ""),
+            logging_backends=t.get("logging_backends", ""),
+            callbacks=t.get("callbacks", ""),
         )
         for t in raw
     ]
+
+
+def _build_plugins(raw: dict[str, Any]) -> PluginsConfig:
+    return PluginsConfig(
+        discover=raw.get("discover", True),
+        local_dir=raw.get("local_dir", "plugins"),
+        hub_discover=raw.get("hub_discover", True),
+    )
 
 
 def _build_metrics(raw: dict[str, Any]) -> MetricsConfig:
@@ -195,12 +219,16 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         researcher=_build_researcher(raw.get("researcher", {})),
         wandb=_build_wandb(raw.get("wandb", {})),
         execution_policy=_build_execution_policy(raw.get("execution_policy", {})),
+        plugins=_build_plugins(raw.get("plugins", {})),
         store_dir=raw.get("store_dir", ".crucible"),
         compose_builtin_specs=raw.get("compose_builtin_specs", False),
         auto_commit_versions=raw.get("auto_commit_versions", False),
         research_state_file=raw.get("research_state_file", "research_state.jsonl"),
         sync_excludes=raw.get("sync_excludes", [
-            ".git", ".venv", "__pycache__", ".crucible", "logs", "data/datasets", "data/tokenizers",
+            ".git", ".venv", "__pycache__",
+            ".crucible/designs", ".crucible/context", ".crucible/notes",
+            ".crucible/store.jsonl", ".crucible/notes.jsonl",
+            "logs", "data/datasets", "data/tokenizers",
         ]),
         results_file=raw.get("results_file", "experiments.jsonl"),
         fleet_results_file=raw.get("fleet_results_file", "experiments_fleet.jsonl"),

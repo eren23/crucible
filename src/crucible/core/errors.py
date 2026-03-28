@@ -33,3 +33,9 @@ class SearchTreeError(CrucibleError):
 
 class RecipeError(CrucibleError):
     """Recipe save, retrieval, or validation failures."""
+
+class PluginError(CrucibleError):
+    """Plugin registration, discovery, or build failures."""
+
+class TapError(CrucibleError):
+    """Tap clone, sync, install, search, or publish failures."""

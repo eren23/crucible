@@ -9,12 +9,12 @@ The canonical roadmap lives at [ROADMAP.md](../ROADMAP.md) in the project root. 
 
 ## Current: v0.2.1-alpha
 
-**What's working:** Full fleet loop (provision → bootstrap → dispatch → collect → destroy), 82 MCP tools, hub system, notes, research briefing, REST API, declarative architecture composition + Python plugins, modality-agnostic training (LM, diffusion, vision, world models), external project runner (run any codebase on fleet), 2 reference examples (DDPM, JEPA), W&B bridge, interactive TUI, 865 tests.
+**What's working:** Full fleet loop (provision → bootstrap → dispatch → collect → destroy), 112 MCP tools, hub system, notes, research briefing, REST API, declarative architecture composition + Python plugins, modality-agnostic training (LM, diffusion, vision, world models), external project runner (run any codebase on fleet), 2 reference examples (DDPM, JEPA), W&B bridge, interactive TUI, unified plugin system (12 pluggable component types with 3-tier precedence), community taps (Homebrew-style plugin sharing), 1000 tests.
 
 **What's next:**
-- Provider plugin system (registry + auto-discovery, like architecture plugins)
 - Pre-dispatch model family validation
 - CI/CD pipeline and PyPI release
+- Community tap index / web UI
 
 ## Planned Phases
 

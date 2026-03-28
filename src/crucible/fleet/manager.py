@@ -100,18 +100,12 @@ class FleetManager:
 
     @staticmethod
     def _build_provider(config: ProjectConfig) -> FleetProvider:
-        ptype = config.provider.type.lower()
-        if ptype == "runpod":
-            from crucible.fleet.providers.runpod import RunPodProvider
-            return RunPodProvider(
-                image_name=config.provider.image or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
-                gpu_type_ids=config.provider.gpu_types or None,
-                ssh_key=config.provider.ssh_key,
-                defaults=config.provider.defaults,
-            )
-        from crucible.fleet.providers.ssh import SSHProvider
-        return SSHProvider(
+        from crucible.fleet.provider_registry import build_provider
+        return build_provider(
+            config.provider.type.lower(),
             ssh_key=config.provider.ssh_key,
+            image_name=config.provider.image or "",
+            gpu_type_ids=config.provider.gpu_types or None,
             defaults=config.provider.defaults,
         )
 

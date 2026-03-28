@@ -1,4 +1,7 @@
-"""Integration tests for architecture loading precedence."""
+"""Integration tests for architecture loading precedence.
+
+Requires torch — skipped when unavailable.
+"""
 from __future__ import annotations
 
 import os
@@ -6,6 +9,10 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
+
+torch = pytest.importorskip("torch")
 
 
 def test_mirrored_global_and_local_precedence(tmp_path):

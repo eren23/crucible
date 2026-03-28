@@ -186,38 +186,42 @@ class SpecResolver:
 
 
 # ---------------------------------------------------------------------------
-# Block type registry
+# Block type registry (PluginRegistry-backed)
 # ---------------------------------------------------------------------------
 
-BLOCK_TYPES: dict[str, Callable[..., Any]] = {}
+from crucible.core.plugin_registry import PluginRegistry
+
+BLOCK_TYPE_REGISTRY = PluginRegistry("block_type")
+BLOCK_TYPES: dict[str, Callable[..., Any]] = BLOCK_TYPE_REGISTRY._registry  # backward compat
 
 
 def _ensure_block_types() -> None:
-    """Lazily populate BLOCK_TYPES on first use (avoids top-level torch import)."""
-    if BLOCK_TYPES:
+    """Lazily populate block types on first use (avoids top-level torch import)."""
+    if BLOCK_TYPE_REGISTRY._registry:
         return
     from crucible.models.components.attention import Block
     from crucible.models.components.memory import PrefixMemoryBlock
-    BLOCK_TYPES["attention_block"] = Block
-    BLOCK_TYPES["prefix_memory_block"] = PrefixMemoryBlock
+    BLOCK_TYPE_REGISTRY.register("attention_block", Block, source="builtin")
+    BLOCK_TYPE_REGISTRY.register("prefix_memory_block", PrefixMemoryBlock, source="builtin")
 
 
 # ---------------------------------------------------------------------------
-# Augmentation registry
+# Augmentation registry (PluginRegistry-backed)
 # ---------------------------------------------------------------------------
 
-AUGMENTATIONS: dict[str, Callable[..., Any]] = {}
+AUGMENTATION_REGISTRY = PluginRegistry("augmentation")
+AUGMENTATIONS: dict[str, Callable[..., Any]] = AUGMENTATION_REGISTRY._registry  # backward compat
 
 
 def _ensure_augmentations() -> None:
-    """Lazily populate AUGMENTATIONS on first use."""
-    if AUGMENTATIONS:
+    """Lazily populate augmentations on first use."""
+    if AUGMENTATION_REGISTRY._registry:
         return
     from crucible.models.components.gate import SmearGate
     from crucible.models.components.hash_embed import BigramHash, TrigramHash
-    AUGMENTATIONS["smear_gate"] = SmearGate
-    AUGMENTATIONS["bigram_hash"] = BigramHash
-    AUGMENTATIONS["trigram_hash"] = TrigramHash
+    AUGMENTATION_REGISTRY.register("smear_gate", SmearGate, source="builtin")
+    AUGMENTATION_REGISTRY.register("bigram_hash", BigramHash, source="builtin")
+    AUGMENTATION_REGISTRY.register("trigram_hash", TrigramHash, source="builtin")
 
 
 # ---------------------------------------------------------------------------
@@ -354,12 +358,12 @@ class PrefixMemoryStackPattern(StackPattern):
         return x
 
 
-STACK_PATTERNS: dict[str, StackPattern] = {
-    "sequential": SequentialPattern(),
-    "encoder_decoder_skip": EncoderDecoderSkipPattern(),
-    "looped": LoopedPattern(),
-    "prefix_memory_stack": PrefixMemoryStackPattern(),
-}
+STACK_PATTERN_REGISTRY = PluginRegistry("stack_pattern")
+STACK_PATTERN_REGISTRY.register("sequential", SequentialPattern(), source="builtin")
+STACK_PATTERN_REGISTRY.register("encoder_decoder_skip", EncoderDecoderSkipPattern(), source="builtin")
+STACK_PATTERN_REGISTRY.register("looped", LoopedPattern(), source="builtin")
+STACK_PATTERN_REGISTRY.register("prefix_memory_stack", PrefixMemoryStackPattern(), source="builtin")
+STACK_PATTERNS: dict[str, StackPattern] = STACK_PATTERN_REGISTRY._registry  # backward compat
 
 
 # ---------------------------------------------------------------------------

@@ -126,15 +126,19 @@ def run_generic_training() -> None:
     else:
         param_groups = [{"params": list(model.parameters())}]
 
-    # Set lr on all groups
+    # Set lr/weight_decay on each group so the optimizer factory sees them
+    # per-group (don't pass as top-level kwargs — avoids PyTorch conflicts).
     for pg in param_groups:
         pg.setdefault("lr", lr)
         pg.setdefault("weight_decay", weight_decay)
 
-    optimizer = torch.optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
+    optimizer_name = _env("OPTIMIZER", "adamw")
+    from crucible.training.optimizers import build_optimizer
+    optimizer = build_optimizer(optimizer_name, param_groups)
 
     # LR scheduler
-    scheduler = _build_scheduler(optimizer, lr_schedule, warmup_steps, iterations, lr)
+    from crucible.training.schedulers import build_scheduler as _build_sched
+    scheduler = _build_sched(lr_schedule, optimizer, total_steps=iterations, warmup_steps=warmup_steps)
 
     # Build data adapter eagerly so misconfiguration fails fast.
     try:
@@ -240,37 +244,6 @@ def run_generic_training() -> None:
             print(f"metric:{mk}={mv:.6f}", flush=True)
     else:
         print(f"metric:train_loss={last_train_loss:.6f}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# LR Scheduler
-# ---------------------------------------------------------------------------
-
-def _build_scheduler(
-    optimizer: Any,
-    schedule: str,
-    warmup_steps: int,
-    total_steps: int,
-    base_lr: float,
-) -> Any:
-    """Build a learning rate scheduler with optional warmup."""
-    import torch
-
-    if schedule == "constant" and warmup_steps <= 0:
-        return None
-
-    def lr_lambda(step: int) -> float:
-        # Warmup phase
-        if warmup_steps > 0 and step < warmup_steps:
-            return (step + 1) / warmup_steps
-        # Cosine decay after warmup
-        if schedule == "cosine":
-            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-            return 0.5 * (1.0 + math.cos(math.pi * progress))
-        # Constant after warmup
-        return 1.0
-
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
 def _resolve_step_result(

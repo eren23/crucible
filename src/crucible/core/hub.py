@@ -186,6 +186,7 @@ class HubStore:
         (hub_dir / "global").mkdir(exist_ok=True)
         (hub_dir / "architectures" / "plugins").mkdir(parents=True, exist_ok=True)
         (hub_dir / "architectures" / "specs").mkdir(parents=True, exist_ok=True)
+        (hub_dir / "taps").mkdir(exist_ok=True)
 
         config = {
             "name": name or hub_dir.name,
