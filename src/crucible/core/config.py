@@ -202,6 +202,8 @@ def load_config(path: Path | None = None) -> ProjectConfig:
     if path is None:
         path = find_config()
     if path is None:
+        from crucible.core.log import log_warn
+        log_warn("No crucible.yaml found, using default config")
         return ProjectConfig()
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -353,7 +355,9 @@ def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]
                 "train": raw.get("train", ""),
                 "metrics_primary": raw.get("metrics", {}).get("primary", "val_loss"),
             })
-        except Exception:
+        except Exception as exc:
+            from crucible.core.log import log_warn
+            log_warn(f"Failed to parse project spec {p.name}: {exc}")
             continue
     return results
 

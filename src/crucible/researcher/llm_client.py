@@ -49,7 +49,9 @@ class AnthropicClient:
         except KeyboardInterrupt:
             raise
         except Exception as exc:
-            raise ResearcherError(f"LLM call failed (model={self.model}): {exc}") from exc
+            from crucible.core.log import log_warn
+            log_warn(f"LLM call failed (model={self.model}): {exc}")
+            return None
 
 
 def parse_json_from_text(text: str) -> dict[str, Any] | None:

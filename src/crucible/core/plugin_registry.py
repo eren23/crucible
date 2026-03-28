@@ -187,9 +187,11 @@ class PluginRegistry(Generic[T]):
                 loaded.append(py_file.stem)
             except PluginError:
                 raise  # Propagate registration conflicts
-            except Exception:
+            except Exception as exc:
                 # Remove failed module from sys.modules to allow retry
                 sys.modules.pop(module_name, None)
+                from crucible.core.log import log_warn
+                log_warn(f"Failed to load {self.plugin_type} plugin {py_file.name}: {exc}")
         return loaded
 
     # ------------------------------------------------------------------

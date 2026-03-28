@@ -154,6 +154,8 @@ def resolve_shard_paths(
     dict with keys ``"train"`` and ``"val"``, each a list of remote paths
     relative to the repo root.
     """
+    if "name" not in dataset_entry:
+        raise ValueError("Dataset manifest entry missing required 'name' field")
     ds_name = dataset_entry["name"]
     stats = dataset_entry.get("stats") or {}
     max_train = int(stats.get("files_train", 0))

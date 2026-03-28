@@ -124,3 +124,17 @@ class Hyperparameters:
 
     # Lineage tracking.
     parent_run_id = os.environ.get("PARENT_RUN_ID", "")
+
+    def __init__(self) -> None:
+        """Validate critical hyperparameters on instantiation."""
+        checks = {
+            "vocab_size": (self.vocab_size, 1),
+            "num_layers": (self.num_layers, 1),
+            "model_dim": (self.model_dim, 1),
+            "num_heads": (self.num_heads, 1),
+            "num_kv_heads": (self.num_kv_heads, 1),
+            "mlp_mult": (self.mlp_mult, 1),
+        }
+        for name, (value, minimum) in checks.items():
+            if value < minimum:
+                raise ValueError(f"{name.upper()} must be >= {minimum}, got {value}")

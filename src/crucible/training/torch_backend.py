@@ -80,12 +80,18 @@ def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 
 
+_zeropower_compiled = False
+
+
 def main() -> None:
-    global zeropower_via_newtonschulz5
+    global _zeropower_compiled
+    import crucible.training.muon as _muon_mod
 
     code = Path(__file__).read_text(encoding="utf-8")
     args = Hyperparameters()
-    zeropower_via_newtonschulz5 = torch.compile(zeropower_via_newtonschulz5)
+    if not _zeropower_compiled:
+        _muon_mod.zeropower_via_newtonschulz5 = torch.compile(zeropower_via_newtonschulz5)
+        _zeropower_compiled = True
 
     # -----------------------------
     # DISTRIBUTED + CUDA SETUP

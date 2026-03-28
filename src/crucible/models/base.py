@@ -59,6 +59,10 @@ class TiedEmbeddingLM(CrucibleModel):
         spectral_embed_init: bool = False,
     ):
         super().__init__()
+        if vocab_size <= 0:
+            raise ValueError(f"vocab_size must be positive, got {vocab_size}")
+        if model_dim <= 0:
+            raise ValueError(f"model_dim must be positive, got {model_dim}")
         if logit_softcap <= 0.0:
             raise ValueError(f"logit_softcap must be positive, got {logit_softcap}")
         if embed_bottleneck_dim < 0:

@@ -58,10 +58,16 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def append_jsonl(path: Path, record: dict[str, Any]) -> None:
-    """Append a single JSON record to a JSONL file."""
+    """Append a single JSON record to a JSONL file with file locking."""
+    import fcntl
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:

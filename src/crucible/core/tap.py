@@ -77,7 +77,10 @@ class TapManager:
             os.close(fd)
             os.replace(tmp, str(self._taps_file))
         except BaseException:
-            os.close(fd) if not os.get_inheritable(fd) else None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
@@ -97,7 +100,10 @@ class TapManager:
             os.close(fd)
             os.replace(tmp, str(self._installed_file))
         except BaseException:
-            os.close(fd) if not os.get_inheritable(fd) else None
+            try:
+                os.close(fd)
+            except OSError:
+                pass
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise

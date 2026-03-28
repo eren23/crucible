@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from crucible.core.errors import CrucibleError
 from crucible.api.models import (
     FindingCreate,
     HealthResponse,
@@ -84,7 +85,7 @@ def list_experiments(
                 "timestamp": r.get("timestamp", ""),
             })
         return {"experiments": entries, "total": len(entries)}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"experiments": [], "total": 0, "note": str(exc)}
 
 
@@ -99,7 +100,7 @@ def get_experiment(run_id: str) -> dict[str, Any]:
             if r.get("id") == run_id or r.get("name") == run_id:
                 return {"found": True, "result": r}
         return {"found": False, "result": {}}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"found": False, "error": str(exc)}
 
 
@@ -145,7 +146,7 @@ def list_findings(category: str = "", limit: int = 50) -> dict[str, Any]:
         state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
         findings = state.get_findings(category=category or None, limit=limit)
         return {"findings": findings, "total": len(findings)}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"findings": [], "error": str(exc)}
 
 
@@ -166,7 +167,7 @@ def push_finding(data: FindingCreate) -> dict[str, Any]:
         )
         state.save()
         return {"status": "recorded"}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"error": str(exc)}
 
 
@@ -186,7 +187,7 @@ def list_tracks() -> dict[str, Any]:
         tracks = hub.list_tracks()
         active = hub.get_active_track()
         return {"tracks": tracks, "active_track": active, "total": len(tracks)}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"tracks": [], "error": str(exc)}
 
 
@@ -198,7 +199,7 @@ def track_briefing(name: str) -> dict[str, Any]:
 
         config.active_track = name
         return build_briefing(config)
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"error": str(exc)}
 
 
@@ -226,5 +227,5 @@ def leaderboard(top_n: int = 20) -> dict[str, Any]:
                 "model_bytes": r.get("model_bytes"),
             })
         return {"total_completed": len(results), "top": entries}
-    except Exception as exc:
+    except (CrucibleError, ValueError, KeyError) as exc:
         return {"top": [], "error": str(exc)}
