@@ -218,7 +218,19 @@ def _main() -> None:
     # ── mcp ──
     mcp_parser = subparsers.add_parser("mcp", help="MCP server")
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
-    mcp_sub.add_parser("serve", help="Start MCP server (stdio)")
+    mcp_serve = mcp_sub.add_parser("serve", help="Start MCP server (stdio)")
+    mcp_serve.add_argument("--trace", action="store_true", help="Enable session tracing to .crucible/traces/")
+    mcp_serve.add_argument("--trace-id", type=str, default=None, help="Custom session ID for the trace")
+
+    # ── trace ──
+    trace_parser = subparsers.add_parser("trace", help="Session trace viewing and export")
+    trace_sub = trace_parser.add_subparsers(dest="trace_command")
+    trace_sub.add_parser("list", help="List all recorded traces")
+    trace_show = trace_sub.add_parser("show", help="Print trace entries for a session")
+    trace_show.add_argument("session_id", help="Session ID to display")
+    trace_export = trace_sub.add_parser("export", help="Export trace as shareable markdown")
+    trace_export.add_argument("session_id", help="Session ID to export")
+    trace_export.add_argument("--output", "-o", type=str, default=None, help="Output file path (default: stdout)")
 
     # ── models ──
     models_parser = subparsers.add_parser("models", help="Model zoo")
@@ -292,6 +304,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.mcp_commands import handle_mcp
 
         handle_mcp(args)
+    elif args.command == "trace":
+        from crucible.cli.trace_commands import handle_trace
+
+        handle_trace(args)
     elif args.command == "models":
         from crucible.cli.analyze_commands import handle_models
 
@@ -302,15 +318,41 @@ def _dispatch(args: argparse.Namespace) -> None:
 
 
 def _cmd_init() -> None:
-    """Initialize a crucible.yaml in the current directory."""
+    """Initialize a crucible.yaml and .crucible/ directory structure."""
     from crucible.core.config import generate_default_config
 
-    target = Path.cwd() / "crucible.yaml"
+    cwd = Path.cwd()
+    target = cwd / "crucible.yaml"
+
+    # Create crucible.yaml
     if target.exists():
         print(f"crucible.yaml already exists at {target}")
-        sys.exit(1)
-    target.write_text(generate_default_config(), encoding="utf-8")
-    print(f"Created {target}")
+    else:
+        target.write_text(generate_default_config(), encoding="utf-8")
+        print(f"Created {target}")
+
+    # Create .crucible/ directory structure
+    dirs_to_create = [
+        cwd / ".crucible",
+        cwd / ".crucible" / "plugins" / "optimizers",
+        cwd / ".crucible" / "plugins" / "callbacks",
+        cwd / ".crucible" / "plugins" / "schedulers",
+        cwd / ".crucible" / "projects",
+        cwd / ".crucible" / "designs",
+        cwd / ".crucible" / "traces",
+    ]
+    created = []
+    for d in dirs_to_create:
+        if not d.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            created.append(str(d.relative_to(cwd)))
+
+    if created:
+        print("Created directories:")
+        for name in created:
+            print(f"  {name}/")
+    else:
+        print(".crucible/ directory structure already exists")
 
 
 if __name__ == "__main__":

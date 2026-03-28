@@ -131,7 +131,7 @@ class TestCollectProjectResult:
         )
         assert result["status"] == "running"
 
-    @patch("crucible.runner.wandb.fetch_wandb_run_info")
+    @patch("crucible.runner.wandb_logger.fetch_wandb_run_info")
     @patch("crucible.fleet.project_runner._run")
     @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
     @patch("crucible.fleet.project_runner.check_project_running", return_value=False)

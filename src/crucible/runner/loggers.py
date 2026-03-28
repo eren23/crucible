@@ -103,7 +103,7 @@ class WandbLoggerAdapter(TrainingLogger):
     """Adapter wrapping the existing WandbLogger for the registry interface."""
 
     def __init__(self, *, run_id: str = "", config: dict | None = None, **kwargs: Any) -> None:
-        from crucible.runner.wandb import WandbLogger
+        from crucible.runner.wandb_logger import WandbLogger
         self._inner = WandbLogger.create(
             run_id=run_id,
             config=config or {},

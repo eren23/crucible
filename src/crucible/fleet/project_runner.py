@@ -152,7 +152,7 @@ def collect_project_result(
     wandb_required = bool(spec.env_set.get("WANDB_PROJECT"))
     if wandb_required and not still_running:
         try:
-            from crucible.runner.wandb import fetch_wandb_run_info
+            from crucible.runner.wandb_logger import fetch_wandb_run_info
             wandb_project = spec.env_set.get("WANDB_PROJECT", "")
             wandb_entity = spec.env_set.get("WANDB_ENTITY", "")
             if wandb_project:

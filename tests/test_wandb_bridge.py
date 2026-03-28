@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from crucible.runner.wandb import WandbLogger, _resolve_wandb_url, wandb_annotate_finished_run
+from crucible.runner.wandb_logger import WandbLogger, _resolve_wandb_url, wandb_annotate_finished_run
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ class TestWandbLoggerEnabled:
         logger = WandbLogger(run=mock_run, enabled=True)
         return logger, mock_run
 
-    @patch("crucible.runner.wandb.wandb", create=True)
+    @patch("crucible.runner.wandb_logger.wandb", create=True)
     def test_log_image_calls_wandb_image(self, mock_wandb_mod):
         logger, mock_run = self._make_logger()
         mock_image = MagicMock()
@@ -223,7 +223,7 @@ class TestWandbAnnotateFinishedRun:
         result = wandb_annotate_finished_run("https://example.com/bad")
         assert result is False
 
-    @patch("crucible.runner.wandb.wandb", create=True)
+    @patch("crucible.runner.wandb_logger.wandb", create=True)
     def test_annotates_notes_successfully(self, mock_wandb_mod):
         mock_run = MagicMock()
         mock_run.summary = {}
@@ -241,7 +241,7 @@ class TestWandbAnnotateFinishedRun:
         mock_api.run.assert_called_once_with("myteam/myproj/abc123")
         assert mock_run.summary["crucible_notes"] == ["note1"]
 
-    @patch("crucible.runner.wandb.wandb", create=True)
+    @patch("crucible.runner.wandb_logger.wandb", create=True)
     def test_annotates_findings_successfully(self, mock_wandb_mod):
         mock_run = MagicMock()
         mock_run.summary = {}

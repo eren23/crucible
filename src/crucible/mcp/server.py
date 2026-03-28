@@ -7,7 +7,10 @@ Run via stdio:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
+import os
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -23,6 +26,12 @@ from crucible.mcp.tools import TOOL_DISPATCH
 load_env_files(Path(__file__).resolve().parent.parent.parent.parent)
 
 app = Server("crucible-fleet")
+
+# ---------------------------------------------------------------------------
+# Session tracer (enabled via --trace flag or CRUCIBLE_TRACE=1 env var)
+# ---------------------------------------------------------------------------
+
+_tracer: Any = None  # SessionTracer | None — avoid import at module level
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1913,6 +1922,33 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # Trace tools
+    Tool(
+        name="trace_list",
+        description=(
+            "List all session traces with metadata summaries.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {traces: [{session_id, started_at, ended_at, tool_calls, tool_counts, trace_file}]}\n"
+            "NEXT: trace_get to view full entries for a session."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="trace_get",
+        description=(
+            "Get the full trace entries for a session.\n\n"
+            "REQUIRES: session_id from trace_list.\n"
+            "RETURNS: {session_id, entries: [{ts, seq, tool, arguments, result, duration_ms, status}], meta}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Session ID from trace_list."},
+            },
+            "required": ["session_id"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -1926,7 +1962,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
     handler = TOOL_DISPATCH.get(name)
     if handler is None:
         return _error_text(f"Unknown tool: {name}")
-    return await asyncio.to_thread(_safe_call, handler, arguments)
+
+    t0 = time.monotonic()
+    result = await asyncio.to_thread(_safe_call, handler, arguments)
+    duration_ms = (time.monotonic() - t0) * 1000
+
+    if _tracer is not None:
+        try:
+            # Extract the raw result dict from TextContent for the trace
+            raw = json.loads(result[0].text) if result else None
+            is_error = isinstance(raw, dict) and "error" in raw
+            _tracer.record(
+                tool=name,
+                arguments=arguments,
+                result=raw,
+                duration_ms=duration_ms,
+                status="error" if is_error else "ok",
+                error=raw.get("error") if is_error else None,
+            )
+        except Exception:
+            pass  # Never let tracing break tool execution
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1934,7 +1991,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
 # ---------------------------------------------------------------------------
 
 
+def _init_tracer() -> None:
+    """Initialize the session tracer if CRUCIBLE_TRACE=1 is set."""
+    global _tracer
+    if os.environ.get("CRUCIBLE_TRACE") != "1":
+        return
+
+    from crucible.mcp.tracer import SessionTracer
+
+    # Determine trace directory: .crucible/traces/ under the project root
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    trace_dir = project_root / ".crucible" / "traces"
+    session_id = os.environ.get("CRUCIBLE_TRACE_ID") or None
+    _tracer = SessionTracer(trace_dir, session_id=session_id)
+
+    def _finalize_tracer() -> None:
+        if _tracer is not None:
+            _tracer.finalize()
+
+    atexit.register(_finalize_tracer)
+
+
 async def _run_server() -> None:
+    _init_tracer()
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

@@ -52,7 +52,7 @@ from crucible.models.components.linear import CastedLinear
 
 # Crucible runner utilities
 from crucible.runner.tracker import RunTracker
-from crucible.runner.wandb import WandbLogger
+from crucible.runner.wandb_logger import WandbLogger
 from crucible.runner.fingerprint import code_fingerprint
 from crucible.core.io import collect_public_attrs
 
@@ -266,8 +266,23 @@ def main() -> None:
             scalar_params.append(p)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
 
+    # Discover custom optimizer + callback plugins from .crucible/plugins/ and ~/.crucible-hub/plugins/
+    from crucible.core.plugin_discovery import discover_all_plugins
+    from crucible.training.optimizers import OPTIMIZER_REGISTRY, build_optimizer
+    from crucible.training.callbacks import CALLBACK_REGISTRY, build_callbacks
+    _proj_root = Path(__file__).resolve().parent.parent.parent.parent
+    discover_all_plugins(
+        {"optimizers": OPTIMIZER_REGISTRY, "callbacks": CALLBACK_REGISTRY},
+        project_root=_proj_root,
+    )
+
+    # Build training callbacks from CALLBACKS env var (comma-separated names).
+    _callbacks_str = os.environ.get("CALLBACKS", "")
+    _callbacks = build_callbacks(_callbacks_str) if _callbacks_str else []
+    if _callbacks:
+        log0(f"callbacks: {[type(cb).__name__ for cb in _callbacks]}")
+
     # Pluggable per-group optimizers — env vars override defaults.
-    from crucible.training.optimizers import build_optimizer
     _embed_opt = os.environ.get("EMBED_OPTIMIZER", "adam")
     _matrix_opt = os.environ.get("MATRIX_OPTIMIZER", "muon")
     _scalar_opt = os.environ.get("SCALAR_OPTIMIZER", "adamw")
@@ -423,6 +438,10 @@ def main() -> None:
     # MAIN TRAINING LOOP
     # -----------------------------
 
+    _cb_state = {"model": base_model, "total_steps": args.iterations, "optimizers": optimizers}
+    for _cb in _callbacks:
+        _cb.on_train_begin(_cb_state)
+
     training_time_ms = 0.0
     stop_after_step: int | None = None
     swa_state: dict[str, Tensor] | None = None
@@ -507,6 +526,9 @@ def main() -> None:
                 wandb.finish(1)
             break
 
+        for _cb in _callbacks:
+            _cb.on_after_backward(step, _cb_state)
+
         frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
         muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
         for group in optimizer_muon.param_groups:
@@ -533,6 +555,11 @@ def main() -> None:
 
         step_ms = 1000.0 * (time.perf_counter() - step_t0)
         step += 1
+
+        _step_metrics = {"train_loss": float(train_loss.item())}
+        for _cb in _callbacks:
+            _cb.on_step_end(step, _step_metrics, _cb_state)
+
         approx_training_time_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
         tok_s = args.train_batch_tokens / max(step_ms / 1000.0, 1e-9)
         should_log_train = (
@@ -577,6 +604,9 @@ def main() -> None:
         if stop_after_step is None and _graceful_shutdown:
             log0("graceful_shutdown: signal received, stopping after this step")
             stop_after_step = step
+
+    for _cb in _callbacks:
+        _cb.on_train_end(_cb_state)
 
     log0(
         f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "

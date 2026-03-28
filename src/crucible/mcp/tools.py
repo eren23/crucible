@@ -1173,7 +1173,7 @@ def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
     key = args.get("key", "image")
 
     try:
-        from crucible.runner.wandb import _resolve_wandb_url
+        from crucible.runner.wandb_logger import _resolve_wandb_url
 
         wandb_url = _resolve_wandb_url(run_id, config)
         if not wandb_url:
@@ -1206,7 +1206,7 @@ def wandb_get_url(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     run_id = args["run_id"]
     try:
-        from crucible.runner.wandb import _resolve_wandb_url
+        from crucible.runner.wandb_logger import _resolve_wandb_url
 
         url = _resolve_wandb_url(run_id, config)
         if url:
@@ -1226,7 +1226,7 @@ def wandb_annotate(args: dict[str, Any]) -> dict[str, Any]:
     annotation_type = args.get("annotation_type", "note")
 
     try:
-        from crucible.runner.wandb import _resolve_wandb_url, wandb_annotate_finished_run
+        from crucible.runner.wandb_logger import _resolve_wandb_url, wandb_annotate_finished_run
 
         wandb_url = _resolve_wandb_url(run_id, config)
         if not wandb_url:
@@ -3811,6 +3811,60 @@ def hub_package_info(args: dict[str, Any]) -> dict[str, Any]:
     return info
 
 
+# ---------------------------------------------------------------------------
+# Trace tools
+# ---------------------------------------------------------------------------
+
+
+def trace_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List all session traces with metadata.
+
+    REQUIRES: Nothing.
+    RETURNS: {traces: [{session_id, started_at, ended_at, tool_calls, tool_counts, trace_file}]}
+    """
+    config = _get_config()
+    trace_dir = config.project_root / config.store_dir / "traces"
+    if not trace_dir.exists():
+        return {"traces": []}
+
+    import yaml
+
+    traces = []
+    for meta_path in sorted(trace_dir.glob("*.meta.yaml"), reverse=True):
+        try:
+            meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+            if meta:
+                traces.append(meta)
+        except Exception:
+            continue
+    return {"traces": traces}
+
+
+def trace_get(args: dict[str, Any]) -> dict[str, Any]:
+    """Get the full trace entries for a session.
+
+    REQUIRES: session_id.
+    RETURNS: {session_id, entries: [...], meta: {...}} or {error}
+    """
+    session_id = args.get("session_id", "")
+    if not session_id:
+        return {"error": "session_id is required"}
+
+    config = _get_config()
+    trace_dir = config.project_root / config.store_dir / "traces"
+    trace_path = trace_dir / f"{session_id}.jsonl"
+    meta_path = trace_dir / f"{session_id}.meta.yaml"
+
+    if not trace_path.exists():
+        return {"error": f"Trace {session_id!r} not found"}
+
+    from crucible.mcp.tracer import load_trace, load_trace_meta
+
+    entries = load_trace(trace_path)
+    meta = load_trace_meta(meta_path) if meta_path.exists() else None
+    return {"session_id": session_id, "entries": entries, "meta": meta}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -3944,4 +3998,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "hub_tap_push": hub_tap_push,
     "hub_submit_pr": hub_submit_pr,
     "hub_package_info": hub_package_info,
+    # Trace tools
+    "trace_list": trace_list,
+    "trace_get": trace_get,
 }
