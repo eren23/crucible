@@ -60,6 +60,10 @@ def validate_finding(finding: dict[str, Any]) -> list[str]:
     if not finding.get("title"):
         errors.append("Finding must have a non-empty 'title'.")
 
+    if not finding.get("body"):
+        from crucible.core.log import log_warn
+        log_warn("Finding has no 'body' — consider adding a description")
+
     category = finding.get("category", "")
     if category and category not in FINDING_CATEGORIES:
         errors.append(

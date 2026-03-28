@@ -339,7 +339,8 @@ def run_experiment(
                 oom_retry_used=oom_retry_used,
             )
 
-            assert proc.stdout is not None
+            if proc.stdout is None:
+                raise RunnerError(f"Failed to open stdout pipe for experiment {exp_id}")
             start = time.monotonic()
             selector = selectors.DefaultSelector()
             selector.register(proc.stdout, selectors.EVENT_READ)
@@ -374,7 +375,11 @@ def run_experiment(
                     if stream_output:
                         print(f"[{exp_id}] {rem_line.rstrip()}", flush=True)
 
-            proc.wait(timeout=5)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
             result["returncode"] = proc.returncode
             combined_output = "".join(lines)
 

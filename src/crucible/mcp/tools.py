@@ -133,10 +133,17 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = {"summary": summary, "nodes": node_details}
 
         if include_metrics and nodes:
-            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             ssh_nodes = [n for n in nodes if n.get("ssh_host")]
+            metrics = []
             with ThreadPoolExecutor(max_workers=min(8, len(ssh_nodes) or 1)) as pool:
-                metrics = list(pool.map(_probe_node_metrics, ssh_nodes))
+                futures = {pool.submit(_probe_node_metrics, n): n for n in ssh_nodes}
+                for fut in as_completed(futures, timeout=30):
+                    try:
+                        metrics.append(fut.result(timeout=10))
+                    except Exception:
+                        node = futures[fut]
+                        metrics.append({"node": node.get("name", "?"), "error": "probe timeout"})
             result["metrics"] = metrics
 
         return result

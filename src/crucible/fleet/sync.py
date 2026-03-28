@@ -17,6 +17,7 @@ def _run(
     capture_output: bool = True,
     check: bool = True,
     cwd: Path | None = None,
+    timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
@@ -24,6 +25,7 @@ def _run(
         check=check,
         capture_output=capture_output,
         text=True,
+        timeout=timeout,
     )
 
 
@@ -74,9 +76,10 @@ def remote_exec(
     command: str,
     *,
     check: bool = True,
+    timeout: int | None = 120,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a shell command on a remote node via SSH."""
-    return _run(ssh_base(node) + [command], check=check)
+    return _run(ssh_base(node) + [command], check=check, timeout=timeout)
 
 
 def remote_python(node: dict[str, Any], code: str) -> subprocess.CompletedProcess[str]:
@@ -91,9 +94,11 @@ def checked_remote_exec(
     node: dict[str, Any],
     label: str,
     command: str,
+    *,
+    timeout: int | None = 600,
 ) -> subprocess.CompletedProcess[str]:
     """Execute a command on a remote node; raise RuntimeError on failure."""
-    proc = remote_exec(node, command, check=False)
+    proc = remote_exec(node, command, check=False, timeout=timeout)
     if proc.returncode == 0:
         return proc
     stderr = (proc.stderr or "").strip()

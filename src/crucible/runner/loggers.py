@@ -73,12 +73,14 @@ class JsonlLogger(TrainingLogger):
     """Appends metrics as JSON lines to a file."""
 
     def __init__(self, *, run_id: str = "", log_dir: str = "", **kwargs: Any) -> None:
+        import atexit
         log_dir = log_dir or os.environ.get("CRUCIBLE_LOG_DIR", ".crucible/logs")
         self._dir = Path(log_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path = self._dir / f"{run_id or 'unknown'}.jsonl"
         self._f = open(self._path, "a")
         self._closed = False
+        atexit.register(self.finish)
 
     def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
         if self._closed:

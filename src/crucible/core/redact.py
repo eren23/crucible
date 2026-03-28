@@ -15,10 +15,10 @@ _SECRET_KEY_PATTERNS = re.compile(
 )
 
 _SECRET_VALUE_PATTERNS = [
-    re.compile(r"sk-[a-zA-Z0-9]{20,}"),           # Anthropic/OpenAI keys
-    re.compile(r"wandb_v1_[a-zA-Z0-9_]{20,}"),     # WandB keys
-    re.compile(r"rpd_[a-zA-Z0-9]{20,}"),            # RunPod keys
-    re.compile(r"hf_[a-zA-Z0-9]{20,}"),             # HuggingFace tokens
+    re.compile(r"sk-[a-zA-Z0-9]{15,}"),             # Anthropic/OpenAI keys
+    re.compile(r"wandb_v\d+_[a-zA-Z0-9_]{15,}"),    # WandB keys (any version)
+    re.compile(r"rpd_[a-zA-Z0-9]{15,}"),             # RunPod keys
+    re.compile(r"hf_[a-zA-Z0-9]{15,}"),              # HuggingFace tokens
 ]
 
 

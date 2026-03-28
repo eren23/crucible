@@ -219,8 +219,12 @@ class HubStore:
                 capture_output=True,
                 check=True,
             )
-        except Exception:
-            pass  # Git is optional
+        except FileNotFoundError:
+            from crucible.core.log import log_warn
+            log_warn("git not installed; hub will not support git sync")
+        except subprocess.CalledProcessError as exc:
+            from crucible.core.log import log_warn
+            log_warn(f"git init failed: {exc.stderr.strip() if exc.stderr else exc}")
 
         store = HubStore(hub_dir)
         return store
@@ -348,9 +352,16 @@ class HubStore:
         for child in sorted(self._tracks_dir.iterdir()):
             track_yaml = child / "track.yaml"
             if track_yaml.exists():
-                raw = yaml.safe_load(track_yaml.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    tracks.append(raw)
+                try:
+                    raw = yaml.safe_load(track_yaml.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        tracks.append(raw)
+                    else:
+                        from crucible.core.log import log_warn
+                        log_warn(f"Malformed track.yaml in {child.name}: expected dict")
+                except Exception as exc:
+                    from crucible.core.log import log_warn
+                    log_warn(f"Failed to parse track.yaml in {child.name}: {exc}")
         return tracks
 
     def activate_track(self, name: str) -> None:

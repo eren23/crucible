@@ -102,6 +102,10 @@ class ImageFolderAdapter(DataAdapter):
 
         images_list = []
         labels_list = []
+        if len(self._loader.dataset) == 0:
+            from crucible.core.errors import DataError
+            raise DataError("Dataset is empty — cannot produce a batch")
+
         for _ in range(batch_size):
             try:
                 img, label = next(self._iter)
@@ -112,7 +116,10 @@ class ImageFolderAdapter(DataAdapter):
             labels_list.append(label)
 
         images = torch.stack(images_list)
-        labels = torch.cat(labels_list) if isinstance(labels_list[0], (type(images_list[0]),)) else torch.tensor(labels_list)
+        if isinstance(labels_list[0], torch.Tensor):
+            labels = torch.stack(labels_list)
+        else:
+            labels = torch.tensor(labels_list)
 
         if device is not None:
             images = images.to(device)

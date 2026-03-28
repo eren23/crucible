@@ -126,8 +126,9 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
                 loaded.append(py_file.stem)
-            except Exception:
-                pass  # Skip broken plugins silently
+            except Exception as exc:
+                from crucible.core.log import log_warn
+                log_warn(f"Failed to load architecture plugin {py_file.name}: {exc}")
 
         # --- YAML spec plugins ---
         for yaml_file in sorted(hub_arch_dir.glob("*.yaml")):
@@ -136,8 +137,9 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
             try:
                 _register_from_spec_file(yaml_file.stem, yaml_file, source=source)
                 loaded.append(yaml_file.stem)
-            except Exception:
-                pass  # Skip broken specs silently
+            except Exception as exc:
+                from crucible.core.log import log_warn
+                log_warn(f"Failed to load architecture spec {yaml_file.name}: {exc}")
     finally:
         _CURRENT_REGISTER_SOURCE = prev_source
     return loaded
