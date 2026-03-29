@@ -242,9 +242,12 @@ TOOLS: list[Tool] = [
     Tool(
         name="destroy_nodes",
         description=(
-            "Tear down tracked nodes. Optionally specify node names.\n\n"
-            "REQUIRES: Nodes must exist in inventory.\n"
-            "RETURNS: {destroyed, status}\n"
+            "Tear down nodes. Supports names, pod IDs, or destroy-all.\n\n"
+            "With no args: destroys ALL pods (inventory + orphans via RunPod API).\n"
+            "With node_names: destroys matching nodes by name (inventory + orphan name match).\n"
+            "With pod_ids: destroys specific pods by RunPod pod ID (direct API, no inventory needed).\n\n"
+            "REQUIRES: RUNPOD_API_KEY for orphan/pod_id cleanup.\n"
+            "RETURNS: {destroyed, status, orphan_pods_destroyed?}\n"
             "NEXT: provision_nodes to create new ones."
         ),
         inputSchema={
@@ -254,6 +257,12 @@ TOOLS: list[Tool] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Node names to destroy. If empty, destroys all.",
+                    "default": [],
+                },
+                "pod_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "RunPod pod IDs to destroy directly (bypasses inventory).",
                     "default": [],
                 },
             },
