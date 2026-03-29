@@ -27,7 +27,7 @@ fi
 
 # 3. Create Python 3.10 venv and install deps
 echo "=== Creating Python 3.10 environment ==="
-uv venv --python=3.10 .venv
+uv venv --python=3.10 --clear .venv
 source .venv/bin/activate
 
 echo "=== Installing stable-worldmodel[train,env] ==="

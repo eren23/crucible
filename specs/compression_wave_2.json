@@ -1,0 +1,89 @@
+[
+  {
+    "name": "wanda-50pct",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "compression-w2",
+    "tags": ["compression", "pruning", "wanda", "50pct"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "CALLBACKS": "pruning_wanda,compression_metrics",
+      "WANDA_SPARSITY": "0.5",
+      "WANDA_CALIBRATION_STEPS": "50",
+      "WANDA_APPLY_AT_STEP": "300",
+      "QUANT_MODE": "int8"
+    }
+  },
+  {
+    "name": "qat8-wanda30",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "compression-w2",
+    "tags": ["compression", "qat", "pruning", "combined", "int8", "wanda"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "CALLBACKS": "qat_int8,pruning_wanda,compression_metrics",
+      "QAT_INT8_WARMUP_STEPS": "200",
+      "WANDA_SPARSITY": "0.3",
+      "WANDA_CALIBRATION_STEPS": "50",
+      "WANDA_APPLY_AT_STEP": "500",
+      "QUANT_MODE": "int8"
+    }
+  },
+  {
+    "name": "qat4-wanda30",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "compression-w2",
+    "tags": ["compression", "qat", "pruning", "combined", "int4", "wanda"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "CALLBACKS": "qat_int4,pruning_wanda,compression_metrics",
+      "QAT_INT4_WARMUP_STEPS": "200",
+      "QAT_INT4_GROUP_SIZE": "128",
+      "WANDA_SPARSITY": "0.3",
+      "WANDA_CALIBRATION_STEPS": "50",
+      "WANDA_APPLY_AT_STEP": "500",
+      "QUANT_MODE": "int8"
+    }
+  },
+  {
+    "name": "layer-remove-2",
+    "tier": "screen",
+    "backend": "torch",
+    "wave": "compression-w2",
+    "tags": ["compression", "pruning", "layer-removal"],
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "9",
+      "MODEL_DIM": "512",
+      "NUM_HEADS": "8",
+      "NUM_KV_HEADS": "4",
+      "MLP_MULT": "2",
+      "ACTIVATION": "relu_sq",
+      "CALLBACKS": "pruning_layer_removal,compression_metrics",
+      "LAYER_REMOVE_COUNT": "2",
+      "LAYER_REMOVE_METRIC": "angular_distance",
+      "LAYER_REMOVE_AT_STEP": "0",
+      "QUANT_MODE": "int8"
+    }
+  }
+]
