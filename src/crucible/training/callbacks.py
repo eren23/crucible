@@ -35,8 +35,16 @@ class TrainingCallback(ABC):
 
     priority: int = 100
 
+    def on_model_ready(self, state: dict[str, Any]) -> None:
+        """Called after model creation but BEFORE torch.compile.
+
+        This is the correct hook for registering forward pre-hooks
+        (e.g. QAT fake quantization, activation collection) that must
+        be visible to the compiled graph.
+        """
+
     def on_train_begin(self, state: dict[str, Any]) -> None:
-        """Called once before the training loop starts."""
+        """Called once before the training loop starts (AFTER torch.compile)."""
 
     def on_step_begin(self, step: int, state: dict[str, Any]) -> None:
         """Called at the start of each training step."""
