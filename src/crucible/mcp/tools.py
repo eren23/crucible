@@ -272,16 +272,64 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
-    """Tear down tracked nodes."""
+    """Tear down nodes. Supports names, pod IDs, or destroy-all."""
     config = _get_config()
     try:
         from crucible.fleet.manager import FleetManager
 
         fleet = FleetManager(config)
         node_names = args.get("node_names") or None
+        pod_ids = args.get("pod_ids") or None
         selected = set(node_names) if node_names else None
+
+        destroyed_names: list[str] = []
+        destroyed_ids: list[str] = []
+
+        # Mode 1: Direct pod ID destruction (bypasses inventory entirely)
+        if pod_ids:
+            if config.provider.type.lower() == "runpod":
+                from crucible.fleet.providers.runpod import RunPodProvider
+                provider = fleet.provider
+                if isinstance(provider, RunPodProvider):
+                    destroyed_ids = provider.destroy_pods_by_id(pod_ids)
+                    # Also remove from inventory if present
+                    from crucible.fleet.inventory import load_nodes_if_exists, save_nodes
+                    nodes = load_nodes_if_exists(fleet.nodes_file)
+                    nodes = [n for n in nodes if (n.get("pod_id") or n.get("node_id")) not in set(pod_ids)]
+                    save_nodes(fleet.nodes_file, nodes)
+            return {"destroyed_pod_ids": destroyed_ids, "status": "ok"}
+
+        # Mode 2: Destroy by name or all
         fleet.destroy(selected_names=selected)
-        return {"destroyed": node_names or "all", "status": "ok"}
+        destroyed_names = list(selected) if selected else ["all"]
+
+        # Also clean up orphaned pods via RunPod API
+        orphan_destroyed: list[str] = []
+        if config.provider.type.lower() == "runpod":
+            from crucible.fleet.providers.runpod import RunPodProvider
+            provider = fleet.provider
+            if isinstance(provider, RunPodProvider):
+                if not node_names:
+                    # No names: destroy ALL pods in the account
+                    orphan_destroyed = provider.destroy_all_pods()
+                else:
+                    # Names specified: find orphans with matching names
+                    from crucible.fleet.inventory import load_nodes_if_exists
+                    remaining = load_nodes_if_exists(fleet.nodes_file)
+                    tracked_ids = {n.get("pod_id") or n.get("node_id") for n in remaining}
+                    for pod in provider.list_all_pods():
+                        pod_name = str(pod.get("name") or "")
+                        pod_id = str(pod.get("id") or "")
+                        if pod_name in selected and pod_id not in tracked_ids:
+                            orphan_destroyed.extend(provider.destroy_pods_by_id([pod_id]))
+
+        result: dict[str, Any] = {
+            "destroyed": destroyed_names if node_names else "all",
+            "status": "ok",
+        }
+        if orphan_destroyed:
+            result["orphan_pods_destroyed"] = orphan_destroyed
+        return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:

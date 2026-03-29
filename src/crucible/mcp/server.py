@@ -55,6 +55,82 @@ def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> list[TextContent]:
 
 
 # ---------------------------------------------------------------------------
+# Keepalive for long-running tool calls
+# ---------------------------------------------------------------------------
+
+# Tools known to be long-running (may take minutes).
+# For these, the keepalive fires more aggressively.
+_LONG_RUNNING_TOOLS: set[str] = {
+    "bootstrap_nodes",
+    "bootstrap_project",
+    "collect_results",
+    "collect_project_results",
+    "destroy_nodes",
+    "dispatch_experiments",
+    "fleet_refresh",
+    "provision_nodes",
+    "provision_project",
+    "run_project",
+    "sync_code",
+    "tree_enqueue_pending",
+}
+
+_KEEPALIVE_INTERVAL = 8.0  # seconds between keepalive pings
+
+
+async def _run_with_keepalive(
+    handler: Any,
+    arguments: dict,
+    tool_name: str,
+    session: Any,
+    request_id: Any,
+) -> list[TextContent]:
+    """Run a tool handler in a thread while sending periodic log messages.
+
+    Long-running MCP tool calls can cause the stdio client to time out
+    if no data flows on the pipe.  We send periodic ``notifications/message``
+    (log-level "info") to keep the connection alive.
+    """
+    done = asyncio.Event()
+    result_box: list[list[TextContent] | None] = [None]
+    exc_box: list[BaseException | None] = [None]
+
+    async def _worker() -> None:
+        try:
+            result_box[0] = await asyncio.to_thread(_safe_call, handler, arguments)
+        except BaseException as exc:
+            exc_box[0] = exc
+        finally:
+            done.set()
+
+    async def _keepalive() -> None:
+        elapsed = 0.0
+        while not done.is_set():
+            try:
+                await asyncio.wait_for(done.wait(), timeout=_KEEPALIVE_INTERVAL)
+                # done was set — exit cleanly
+                return
+            except asyncio.TimeoutError:
+                pass
+            elapsed += _KEEPALIVE_INTERVAL
+            try:
+                await session.send_log_message(
+                    level="info",
+                    data=f"[{tool_name}] still running ({elapsed:.0f}s elapsed)...",
+                    logger="crucible.mcp.keepalive",
+                    related_request_id=request_id,
+                )
+            except Exception:
+                pass  # Never let keepalive errors break the tool
+
+    await asyncio.gather(_worker(), _keepalive())
+
+    if exc_box[0] is not None:
+        raise exc_box[0]
+    return result_box[0]  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
 # Tool catalogue
 # ---------------------------------------------------------------------------
 
@@ -166,9 +242,12 @@ TOOLS: list[Tool] = [
     Tool(
         name="destroy_nodes",
         description=(
-            "Tear down tracked nodes. Optionally specify node names.\n\n"
-            "REQUIRES: Nodes must exist in inventory.\n"
-            "RETURNS: {destroyed, status}\n"
+            "Tear down nodes. Supports names, pod IDs, or destroy-all.\n\n"
+            "With no args: destroys ALL pods (inventory + orphans via RunPod API).\n"
+            "With node_names: destroys matching nodes by name (inventory + orphan name match).\n"
+            "With pod_ids: destroys specific pods by RunPod pod ID (direct API, no inventory needed).\n\n"
+            "REQUIRES: RUNPOD_API_KEY for orphan/pod_id cleanup.\n"
+            "RETURNS: {destroyed, status, orphan_pods_destroyed?}\n"
             "NEXT: provision_nodes to create new ones."
         ),
         inputSchema={
@@ -178,6 +257,12 @@ TOOLS: list[Tool] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Node names to destroy. If empty, destroys all.",
+                    "default": [],
+                },
+                "pod_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "RunPod pod IDs to destroy directly (bypasses inventory).",
                     "default": [],
                 },
             },
@@ -1964,7 +2049,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
         return _error_text(f"Unknown tool: {name}")
 
     t0 = time.monotonic()
-    result = await asyncio.to_thread(_safe_call, handler, arguments)
+
+    # For long-running tools, send periodic keepalive log messages to prevent
+    # the stdio client from timing out on pipe reads.
+    use_keepalive = name in _LONG_RUNNING_TOOLS
+    if use_keepalive:
+        try:
+            ctx = app.request_context
+            session = ctx.session
+            request_id = ctx.request_id
+        except LookupError:
+            use_keepalive = False
+
+    try:
+        if use_keepalive:
+            result = await _run_with_keepalive(handler, arguments, name, session, request_id)
+        else:
+            result = await asyncio.to_thread(_safe_call, handler, arguments)
+    except Exception as exc:
+        result = _error_text(f"[unexpected] {exc}")
+
     duration_ms = (time.monotonic() - t0) * 1000
 
     if _tracer is not None:

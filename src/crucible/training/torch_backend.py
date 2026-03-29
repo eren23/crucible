@@ -245,6 +245,25 @@ def main() -> None:
             if isinstance(module, CastedLinear):
                 _qat_hooks.append(module.register_forward_pre_hook(_make_qat_hook(module)))
 
+    # Discover and build callbacks BEFORE torch.compile so that on_model_ready
+    # can register forward hooks that will be visible to the compiled graph.
+    from crucible.core.plugin_discovery import discover_all_plugins
+    from crucible.training.callbacks import CALLBACK_REGISTRY, build_callbacks
+    _proj_root = Path(__file__).resolve().parent.parent.parent.parent
+    discover_all_plugins(
+        {"callbacks": CALLBACK_REGISTRY},
+        project_root=_proj_root,
+    )
+    _callbacks_str = os.environ.get("CALLBACKS", "")
+    _callbacks = build_callbacks(_callbacks_str) if _callbacks_str else []
+    if _callbacks:
+        log0(f"callbacks: {[type(cb).__name__ for cb in _callbacks]}")
+
+    # on_model_ready: let callbacks register forward hooks BEFORE compile.
+    _cb_state_early = {"model": base_model, "total_steps": args.iterations}
+    for _cb in _callbacks:
+        _cb.on_model_ready(_cb_state_early)
+
     compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
     model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else compiled_model
 
@@ -272,21 +291,12 @@ def main() -> None:
             scalar_params.append(p)
     token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
 
-    # Discover custom optimizer + callback plugins from .crucible/plugins/ and ~/.crucible-hub/plugins/
-    from crucible.core.plugin_discovery import discover_all_plugins
+    # Discover custom optimizer plugins (callbacks already discovered before torch.compile).
     from crucible.training.optimizers import OPTIMIZER_REGISTRY, build_optimizer
-    from crucible.training.callbacks import CALLBACK_REGISTRY, build_callbacks
-    _proj_root = Path(__file__).resolve().parent.parent.parent.parent
     discover_all_plugins(
-        {"optimizers": OPTIMIZER_REGISTRY, "callbacks": CALLBACK_REGISTRY},
+        {"optimizers": OPTIMIZER_REGISTRY},
         project_root=_proj_root,
     )
-
-    # Build training callbacks from CALLBACKS env var (comma-separated names).
-    _callbacks_str = os.environ.get("CALLBACKS", "")
-    _callbacks = build_callbacks(_callbacks_str) if _callbacks_str else []
-    if _callbacks:
-        log0(f"callbacks: {[type(cb).__name__ for cb in _callbacks]}")
 
     # Pluggable per-group optimizers — env vars override defaults.
     _embed_opt = os.environ.get("EMBED_OPTIMIZER", "adam")
@@ -488,17 +498,21 @@ def main() -> None:
                     latest_val_bpb=val_bpb,
                     train_time_ms=training_time_ms,
                 )
+            _val_metrics = {"val_loss": val_loss, "val_bpb": val_bpb}
+            for _cb in _callbacks:
+                _cb.on_validation_end(step, _val_metrics, _cb_state)
             if wandb is not None:
-                wandb.log(
-                    {
-                        "run/phase": "validating",
-                        "metrics/val_loss": val_loss,
-                        "metrics/val_bpb": val_bpb,
-                        "timing/train_time_ms": training_time_ms,
-                        "timing/step_avg_ms": training_time_ms / max(step, 1),
-                    },
-                    step=step,
-                )
+                _wandb_val = {
+                    "run/phase": "validating",
+                    "metrics/val_loss": val_loss,
+                    "metrics/val_bpb": val_bpb,
+                    "timing/train_time_ms": training_time_ms,
+                    "timing/step_avg_ms": training_time_ms / max(step, 1),
+                }
+                for _mk, _mv in _val_metrics.items():
+                    if _mk not in ("val_loss", "val_bpb") and isinstance(_mv, (int, float)):
+                        _wandb_val[f"compression/{_mk}"] = _mv
+                wandb.log(_wandb_val, step=step)
             torch.cuda.synchronize()
             t0 = time.perf_counter()
 
@@ -513,6 +527,8 @@ def main() -> None:
         elapsed_ms = training_time_ms + 1000.0 * (time.perf_counter() - t0)
         scale = lr_mul(step, elapsed_ms)
         step_t0 = time.perf_counter()
+        for _cb in _callbacks:
+            _cb.on_step_begin(step, _cb_state)
         zero_grad_all()
         train_loss = torch.zeros((), device=device)
         for micro_step in range(grad_accum_steps):
@@ -588,14 +604,19 @@ def main() -> None:
                     tok_s=tok_s,
                 )
             if wandb is not None:
+                _wandb_payload = {
+                    "run/phase": "training",
+                    "metrics/train_loss": float(train_loss.item()),
+                    "timing/train_time_ms": approx_training_time_ms,
+                    "timing/step_avg_ms": approx_training_time_ms / step,
+                    "timing/tok_s": tok_s,
+                }
+                # Forward any extra metrics injected by callbacks
+                for _mk, _mv in _step_metrics.items():
+                    if _mk != "train_loss" and isinstance(_mv, (int, float)):
+                        _wandb_payload[f"compression/{_mk}"] = _mv
                 wandb.log(
-                    {
-                        "run/phase": "training",
-                        "metrics/train_loss": float(train_loss.item()),
-                        "timing/train_time_ms": approx_training_time_ms,
-                        "timing/step_avg_ms": approx_training_time_ms / step,
-                        "timing/tok_s": tok_s,
-                    },
+                    _wandb_payload,
                     step=step,
                 )
 

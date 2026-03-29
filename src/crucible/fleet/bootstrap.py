@@ -263,7 +263,19 @@ def bootstrap_project(
                 f'{uv_pfx}{activate} && uv pip install "{pkg}"',
             )
 
-    # 5. Forward env vars
+    # 5. Copy local files to workspace
+    if spec.local_files:
+        from crucible.fleet.sync import scp_to_node
+        log_step(f"{name}: copying {len(spec.local_files)} local files")
+        for local_path in spec.local_files:
+            p = Path(local_path).expanduser()
+            if not p.exists():
+                log_warn(f"{name}: local file not found: {p}")
+                continue
+            remote_path = f"{spec.workspace}/{p.name}"
+            scp_to_node(node, str(p), remote_path)
+
+    # 6. Forward env vars
     log_step(f"{name}: forwarding env vars")
     write_remote_env(
         node,

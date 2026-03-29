@@ -337,22 +337,30 @@ class RunPodProvider(FleetProvider):
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         public_key = read_public_key(self.public_key_path)
+        # Apply per-call overrides (e.g. from project spec pod config)
+        eff_container_disk = kwargs.pop("container_disk_gb", self.container_disk_gb)
+        eff_volume_gb = kwargs.pop("volume_gb", self.volume_gb)
+        eff_gpu_type_ids = kwargs.pop("gpu_type_ids", None)
+        if isinstance(eff_gpu_type_ids, str):
+            eff_gpu_type_ids = [eff_gpu_type_ids]
+        eff_image = kwargs.pop("image_name", self.image_name)
+
         created: list[dict[str, Any]] = []
         for index in range(start_index, start_index + count):
             ordinal = index - start_index + 1
             name = f"{name_prefix}-{index:02d}"
             last_error: str | None = None
-            log_info(f"Creating pod {ordinal}/{count}: {name}")
+            log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB)")
             for cloud_type in self.cloud_types:
                 try:
                     raw = create_api_pod(
                         name=name,
-                        gpu_type_ids=self.gpu_type_ids,
-                        image_name=self.image_name,
+                        gpu_type_ids=eff_gpu_type_ids or self.gpu_type_ids,
+                        image_name=eff_image,
                         cloud_type=cloud_type,
                         interruptible=self.interruptible,
-                        container_disk_gb=self.container_disk_gb,
-                        volume_gb=self.volume_gb,
+                        container_disk_gb=eff_container_disk,
+                        volume_gb=eff_volume_gb,
                         volume_mount_path=self.volume_mount_path,
                         public_key=public_key,
                         ports=self.ports,
@@ -399,11 +407,13 @@ class RunPodProvider(FleetProvider):
             if nid:
                 previous_by_id[nid] = n
         refreshed: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
         for node in nodes:
             pod_id = node.get("pod_id") or node.get("node_id")
             if not pod_id:
                 refreshed.append(node)
                 continue
+            seen_ids.add(pod_id)
             try:
                 api = runpod_get_api_pod(pod_id)
                 refreshed.append(
@@ -414,6 +424,20 @@ class RunPodProvider(FleetProvider):
                 failed["api_state"] = "lost"
                 failed["state"] = "lost"
                 refreshed.append(failed)
+
+        # Reconcile: add any pods from the API that aren't in inventory (orphan recovery)
+        try:
+            all_pods = self.list_all_pods()
+            for pod in all_pods:
+                pod_id = str(pod.get("id") or "")
+                if pod_id and pod_id not in seen_ids:
+                    log_info(f"Reconciled orphan pod: {pod.get('name', '?')} ({pod_id})")
+                    refreshed.append(
+                        inventory_record_from_api(pod, previous=None, defaults=self.defaults),
+                    )
+        except Exception:
+            pass  # Best-effort reconciliation
+
         return refreshed
 
     def wait_ready(
@@ -439,6 +463,38 @@ class RunPodProvider(FleetProvider):
             stalled_seconds=stalled_seconds,
         )
         return nodes
+
+    # -- API-level operations (beyond inventory) --------------------------
+
+    def list_all_pods(self) -> list[dict[str, Any]]:
+        """List all pods from the RunPod API, regardless of local inventory."""
+        return runpod_list_api_pods()
+
+    def destroy_all_pods(self) -> list[str]:
+        """Destroy ALL pods from the RunPod account. Returns list of destroyed pod IDs."""
+        pods = self.list_all_pods()
+        destroyed: list[str] = []
+        for pod in pods:
+            pod_id = str(pod.get("id") or "")
+            if not pod_id:
+                continue
+            try:
+                runpod_delete_api_pod(pod_id)
+                destroyed.append(pod_id)
+            except FleetError:
+                pass  # Best-effort: pod may already be gone
+        return destroyed
+
+    def destroy_pods_by_id(self, pod_ids: list[str]) -> list[str]:
+        """Destroy specific pods by ID. Returns list of destroyed pod IDs."""
+        destroyed: list[str] = []
+        for pod_id in pod_ids:
+            try:
+                runpod_delete_api_pod(pod_id)
+                destroyed.append(pod_id)
+            except FleetError:
+                pass  # Best-effort: pod may already be gone
+        return destroyed
 
     # -- Internal helpers -------------------------------------------------
 

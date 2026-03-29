@@ -47,6 +47,24 @@ def ssh_base(node: dict[str, Any]) -> list[str]:
     ]
 
 
+def scp_to_node(node: dict[str, Any], local_path: str, remote_path: str) -> None:
+    """Copy a local file to a remote node via scp."""
+    ssh_key = str(Path(node.get("ssh_key", "~/.ssh/id_ed25519")).expanduser())
+    port = str(node.get("ssh_port", 22))
+    user_host = f"{node.get('user', 'root')}@{node['ssh_host']}"
+    cmd = [
+        "scp",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "BatchMode=yes",
+        "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
+        "-i", ssh_key,
+        "-P", port,
+        local_path,
+        f"{user_host}:{remote_path}",
+    ]
+    _run(cmd, check=True)
+
+
 def rsync_base(node: dict[str, Any]) -> list[str]:
     """Build the base ``rsync`` command list for a node."""
     ssh_key = str(Path(node.get("ssh_key", "~/.ssh/id_ed25519")).expanduser())
