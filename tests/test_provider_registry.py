@@ -41,3 +41,8 @@ class TestProviderRegistry:
             assert result["kwargs"]["ssh_key"] == "/tmp/key"
         finally:
             PROVIDER_REGISTRY.unregister("mock_cloud")
+
+    def test_runpod_build_threads_interruptible(self):
+        provider = build_provider("runpod", interruptible=False)
+        assert provider.interruptible is False
+        assert provider.cloud_types == ["SECURE", "COMMUNITY"]

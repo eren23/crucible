@@ -31,6 +31,7 @@ from crucible.fleet.sync import (
 )
 
 BOOTSTRAP_ATTEMPTS = 3
+DEFAULT_PROJECT_SYSTEM_PACKAGES = ("git", "rsync", "curl")
 
 
 # ---------------------------------------------------------------------------
@@ -86,10 +87,65 @@ def bootstrap_step(
     node: dict[str, Any],
     label: str,
     command: str,
+    *,
+    timeout: int | None = 600,
 ) -> Any:
     """Run one labelled bootstrap command on a node."""
     log_step(f"bootstrap {node['name']}: {label}")
-    return checked_remote_exec(node, f"bootstrap:{label}", command)
+    return checked_remote_exec(node, f"bootstrap:{label}", command, timeout=timeout)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def ensure_project_system_tools(
+    node: dict[str, Any],
+    spec: Any,
+    *,
+    timeout: int,
+) -> None:
+    """Install generic OS tools required for external-project bootstrap.
+
+    Bare container images often miss ``git``, ``curl``, or ``rsync``. Those are
+    needed for clone/update, uv installation, and launcher sync. Projects can
+    request additional OS packages via ``system_packages`` in their spec.
+    """
+    packages = _dedupe_preserve_order(
+        list(DEFAULT_PROJECT_SYSTEM_PACKAGES) + list(getattr(spec, "system_packages", []) or [])
+    )
+    package_args = " ".join(shlex.quote(pkg) for pkg in packages)
+    core_checks = " && ".join(
+        f"command -v {shlex.quote(tool)} >/dev/null 2>&1"
+        for tool in DEFAULT_PROJECT_SYSTEM_PACKAGES
+    )
+    needs_install = "true" if getattr(spec, "system_packages", []) else f"! ( {core_checks} )"
+    install_cmd = (
+        f"if {needs_install}; then "
+        "if command -v apt-get >/dev/null 2>&1; then "
+        "export DEBIAN_FRONTEND=noninteractive && apt-get update && "
+        f"apt-get install -y {package_args}; "
+        "elif command -v apk >/dev/null 2>&1; then "
+        f"apk add --no-cache {package_args}; "
+        "elif command -v dnf >/dev/null 2>&1; then "
+        f"dnf install -y {package_args}; "
+        "elif command -v yum >/dev/null 2>&1; then "
+        f"yum install -y {package_args}; "
+        "else "
+        "echo unsupported_package_manager >&2; exit 90; "
+        "fi; "
+        "else echo system_tools_ready; "
+        "fi"
+    )
+    bootstrap_step(node, "system_tools", install_cmd, timeout=timeout)
 
 
 def bootstrap_node(
@@ -200,6 +256,9 @@ def bootstrap_project(
     name = node["name"]
     branch_q = _shlex.quote(spec.branch)
     repo_q = _shlex.quote(spec.repo)
+    project_step_timeout = max(int(getattr(spec, "setup_timeout", 600) or 600), 1)
+
+    ensure_project_system_tools(node, spec, timeout=project_step_timeout)
 
     # 1. Clone or update repo
     log_step(f"{name}: cloning {spec.repo} (branch={spec.branch})")
@@ -212,12 +271,14 @@ def bootstrap_project(
             f"cd {ws} && git fetch origin && "
             f"git checkout {branch_q} && "
             f"git reset --hard origin/{branch_q}",
+            timeout=project_step_timeout,
         )
     else:
         depth = "--depth 1" if spec.shallow else ""
         bootstrap_step(
             node, "repo_clone",
             f"git clone {depth} -b {branch_q} {repo_q} {ws}",
+            timeout=project_step_timeout,
         )
 
     # 2. Create Python venv
@@ -232,12 +293,14 @@ def bootstrap_project(
                 node, "install_uv",
                 "command -v uv >/dev/null 2>&1 || "
                 "(curl -LsSf https://astral.sh/uv/install.sh | sh)",
+                timeout=project_step_timeout,
             )
             python_q = _shlex.quote(spec.python)
             bootstrap_step(
                 node, "create_venv",
                 f'export PATH="$HOME/.local/bin:$PATH" && '
                 f"cd {ws} && uv venv --python={python_q} .venv",
+                timeout=project_step_timeout,
             )
 
     # Activation prefix for subsequent commands
@@ -255,6 +318,7 @@ def bootstrap_project(
         bootstrap_step(
             node, "install_torch",
             f"{uv_pfx}{activate} && uv pip install {torch_pkgs} {flags}",
+            timeout=project_step_timeout,
         )
 
     # 4. Install remaining deps
@@ -265,6 +329,7 @@ def bootstrap_project(
             bootstrap_step(
                 node, f"install_{safe_label}",
                 f'{uv_pfx}{activate} && uv pip install "{pkg}"',
+                timeout=project_step_timeout,
             )
 
     # 5. Materialize shared launcher bundles into the external workspace.
@@ -324,6 +389,7 @@ def bootstrap_project(
         bootstrap_step(
             node, f"setup_{i}",
             f"{uv_pfx}{activate} && source {ws}/.env 2>/dev/null; {cmd}",
+            timeout=project_step_timeout,
         )
 
     # 9. Mark ready

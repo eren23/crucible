@@ -72,6 +72,12 @@ class TestLaunchProject:
         assert "python -c" in cmd
         assert "start_new_session=True" in cmd
 
+    @patch("crucible.fleet.project_runner.remote_exec")
+    def test_uses_spec_launch_timeout(self, mock_exec):
+        mock_exec.return_value = MagicMock(returncode=0, stdout="222\n", stderr="")
+        launch_project(_make_node(), _make_spec(launch_timeout=480), "run_timeout")
+        assert mock_exec.call_args.kwargs["timeout"] == 480
+
 
 class TestCheckProjectRunning:
     @patch("crucible.fleet.project_runner.remote_exec")

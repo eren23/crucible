@@ -64,6 +64,7 @@ def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: An
         image_name=image_name or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
         gpu_type_ids=gpu_type_ids,
         ssh_key=ssh_key,
+        interruptible=bool(kwargs.get("interruptible", True)),
         defaults=defaults or {},
     )
 

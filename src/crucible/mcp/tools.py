@@ -3230,8 +3230,11 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
         spec = load_project_spec(project_name, config.project_root)
         _project_contract_env(config, spec)
 
+        from crucible.fleet.inventory import load_nodes_if_exists, next_node_index
         from crucible.fleet.manager import FleetManager
         fm = FleetManager(config)
+        name_prefix = project_name[:12]
+        existing_nodes = load_nodes_if_exists(config.project_root / config.nodes_file)
 
         # Apply pod overrides if present
         provider_overrides: dict[str, Any] = {}
@@ -3243,17 +3246,29 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
             provider_overrides["container_disk_gb"] = spec.pod.container_disk
         if spec.pod.volume_disk:
             provider_overrides["volume_gb"] = spec.pod.volume_disk
+        if spec.pod.interruptible is not None:
+            provider_overrides["interruptible"] = spec.pod.interruptible
 
+        previous_ids = {
+            n.get("node_id") or n.get("pod_id")
+            for n in existing_nodes
+            if n.get("node_id") or n.get("pod_id")
+        }
         nodes = fm.provision(
             count=count,
-            name_prefix=project_name[:12],
+            name_prefix=name_prefix,
+            start_index=next_node_index(existing_nodes, name_prefix),
             **provider_overrides,
         )
+        new_nodes = [
+            n for n in nodes
+            if (n.get("node_id") or n.get("pod_id")) not in previous_ids
+        ]
         return {
-            "created": len(nodes),
+            "created": len(new_nodes),
             "new_nodes": [
                 {"name": n.get("name", ""), "node_id": n.get("node_id", "")}
-                for n in nodes
+                for n in new_nodes
             ],
         }
     except CrucibleError as exc:
@@ -3319,6 +3334,7 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
                     "name": n.get("name", ""),
                     "state": n.get("state", "unknown"),
                     "project": n.get("project", ""),
+                    **({"error": n.get("error", "")} if n.get("error") else {}),
                 }
                 for n in results
             ],
