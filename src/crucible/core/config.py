@@ -280,6 +280,8 @@ class ProjectSpec:
     install: list[str] = field(default_factory=list)
     install_flags: str = ""                  # global pip flags (e.g. --index-url)
     install_torch: str = ""                  # separate torch install line
+    launcher: str = ""                       # reusable launcher bundle name
+    launcher_entry: str = ""                # entry script inside launcher bundle
     local_files: list[str] = field(default_factory=list)  # local paths to scp to workspace
     setup: list[str] = field(default_factory=list)
     setup_timeout: int = 3600
@@ -329,6 +331,8 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         install=raw.get("install", []),
         install_flags=raw.get("install_flags", ""),
         install_torch=raw.get("install_torch", ""),
+        launcher=raw.get("launcher", ""),
+        launcher_entry=raw.get("launcher_entry", ""),
         local_files=raw.get("local_files", []),
         setup=raw.get("setup", []),
         setup_timeout=raw.get("setup_timeout", 3600),
@@ -354,6 +358,7 @@ def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]
             results.append({
                 "name": raw.get("name", p.stem),
                 "repo": raw.get("repo", ""),
+                "launcher": raw.get("launcher", ""),
                 "train": raw.get("train", ""),
                 "metrics_primary": raw.get("metrics", {}).get("primary", "val_loss"),
             })

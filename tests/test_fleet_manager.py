@@ -58,12 +58,25 @@ class TestProvision:
         ]
         fm._provider = MagicMock()
         fm._provider.provision.return_value = fake_nodes
+        fm.nodes_file.write_text("[]")
 
         result = fm.provision(count=2, name_prefix="test")
         assert len(result) == 2
         assert fm._provider.provision.called
         # Verify nodes were persisted
         assert fm.nodes_file.exists()
+
+    def test_provision_merges_with_existing_nodes(self, fleet_config: ProjectConfig):
+        from crucible.fleet.manager import FleetManager
+
+        fm = FleetManager(fleet_config)
+        fm._provider = MagicMock()
+        fm.nodes_file.write_text(json.dumps([{"name": "existing-1", "node_id": "old-1", "state": "ready"}]))
+        fm._provider.provision.return_value = [{"name": "new-1", "node_id": "new-1", "state": "pending"}]
+
+        result = fm.provision(count=1, name_prefix="new")
+
+        assert {node["name"] for node in result} == {"existing-1", "new-1"}
 
 
 class TestDestroy:
@@ -97,3 +110,18 @@ class TestRefresh:
 
         result = fm.refresh()
         fm._provider.refresh.assert_called_once()
+        assert result[0]["ssh_host"] == "1.2.3.4"
+
+    def test_refresh_preserves_project_metadata(self, fleet_config: ProjectConfig):
+        from crucible.fleet.manager import FleetManager
+
+        fm = FleetManager(fleet_config)
+        fm._provider = MagicMock()
+        fm._provider.refresh.return_value = [{"name": "gpu-1", "node_id": "n1", "state": "ready", "ssh_host": "1.2.3.4"}]
+
+        existing = [{"name": "gpu-1", "node_id": "n1", "state": "pending", "project": "lewm"}]
+        fm.nodes_file.write_text(json.dumps(existing))
+
+        result = fm.refresh()
+
+        assert result[0]["project"] == "lewm"

@@ -69,7 +69,8 @@ class TestLaunchProject:
         launch_project(_make_node(), _make_spec(env_set={}), "run_envless")
         cmd = mock_exec.call_args[0][1]
         assert "if [ -f /workspace/test/.env ]; then source /workspace/test/.env; fi" in cmd
-        assert "nohup bash -c" in cmd
+        assert "python -c" in cmd
+        assert "start_new_session=True" in cmd
 
 
 class TestCheckProjectRunning:
@@ -149,11 +150,12 @@ class TestCollectProjectResult:
             spec=_make_spec(env_set={"WANDB_PROJECT": "proj"}, metrics=SimpleNamespace(source="stdout", primary="val_loss", direction="minimize")),
             run_id="run_w",
             pid=777,
+            wandb_run_name="variant_run_name",
             local_logs_dir=logs,
         )
         assert result["wandb"]["url"] == "https://wandb.ai/team/proj/runs/abc123"
         assert result["result"]["val_loss"] == pytest.approx(0.2)
-        mock_fetch.assert_called_once_with(project="proj", entity=None, run_name="run_w")
+        mock_fetch.assert_called_once_with(project="proj", entity=None, run_name="variant_run_name")
 
     @patch("crucible.fleet.project_runner._run")
     @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
@@ -171,3 +173,59 @@ class TestCollectProjectResult:
             local_logs_dir=logs,
         )
         assert result["contract_status"] == "wandb_missing"
+
+    @patch("crucible.fleet.project_runner._run")
+    @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
+    @patch("crucible.fleet.project_runner.check_project_running", return_value=False)
+    def test_merges_experiment_metadata(self, mock_check, mock_rsync, mock_run, tmp_path):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        (logs / "run_meta.log").write_text("metric:val_loss=0.25\n", encoding="utf-8")
+
+        result = collect_project_result(
+            node=_make_node(),
+            spec=_make_spec(),
+            run_id="run_meta",
+            pid=42,
+            experiment_meta={
+                "name": "lewm_slim_48d_2e_2p_r1",
+                "config": {"SLIM_DIM": "48"},
+                "launcher": "lewm_upstream",
+            },
+            local_logs_dir=logs,
+        )
+        assert result["name"] == "lewm_slim_48d_2e_2p_r1"
+        assert result["config"]["SLIM_DIM"] == "48"
+        assert result["launcher"] == "lewm_upstream"
+
+    @patch("crucible.fleet.project_runner._run", side_effect=RuntimeError("rsync failed"))
+    @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
+    @patch("crucible.fleet.project_runner.check_project_running", return_value=False)
+    def test_marks_interrupted_when_node_unreachable(self, mock_check, mock_rsync, mock_run, tmp_path):
+        result = collect_project_result(
+            node=_make_node(state="unreachable"),
+            spec=_make_spec(),
+            run_id="run_down",
+            pid=100,
+            local_logs_dir=tmp_path / "logs",
+        )
+        assert result["status"] == "interrupted"
+        assert result["failure_class"] == "unreachable"
+
+    @patch("crucible.fleet.project_runner._run")
+    @patch("crucible.fleet.project_runner.rsync_base", return_value=["rsync"])
+    @patch("crucible.fleet.project_runner.check_project_running", return_value=False)
+    def test_dead_process_without_terminal_marker_is_failed(self, mock_check, mock_rsync, mock_run, tmp_path):
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        (logs / "run_partial.log").write_text("metric:val_loss=0.25\n", encoding="utf-8")
+
+        result = collect_project_result(
+            node=_make_node(),
+            spec=_make_spec(),
+            run_id="run_partial",
+            pid=321,
+            local_logs_dir=logs,
+        )
+        assert result["status"] == "failed"
+        assert result["failure_class"] == "no_terminal_marker"

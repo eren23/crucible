@@ -56,6 +56,19 @@ final_model.*
 
 # Crucible
 .crucible/
+!/.crucible/
+/.crucible/*
+!/.crucible/projects/
+/.crucible/projects/*
+!/.crucible/projects/lewm.yaml
+!/.crucible/plugins/
+/.crucible/plugins/*
+!/.crucible/plugins/launchers/
+/.crucible/plugins/launchers/*
+!/.crucible/plugins/launchers/lewm_upstream/
+/.crucible/plugins/launchers/lewm_upstream/*
+!/.crucible/plugins/launchers/lewm_upstream/plugin.yaml
+!/.crucible/plugins/launchers/lewm_upstream/lewm_upstream.py
 
 # mcp
 .mcp.json

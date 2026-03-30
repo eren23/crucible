@@ -54,6 +54,78 @@ def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> list[TextContent]:
         return _error_text(traceback.format_exc())
 
 
+def _extract_trace_identifiers(name: str, arguments: dict[str, Any], raw: Any) -> dict[str, Any]:
+    """Extract stable run/design identifiers for traceability across MCP calls."""
+    identifiers: dict[str, Any] = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    raw_dict = raw if isinstance(raw, dict) else {}
+
+    project_name = raw_dict.get("project") or raw_dict.get("project_name") or arguments.get("project_name")
+    if project_name:
+        identifiers["project_names"] = [str(project_name)]
+
+    design_name = raw_dict.get("design_name") or arguments.get("design_name")
+    if design_name:
+        identifiers["design_names"] = [str(design_name)]
+
+    wave_name = raw_dict.get("wave_name") or arguments.get("wave_name")
+    if wave_name:
+        identifiers["wave_names"] = [str(wave_name)]
+
+    launch_id = raw_dict.get("launch_id") or arguments.get("launch_id")
+    if launch_id:
+        identifiers["launch_ids"] = [str(launch_id)]
+
+    run_id = raw_dict.get("run_id") or raw_dict.get("id")
+    if run_id:
+        identifiers["run_ids"] = [str(run_id)]
+    elif isinstance(raw_dict.get("runs"), list):
+        run_ids = [
+            str(row.get("run_id"))
+            for row in raw_dict["runs"]
+            if isinstance(row, dict) and row.get("run_id")
+        ]
+        if run_ids:
+            identifiers["run_ids"] = sorted(set(run_ids))
+    elif isinstance(raw_dict.get("nodes"), list):
+        run_ids = [
+            str(node.get("run_id"))
+            for node in raw_dict["nodes"]
+            if isinstance(node, dict) and node.get("run_id")
+        ]
+        if run_ids:
+            identifiers["run_ids"] = sorted(set(run_ids))
+
+    overrides = arguments.get("overrides", {}) if isinstance(arguments.get("overrides"), dict) else {}
+    variant_name = (
+        raw_dict.get("variant_name")
+        or raw_dict.get("name")
+        or overrides.get("CRUCIBLE_VARIANT_NAME")
+        or overrides.get("LEWM_VARIANT")
+    )
+    if name == "run_project" and variant_name:
+        identifiers["variant_names"] = [str(variant_name)]
+
+    launcher_name = raw_dict.get("launcher") or raw_dict.get("launcher_name")
+    if launcher_name:
+        identifiers["launchers"] = [str(launcher_name)]
+
+    node_names: list[str] = []
+    if isinstance(arguments.get("node_names"), list):
+        node_names.extend(str(n) for n in arguments["node_names"] if n)
+    if isinstance(raw_dict.get("nodes"), list):
+        node_names.extend(
+            str(node.get("name"))
+            for node in raw_dict["nodes"]
+            if isinstance(node, dict) and node.get("name")
+        )
+    if node_names:
+        identifiers["node_names"] = sorted(set(node_names))
+
+    return identifiers
+
+
 # ---------------------------------------------------------------------------
 # Keepalive for long-running tool calls
 # ---------------------------------------------------------------------------
@@ -1556,7 +1628,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="run_project",
-        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with PID.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {run_id, nodes: [{name, pid, status}]}\nNEXT: get_fleet_status(include_metrics=true) to monitor GPU, collect_project_results when done.",
+        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1570,11 +1642,24 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="collect_project_results",
-        description="Collect results from an external project run: rsync logs, parse metrics, fetch WandB data.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id, status, metrics, log_tail}\nNEXT: get_leaderboard if completed.",
+        description="Collect results from one external project run or an entire launch: rsync logs, parse metrics, fetch WandB data, and persist terminal status.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id|launch_id, status|summary, metrics|runs, log_tail}\nNEXT: get_leaderboard if completed.",
         inputSchema={
             "type": "object",
             "properties": {
-                "run_id": {"type": "string", "description": "Run ID returned by run_project."},
+                "run_id": {"type": "string", "description": "Per-node run ID returned by run_project."},
+                "launch_id": {"type": "string", "description": "Batch launch ID returned by run_project for multi-node launches."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="get_project_run_status",
+        description="Probe and reconcile the latest lifecycle state for an external project run, including recent lifecycle events.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id, status, failure_class?, remote_node_state?, events:[...]}\nNEXT: collect_project_results when terminal or get_fleet_status(include_metrics=true) for broader fleet state.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Per-node run ID returned by run_project."},
+                "event_limit": {"type": "integer", "description": "How many recent lifecycle events to include.", "default": 10},
             },
             "required": ["run_id"],
             "additionalProperties": False,
@@ -2083,6 +2168,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
                 duration_ms=duration_ms,
                 status="error" if is_error else "ok",
                 error=raw.get("error") if is_error else None,
+                identifiers=_extract_trace_identifiers(name, arguments, raw),
             )
         except Exception:
             pass  # Never let tracing break tool execution

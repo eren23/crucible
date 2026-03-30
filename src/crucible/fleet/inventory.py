@@ -106,6 +106,10 @@ def merge_node_record(existing: dict[str, Any] | None, incoming: dict[str, Any])
     merged["last_seen_at"] = incoming.get("last_seen_at") or existing.get("last_seen_at")
     merged["ssh_host"] = incoming.get("ssh_host") or existing.get("ssh_host") or ""
     merged["ssh_port"] = incoming.get("ssh_port") or existing.get("ssh_port") or 22
+    merged["project"] = incoming.get("project") or existing.get("project")
+    merged["workspace_path"] = incoming.get("workspace_path") or existing.get("workspace_path")
+    merged["env_source"] = incoming.get("env_source") or existing.get("env_source")
+    merged["python_bin"] = incoming.get("python_bin") or existing.get("python_bin")
     api_state = str(merged.get("api_state") or "").lower()
     existing_state = str(existing.get("state") or "").lower()
     if existing_state in {"ready", "boot_failed", "unreachable", "ssh_timeout"} and api_state not in BAD_API_STATES:

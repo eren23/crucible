@@ -116,13 +116,31 @@ class TestSessionTracerFinalize:
 
         meta = load_trace_meta(tracer.meta_path)
         assert meta["session_id"] == "fin"
-        assert meta["trace_version"] == 1
+        assert meta["trace_version"] == 2
         assert meta["tool_calls"] == 3
         assert meta["tool_counts"]["get_fleet_status"] == 2
         assert meta["tool_counts"]["get_leaderboard"] == 1
         assert meta["trace_file"] == "fin.jsonl"
         assert "started_at" in meta
         assert "ended_at" in meta
+
+    def test_finalize_records_identifiers(self, tmp_path: Path):
+        tracer = SessionTracer(tmp_path / "traces", session_id="ids")
+        tracer.record(
+            tool="run_project",
+            arguments={"project_name": "lewm"},
+            result={"run_id": "lewm_123", "nodes": [{"name": "node-1"}]},
+            duration_ms=12.0,
+            identifiers={"run_ids": ["lewm_123"], "project_names": ["lewm"], "node_names": ["node-1"]},
+        )
+        tracer.finalize()
+
+        entries = load_trace(tracer.trace_path)
+        assert entries[0]["identifiers"]["run_ids"] == ["lewm_123"]
+
+        meta = load_trace_meta(tracer.meta_path)
+        assert meta["identifiers"]["run_ids"] == ["lewm_123"]
+        assert meta["identifiers"]["project_names"] == ["lewm"]
 
     def test_finalize_atomic_write(self, tmp_path: Path):
         """The .tmp file should not exist after finalize completes."""

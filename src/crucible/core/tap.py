@@ -33,6 +33,7 @@ VALID_PLUGIN_TYPES = frozenset({
     "optimizers", "schedulers", "callbacks", "loggers",
     "providers", "architectures", "data_adapters", "objectives",
     "block_types", "stack_patterns", "augmentations", "activations",
+    "launchers",
 })
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -371,28 +372,33 @@ class TapManager:
         if plugin_type not in VALID_PLUGIN_TYPES:
             raise TapError(f"Invalid plugin type {plugin_type!r} in manifest for {name!r}")
 
-        # Find the .py file — with symlink escape guard
+        # Find the package payload — with symlink escape guard
         pkg_dir = Path(manifest["_dir"])
         tap_dir = self._taps_dir / manifest.get("_tap", "")
         self._assert_within(pkg_dir, tap_dir, "package directory")
+        dest_root = self._plugins_dir / plugin_type
+        dest_root.mkdir(parents=True, exist_ok=True)
 
-        py_files = list(pkg_dir.glob("*.py"))
-        if not py_files:
-            raise TapError(f"No .py files found in {pkg_dir}")
+        if plugin_type == "launchers":
+            dest_path = dest_root / name
+            if dest_path.exists():
+                raise TapError(f"Launcher package {name!r} is already installed at {dest_path}")
+            shutil.copytree(pkg_dir, dest_path)
+        else:
+            py_files = list(pkg_dir.glob("*.py"))
+            if not py_files:
+                raise TapError(f"No .py files found in {pkg_dir}")
 
-        source_file = None
-        for pf in py_files:
-            if pf.stem == name:
-                source_file = pf
-                break
-        if source_file is None:
-            source_file = py_files[0]
+            source_file = None
+            for pf in py_files:
+                if pf.stem == name:
+                    source_file = pf
+                    break
+            if source_file is None:
+                source_file = py_files[0]
 
-        # Copy to plugins directory (name is validated, no traversal possible)
-        dest_dir = self._plugins_dir / plugin_type
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_file = dest_dir / f"{name}.py"
-        shutil.copy2(source_file, dest_file)
+            dest_path = dest_root / f"{name}.py"
+            shutil.copy2(source_file, dest_path)
 
         # Record installation
         tap_name = manifest.get("_tap", "")
@@ -404,6 +410,7 @@ class TapManager:
             "tap": tap_name,
             "installed_at": utc_now_iso(),
             "sha": sha,
+            "path": str(dest_path),
         }
         installed.append(record)
         self._save_installed_yaml(installed)
@@ -414,7 +421,7 @@ class TapManager:
             "type": plugin_type,
             "version": manifest.get("version", ""),
             "tap": tap_name,
-            "path": str(dest_file),
+            "path": str(dest_path),
         }
 
     def uninstall(self, name: str) -> None:
@@ -431,11 +438,16 @@ class TapManager:
         if record is None:
             raise TapError(f"Package {name!r} is not installed")
 
-        # Remove the file (name validated, no traversal)
+        # Remove the installed payload (name validated, no traversal)
         plugin_type = record.get("type", "")
-        plugin_file = self._plugins_dir / plugin_type / f"{name}.py"
-        if plugin_file.exists():
-            plugin_file.unlink()
+        if plugin_type == "launchers":
+            plugin_path = self._plugins_dir / plugin_type / name
+            if plugin_path.exists():
+                shutil.rmtree(plugin_path)
+        else:
+            plugin_path = self._plugins_dir / plugin_type / f"{name}.py"
+            if plugin_path.exists():
+                plugin_path.unlink()
 
         # Update ledger
         installed = [p for p in installed if p.get("name") != name]
@@ -481,40 +493,53 @@ class TapManager:
         # Find the local plugin
         if project_root is None:
             project_root = Path.cwd()
-        local_plugin = project_root / store_dir / plugins_subdir / plugin_type / f"{name}.py"
-        if not local_plugin.exists():
-            raise TapError(f"Local plugin not found: {local_plugin}")
+        local_root = project_root / store_dir / plugins_subdir / plugin_type
+        if plugin_type == "launchers":
+            local_bundle = local_root / name
+            if not local_bundle.is_dir():
+                raise TapError(f"Local plugin not found: {local_bundle}")
+        else:
+            local_plugin = local_root / f"{name}.py"
+            if not local_plugin.exists():
+                raise TapError(f"Local plugin not found: {local_plugin}")
 
         # Check for existing package in tap
         dest_dir = tap_dir / plugin_type / name
         dest_file = dest_dir / f"{name}.py"
-        if dest_file.exists():
+        if dest_dir.exists():
             raise TapError(
-                f"Package {name!r} already exists in tap {tap!r} at {dest_file}. "
+                f"Package {name!r} already exists in tap {tap!r} at {dest_dir}. "
                 f"Remove it manually or update the existing version."
             )
 
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_plugin, dest_file)
+        if plugin_type == "launchers":
+            shutil.copytree(local_bundle, dest_dir)
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(local_plugin, dest_file)
 
         # Copy or create plugin.yaml
-        local_meta = local_plugin.with_suffix(".yaml")
-        if local_meta.exists():
-            shutil.copy2(local_meta, dest_dir / "plugin.yaml")
-        else:
-            # Auto-generate minimal manifest
-            manifest = {
-                "name": name,
-                "type": plugin_type,
-                "version": "0.1.0",
-                "description": f"{name} plugin",
-                "author": "",
-                "tags": [plugin_type],
-            }
-            (dest_dir / "plugin.yaml").write_text(
-                yaml.dump(manifest, default_flow_style=False, sort_keys=False),
-                encoding="utf-8",
-            )
+        manifest_path = dest_dir / "plugin.yaml"
+        if not manifest_path.exists():
+            if plugin_type == "launchers":
+                local_meta = local_bundle / "plugin.yaml"
+            else:
+                local_meta = local_plugin.with_suffix(".yaml")
+            if local_meta.exists():
+                shutil.copy2(local_meta, manifest_path)
+            else:
+                manifest = {
+                    "name": name,
+                    "type": plugin_type,
+                    "version": "0.1.0",
+                    "description": f"{name} plugin",
+                    "author": "",
+                    "tags": [plugin_type],
+                }
+                manifest_path.write_text(
+                    yaml.dump(manifest, default_flow_style=False, sort_keys=False),
+                    encoding="utf-8",
+                )
 
         # Git add + commit in tap repo
         self._git_run("add", ".", cwd=tap_dir)

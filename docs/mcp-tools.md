@@ -561,8 +561,9 @@ Save a reproducible session recipe. Validates name (lowercase slug), requires at
     {"tool": "provision_project", "args": {"project_name": "yolo11-demo", "count": 1}, "note": "Spin up 1x RTX 4090"},
     {"tool": "fleet_refresh", "args": {}, "note": "Wait ~45s then refresh for SSH endpoint"},
     {"tool": "bootstrap_project", "args": {"project_name": "yolo11-demo"}, "note": "Clone repo, install deps"},
-    {"tool": "run_project", "args": {"project_name": "yolo11-demo", "overrides": {"MODEL": "yolo11n.pt", "EPOCHS": "100"}}, "note": "Launch training"},
-    {"tool": "collect_project_results", "args": {"run_id": "<from_run_project>"}, "note": "Rsync log, parse metrics"},
+    {"tool": "run_project", "args": {"project_name": "yolo11-demo", "overrides": {"MODEL": "yolo11n.pt", "EPOCHS": "100"}}, "note": "Launch training; single-node runs return run_id, multi-node runs return launch_id plus per-node run_ids"},
+    {"tool": "get_project_run_status", "args": {"run_id": "<from_run_project>"}, "note": "Probe lifecycle state and recent events while the run is active"},
+    {"tool": "collect_project_results", "args": {"run_id": "<from_run_project>"}, "note": "Rsync log, parse metrics, persist terminal status"},
     {"tool": "destroy_nodes", "args": {"node_names": ["yolo11-demo-01"]}, "note": "Kill pod"}
   ],
   "results": {"map50_95_b": 0.733, "precision_b": 0.909},

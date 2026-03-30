@@ -216,6 +216,13 @@ class TestMergeNodeRecord:
         # Even if fully bootstrapped, api_state in BAD_API_STATES prevents "ready"
         assert merged["state"] != "ready" or merged.get("api_state") == "terminated"
 
+    def test_merge_preserves_project_metadata(self):
+        existing = {**_ready_node("gpu-1"), "project": "lewm", "workspace_path": "/workspace/le-wm"}
+        incoming = {k: v for k, v in _ready_node("gpu-1").items() if k not in {"project", "workspace_path"}}
+        merged = merge_node_record(existing, incoming)
+        assert merged["project"] == "lewm"
+        assert merged["workspace_path"] == "/workspace/le-wm"
+
 
 # ---------------------------------------------------------------------------
 # merge_node_snapshots

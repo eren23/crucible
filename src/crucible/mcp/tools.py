@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.errors import CrucibleError
@@ -131,6 +133,21 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
             for n in nodes
         ]
         result: dict[str, Any] = {"summary": summary, "nodes": node_details}
+        active_project_runs = [
+            {
+                "run_id": row.get("run_id"),
+                "launch_id": row.get("launch_id"),
+                "project": row.get("project"),
+                "variant_name": row.get("variant_name"),
+                "node_name": row.get("node_name") or row.get("remote_node"),
+                "status": row.get("status"),
+                "updated_at": row.get("updated_at"),
+            }
+            for row in _load_project_runs()
+            if row.get("status") in _PROJECT_ACTIVE_STATUSES
+        ]
+        if active_project_runs:
+            result["active_project_runs"] = active_project_runs
 
         if include_metrics and nodes:
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -564,12 +581,12 @@ def _get_store():
 
 
 def design_browse_experiments(args: dict[str, Any]) -> dict[str, Any]:
-    """Browse completed experiments with filtering."""
+    """Browse experiments with filtering across local, project, and fleet sources."""
     config = _get_config()
     try:
-        from crucible.analysis.results import completed_results
+        from crucible.analysis.results import merged_results
 
-        results = completed_results(config)
+        results = merged_results(config)
         primary = config.metrics.primary
 
         # Apply filters
@@ -620,6 +637,9 @@ def design_browse_experiments(args: dict[str, Any]) -> dict[str, Any]:
                 "tags": r.get("tags", []),
                 "status": r.get("status"),
                 "timestamp": r.get("timestamp"),
+                "project": r.get("project"),
+                "launcher": r.get("launcher"),
+                "remote_node": r.get("remote_node"),
             })
         return {"total_matched": len(filtered), "experiments": trimmed}
     except CrucibleError as exc:
@@ -3037,29 +3057,151 @@ def config_get_modalities(args: dict[str, Any]) -> dict[str, Any]:
 
 # Persistent registry for project runs (survives MCP server restarts)
 _PROJECT_RUNS_FILE = ".crucible/projects/runs.jsonl"
+_PROJECT_RUN_EVENTS_FILE = ".crucible/projects/run_events.jsonl"
+_PROJECT_ACTIVE_STATUSES = frozenset({"launching", "launched", "running"})
+_PROJECT_TERMINAL_STATUSES = frozenset({"completed", "failed", "timeout", "killed", "interrupted"})
+
+
+def _project_runs_path() -> Path:
+    config = _get_config()
+    return config.project_root / _PROJECT_RUNS_FILE
+
+
+def _project_run_events_path() -> Path:
+    config = _get_config()
+    return config.project_root / _PROJECT_RUN_EVENTS_FILE
 
 
 def _save_project_run(run_id: str, data: dict[str, Any]) -> None:
     """Persist a project run record to JSONL."""
-    config = _get_config()
-    runs_path = config.project_root / _PROJECT_RUNS_FILE
+    runs_path = _project_runs_path()
     runs_path.parent.mkdir(parents=True, exist_ok=True)
     from crucible.core.io import append_jsonl, _json_ready
-    record = {"run_id": run_id, **_json_ready(data)}
+    payload = {"run_id": run_id, "updated_at": utc_now_iso(), **_json_ready(data)}
+    record = payload
     append_jsonl(runs_path, record)
 
 
 def _load_project_run(run_id: str) -> dict[str, Any] | None:
     """Load a project run record from JSONL."""
-    config = _get_config()
-    runs_path = config.project_root / _PROJECT_RUNS_FILE
+    runs_path = _project_runs_path()
     if not runs_path.exists():
         return None
-    from crucible.core.io import read_jsonl
+    latest = None
     for record in read_jsonl(runs_path):
         if record.get("run_id") == run_id:
-            return record
-    return None
+            latest = record
+    return latest
+
+
+def _load_project_runs(*, launch_id: str | None = None) -> list[dict[str, Any]]:
+    """Return latest snapshots for all project runs, optionally filtered by launch."""
+    latest_by_run: dict[str, dict[str, Any]] = {}
+    for record in read_jsonl(_project_runs_path()):
+        run_id = str(record.get("run_id", "")).strip()
+        if not run_id:
+            continue
+        latest_by_run[run_id] = record
+    rows = list(latest_by_run.values())
+    if launch_id:
+        rows = [row for row in rows if row.get("launch_id") == launch_id]
+    rows.sort(key=lambda row: row.get("updated_at") or row.get("launched_at") or "", reverse=True)
+    return rows
+
+
+def _update_project_run(run_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge updates onto the latest project-run snapshot and persist it."""
+    current = _load_project_run(run_id) or {"run_id": run_id}
+    merged = {**current, **updates}
+    _save_project_run(run_id, merged)
+    return merged
+
+
+def _append_project_run_event(run_id: str, event: str, **fields: Any) -> None:
+    """Persist an append-only lifecycle event for a project run."""
+    path = _project_run_events_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "ts": utc_now_iso(),
+        "run_id": run_id,
+        "event": event,
+        **fields,
+    }
+    from crucible.core.io import append_jsonl, _json_ready
+    append_jsonl(path, _json_ready(payload))
+
+
+def _load_project_run_events(
+    *,
+    run_id: str | None = None,
+    launch_id: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Load project-run lifecycle events, optionally filtered."""
+    records = read_jsonl(_project_run_events_path())
+    if run_id:
+        records = [row for row in records if row.get("run_id") == run_id]
+    if launch_id:
+        records = [row for row in records if row.get("launch_id") == launch_id]
+    if limit is not None and limit >= 0:
+        records = records[-limit:]
+    return records
+
+
+def _sanitize_node_token(name: str) -> str:
+    import re
+
+    token = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_")
+    return token or "node"
+
+
+def _make_launch_id(project_name: str) -> str:
+    return f"{project_name}_{time.time_ns()}_{uuid4().hex[:6]}"
+
+
+def _make_node_run_id(launch_id: str, node_name: str, *, total_nodes: int) -> str:
+    if total_nodes == 1:
+        return launch_id
+    return f"{launch_id}_{_sanitize_node_token(node_name)}"
+
+
+def _status_event_name(status: str, *, collected: bool = False) -> str:
+    if collected:
+        return "result_collected"
+    if status in {"launching", "launched"}:
+        return f"status_{status}"
+    if status == "running":
+        return "probe_running"
+    if status == "interrupted":
+        return "node_unreachable"
+    if status in _PROJECT_TERMINAL_STATUSES:
+        return "probe_terminal"
+    return "status_observed"
+
+
+def _persist_project_observation(
+    run_id: str,
+    updates: dict[str, Any],
+    *,
+    event_name: str | None = None,
+    event_details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a project-run snapshot update and optional event."""
+    merged = _update_project_run(run_id, updates)
+    if event_name:
+        _append_project_run_event(
+            run_id,
+            event_name,
+            launch_id=merged.get("launch_id"),
+            project=merged.get("project"),
+            status=merged.get("status"),
+            node_name=merged.get("node_name") or merged.get("remote_node"),
+            reason=merged.get("status_reason"),
+            failure_class=merged.get("failure_class"),
+            pid=merged.get("pid"),
+            details=event_details or None,
+        )
+    return merged
 
 
 def list_projects(args: dict[str, Any]) -> dict[str, Any]:
@@ -3159,7 +3301,7 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
             # Apply workspace from spec
             node["workspace_path"] = spec.workspace
             try:
-                updated = _bootstrap_project(node, spec)
+                updated = _bootstrap_project(node, spec, project_root=config.project_root)
                 upsert_node_record(nodes_file, updated)
                 results.append(updated)
             except Exception as exc:
@@ -3197,7 +3339,9 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     try:
         from crucible.core.config import load_project_spec
+        from crucible.core.hub import HubStore
         from crucible.fleet.project_runner import launch_project
+        from crucible.fleet.project_launchers import launcher_runtime_entry, resolve_launcher_bundle
         from crucible.fleet.inventory import load_nodes_if_exists
 
         project_name = args["project_name"]
@@ -3207,7 +3351,33 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         contract_env = _project_contract_env(config, spec)
         overrides.update(contract_env)
         spec.env_set.update(contract_env)
-        run_id = f"{project_name}_{int(__import__('time').time())}"
+        launch_id = _make_launch_id(project_name)
+        variant_name = str(
+            overrides.get("CRUCIBLE_VARIANT_NAME")
+            or overrides.get("LEWM_VARIANT")
+            or overrides.get("WANDB_RUN_NAME")
+            or launch_id
+        )
+        launcher_info = None
+        launcher_path = ""
+        if spec.launcher:
+            hub_dir = HubStore.resolve_hub_dir(config_hub_dir=getattr(config, "hub_dir", ""))
+            launcher_info = resolve_launcher_bundle(
+                project_root=config.project_root,
+                launcher_name=spec.launcher,
+                hub_dir=hub_dir,
+            )
+            if launcher_info is None:
+                return {
+                    "error": (
+                        f"Launcher bundle {spec.launcher!r} not found in local plugins, "
+                        "installed hub packages, or configured taps."
+                    ),
+                    "run_id": launch_id,
+                    "nodes": [],
+                }
+            entry = spec.launcher_entry or launcher_info["entry"]
+            launcher_path = launcher_runtime_entry(spec.workspace, spec.launcher, entry)
 
         nodes_file = config.project_root / config.nodes_file
         all_nodes = load_nodes_if_exists(nodes_file) or []
@@ -3224,55 +3394,258 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
             return {
                 "error": f"No nodes bootstrapped for project {project_name!r}. "
                          f"Run bootstrap_project first.",
-                "run_id": run_id, "nodes": [],
+                "run_id": launch_id, "nodes": [],
             }
 
         launched = []
+        total_nodes = len(ready_nodes)
         for node in ready_nodes:
             node["workspace_path"] = spec.workspace
+            node_run_id = _make_node_run_id(launch_id, node["name"], total_nodes=total_nodes)
+            wandb_run_name = str(overrides.get("WANDB_RUN_NAME") or variant_name or node_run_id)
+            launch_overrides = {
+                **overrides,
+                "WANDB_RUN_NAME": wandb_run_name,
+                "CRUCIBLE_REMOTE_NODE": node["name"],
+                "CRUCIBLE_EXECUTION_PROVIDER": config.provider.type.lower(),
+                "CRUCIBLE_ENFORCE_CONTRACT": "1",
+                "CRUCIBLE_VARIANT_NAME": variant_name,
+            }
+            if launcher_path and "TRAIN_SCRIPT" not in launch_overrides:
+                launch_overrides["TRAIN_SCRIPT"] = launcher_path
+            contract = contract_metadata(config, env={**os.environ, **launch_overrides}, remote_node=node["name"])
+            base_record = {
+                "launch_id": launch_id,
+                "project": spec.name,
+                "variant_name": variant_name,
+                "result_name": variant_name,
+                "node_name": node["name"],
+                "remote_node": node["name"],
+                "ssh_host": node.get("ssh_host", ""),
+                "ssh_port": node.get("ssh_port", 22),
+                "workspace_path": spec.workspace,
+                "overrides": overrides,
+                "resolved_overrides": launch_overrides,
+                "train_command": spec.train,
+                "spec_name": spec.name,
+                "spec_snapshot": {
+                    "repo": spec.repo,
+                    "branch": spec.branch,
+                    "workspace": spec.workspace,
+                    "launcher": spec.launcher,
+                    "launcher_entry": spec.launcher_entry,
+                    "train": spec.train,
+                },
+                "execution_provider": contract["execution_provider"],
+                "contract_status": contract["contract_status"],
+                "launcher": spec.launcher or None,
+                "launcher_entry": spec.launcher_entry or (launcher_info["entry"] if launcher_info else ""),
+                "launcher_source": launcher_info["source"] if launcher_info else "",
+                "launcher_manifest": launcher_info["manifest"] if launcher_info else None,
+                "launcher_runtime_path": launcher_path or None,
+                "wandb": {
+                    **contract["wandb"],
+                    "run_name": wandb_run_name,
+                },
+            }
+            _persist_project_observation(
+                node_run_id,
+                {
+                    **base_record,
+                    "status": "launching",
+                    "status_reason": "launch_requested",
+                },
+                event_name="launch_requested",
+            )
             try:
-                launch_overrides = {
-                    **overrides,
-                    "WANDB_RUN_NAME": run_id,
-                    "CRUCIBLE_REMOTE_NODE": node["name"],
-                    "CRUCIBLE_EXECUTION_PROVIDER": config.provider.type.lower(),
-                    "CRUCIBLE_ENFORCE_CONTRACT": "1",
-                }
-                result = launch_project(node, spec, run_id, overrides=launch_overrides)
-                # Persist for collect_project_results (survives restarts)
-                contract = contract_metadata(config, env={**os.environ, **launch_overrides}, remote_node=node["name"])
-                _save_project_run(run_id, {
-                    "node_name": node["name"],
-                    "ssh_host": node.get("ssh_host", ""),
-                    "ssh_port": node.get("ssh_port", 22),
-                    "workspace_path": spec.workspace,
-                    "project": spec.name,
-                    "pid": result["pid"],
-                    "execution_provider": contract["execution_provider"],
-                    "remote_node": node["name"],
-                    "contract_status": contract["contract_status"],
-                    "wandb": {
-                        **contract["wandb"],
-                        "run_name": run_id,
+                _append_project_run_event(
+                    node_run_id,
+                    "launch_started",
+                    launch_id=launch_id,
+                    project=spec.name,
+                    status="launching",
+                    node_name=node["name"],
+                    details={"variant_name": variant_name},
+                )
+                result = launch_project(node, spec, node_run_id, overrides=launch_overrides)
+                _persist_project_observation(
+                    node_run_id,
+                    {
+                        **base_record,
+                        "pid": result["pid"],
+                        "status": "launched",
+                        "status_reason": None,
+                        "launched_at": utc_now_iso(),
+                        "last_observed_at": utc_now_iso(),
                     },
-                })
+                    event_name="launch_succeeded",
+                    event_details={"pid": result["pid"]},
+                )
                 launched.append({
                     "name": node["name"],
+                    "run_id": node_run_id,
                     "pid": result["pid"],
                     "status": "launched",
+                    "variant_name": variant_name,
                 })
             except Exception as exc:
+                _persist_project_observation(
+                    node_run_id,
+                    {
+                        **base_record,
+                        "status": "failed",
+                        "status_reason": str(exc),
+                        "failure_class": "launch_failed",
+                        "completed_at": utc_now_iso(),
+                    },
+                    event_name="launch_failed",
+                    event_details={"error": str(exc)},
+                )
                 launched.append({
                     "name": node["name"],
+                    "run_id": node_run_id,
                     "pid": None,
                     "status": f"failed: {exc}",
                 })
-
-        return {"run_id": run_id, "nodes": launched}
+        response: dict[str, Any] = {"launch_id": launch_id, "nodes": launched, "variant_name": variant_name}
+        if len(launched) == 1 and launched[0].get("run_id"):
+            response["run_id"] = launched[0]["run_id"]
+        if spec.launcher:
+            response["launcher"] = spec.launcher
+        return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
         return {"error": f"[unexpected] {exc}"}
+
+
+def _observe_project_run(
+    run_info: dict[str, Any],
+    *,
+    persist_result_row: bool,
+    event_name: str,
+) -> dict[str, Any]:
+    """Probe a persisted external project run and update its latest snapshot."""
+    config = _get_config()
+    run_id = run_info["run_id"]
+    if run_info.get("pid") is None and run_info.get("status") in _PROJECT_TERMINAL_STATUSES:
+        latest = _persist_project_observation(
+            run_id,
+            {
+                **run_info,
+                "last_observed_at": utc_now_iso(),
+            },
+            event_name=event_name,
+            event_details={"status": run_info.get("status")},
+        )
+        return {
+            "run_id": run_id,
+            "launch_id": latest.get("launch_id"),
+            "variant_name": latest.get("variant_name"),
+            "status": latest.get("status"),
+            "metrics": latest.get("result"),
+            "log_tail": "",
+            "log_path": latest.get("log_path", ""),
+            "wandb": latest.get("wandb"),
+            "contract_status": latest.get("contract_status", "legacy_missing_contract"),
+            "failure_class": latest.get("failure_class"),
+            "remote_node_state": latest.get("remote_node_state"),
+        }
+
+    from crucible.core.config import load_project_spec
+    from crucible.fleet.inventory import load_nodes_if_exists
+    from crucible.fleet.project_runner import collect_project_result
+
+    nodes = load_nodes_if_exists(config.project_root / config.nodes_file) or []
+    node = next((n for n in nodes if n["name"] == run_info["node_name"]), None)
+    if node is None:
+        node = {
+            "name": run_info["node_name"],
+            "ssh_host": run_info.get("ssh_host", ""),
+            "ssh_port": run_info.get("ssh_port", 22),
+            "state": "unreachable",
+        }
+    node["workspace_path"] = run_info.get("workspace_path", "/workspace/project")
+
+    spec = load_project_spec(run_info["project"], config.project_root)
+    if run_info.get("wandb"):
+        if run_info["wandb"].get("project"):
+            spec.env_set["WANDB_PROJECT"] = run_info["wandb"]["project"]
+        if run_info["wandb"].get("entity"):
+            spec.env_set["WANDB_ENTITY"] = run_info["wandb"]["entity"]
+        if run_info["wandb"].get("mode"):
+            spec.env_set["WANDB_MODE"] = run_info["wandb"]["mode"]
+
+    result = collect_project_result(
+        node=node,
+        spec=spec,
+        run_id=run_id,
+        pid=run_info["pid"],
+        wandb_run_name=(run_info.get("wandb") or {}).get("run_name"),
+        experiment_meta={
+            "name": run_info.get("result_name") or run_info.get("variant_name") or f"{spec.name}-{run_id}",
+            "config": run_info.get("resolved_overrides") or run_info.get("overrides") or {},
+            "project": run_info.get("project", spec.name),
+            "launcher": run_info.get("launcher"),
+            "launcher_source": run_info.get("launcher_source"),
+            "variant_name": run_info.get("variant_name"),
+            "launch_id": run_info.get("launch_id"),
+        },
+        local_logs_dir=config.project_root / config.logs_dir,
+        results_file=(config.project_root / config.fleet_results_file) if persist_result_row else None,
+    )
+    if run_info.get("wandb"):
+        merged_wandb = dict(run_info["wandb"])
+        for key, value in (result.get("wandb") or {}).items():
+            if value is not None:
+                merged_wandb[key] = value
+        result["wandb"] = merged_wandb
+    if run_info.get("execution_provider"):
+        result["execution_provider"] = run_info["execution_provider"]
+    if run_info.get("remote_node"):
+        result["remote_node"] = run_info["remote_node"]
+    if run_info.get("contract_status") and result.get("contract_status") == "compliant":
+        result["contract_status"] = run_info["contract_status"]
+
+    updates = {
+        **run_info,
+        "status": result["status"],
+        "status_reason": result.get("failure_class"),
+        "failure_class": result.get("failure_class"),
+        "last_observed_at": result.get("last_observed_at") or utc_now_iso(),
+        "completed_at": utc_now_iso() if result["status"] in _PROJECT_TERMINAL_STATUSES else None,
+        "result": result.get("result"),
+        "log_path": result.get("log_path"),
+        "wandb": result.get("wandb"),
+        "contract_status": result.get("contract_status"),
+        "remote_node_state": result.get("remote_node_state"),
+    }
+    latest = _persist_project_observation(
+        run_id,
+        updates,
+        event_name=event_name,
+        event_details={
+            "status": result["status"],
+            "failure_class": result.get("failure_class"),
+        },
+    )
+
+    response = {
+        "run_id": run_id,
+        "launch_id": latest.get("launch_id"),
+        "variant_name": latest.get("variant_name"),
+        "status": latest.get("status"),
+        "metrics": result.get("result"),
+        "log_tail": result.get("log_tail", "")[-1000:],
+        "log_path": result.get("log_path", ""),
+        "wandb": result.get("wandb"),
+        "contract_status": result.get("contract_status", "legacy_missing_contract"),
+        "failure_class": result.get("failure_class"),
+        "remote_node_state": result.get("remote_node_state"),
+    }
+    if latest.get("launcher"):
+        response["launcher"] = latest["launcher"]
+    return response
 
 
 def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
@@ -3283,70 +3656,53 @@ def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
     """
     config = _get_config()
     try:
-        from crucible.fleet.project_runner import collect_project_result
+        launch_id = args.get("launch_id")
+        run_id = args.get("run_id")
 
-        run_id = args["run_id"]
+        if launch_id:
+            runs = _load_project_runs(launch_id=launch_id)
+            if not runs:
+                return {"error": f"No runs found for launch_id {launch_id!r}."}
+            collected = [
+                _observe_project_run(run_info, persist_result_row=True, event_name="result_collected")
+                for run_info in runs
+            ]
+            summary: dict[str, int] = {}
+            for row in collected:
+                status = str(row.get("status") or "unknown")
+                summary[status] = summary.get(status, 0) + 1
+            return {"launch_id": launch_id, "runs": collected, "summary": summary}
+
+        if not run_id:
+            return {"error": "Provide either run_id or launch_id."}
+
         run_info = _load_project_run(run_id)
         if run_info is None:
             return {"error": f"No run found for {run_id!r}. Was run_project called?"}
 
-        # Reconstruct node dict from persisted data
-        from crucible.fleet.inventory import load_nodes_if_exists
-        nodes = load_nodes_if_exists(config.project_root / config.nodes_file) or []
-        node = next((n for n in nodes if n["name"] == run_info["node_name"]), None)
-        if node is None:
-            node = {
-                "name": run_info["node_name"],
-                "ssh_host": run_info.get("ssh_host", ""),
-                "ssh_port": run_info.get("ssh_port", 22),
-            }
-        node["workspace_path"] = run_info.get("workspace_path", "/workspace/project")
-
-        from crucible.core.config import load_project_spec
-        spec = load_project_spec(run_info["project"], config.project_root)
-        if run_info.get("wandb"):
-            if run_info["wandb"].get("project"):
-                spec.env_set["WANDB_PROJECT"] = run_info["wandb"]["project"]
-            if run_info["wandb"].get("entity"):
-                spec.env_set["WANDB_ENTITY"] = run_info["wandb"]["entity"]
-            if run_info["wandb"].get("mode"):
-                spec.env_set["WANDB_MODE"] = run_info["wandb"]["mode"]
-
-        result = collect_project_result(
-            node=node,
-            spec=spec,
-            run_id=run_id,
-            pid=run_info["pid"],
-            local_logs_dir=config.project_root / config.logs_dir,
-            results_file=config.project_root / config.fleet_results_file,
-        )
-        if run_info.get("wandb"):
-            merged_wandb = dict(run_info["wandb"])
-            for key, value in (result.get("wandb") or {}).items():
-                if value is not None:
-                    merged_wandb[key] = value
-            result["wandb"] = merged_wandb
-        if run_info.get("execution_provider"):
-            result["execution_provider"] = run_info["execution_provider"]
-        if run_info.get("remote_node"):
-            result["remote_node"] = run_info["remote_node"]
-        if run_info.get("contract_status") and result.get("contract_status") == "compliant":
-            result["contract_status"] = run_info["contract_status"]
-
-        response = {
-            "run_id": run_id,
-            "status": result["status"],
-            "metrics": result.get("result"),
-            "log_tail": result.get("log_tail", "")[-1000:],
-            "log_path": result.get("log_path", ""),
-            "wandb": result.get("wandb"),
-            "contract_status": result.get("contract_status", "legacy_missing_contract"),
-        }
-        if response["status"] != "running" and response["contract_status"] != "compliant":
+        response = _observe_project_run(run_info, persist_result_row=True, event_name="result_collected")
+        if response["status"] not in {"running", "interrupted"} and response["contract_status"] != "compliant":
             response["error"] = (
                 f"Experiment completed without a compliant W&B run "
                 f"(contract_status={response['contract_status']})."
             )
+        return response
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def get_project_run_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Probe and return the latest lifecycle view for an external project run."""
+    try:
+        run_id = args["run_id"]
+        run_info = _load_project_run(run_id)
+        if run_info is None:
+            return {"error": f"No run found for {run_id!r}."}
+
+        response = _observe_project_run(run_info, persist_result_row=False, event_name="status_observed")
+        response["events"] = _load_project_run_events(run_id=run_id, limit=int(args.get("event_limit", 10)))
         return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
@@ -4020,6 +4376,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "bootstrap_project": bootstrap_project_tool,
     "run_project": run_project,
     "collect_project_results": collect_project_results,
+    "get_project_run_status": get_project_run_status,
     # Recipe tools
     "recipe_save": recipe_save,
     "recipe_list": recipe_list,

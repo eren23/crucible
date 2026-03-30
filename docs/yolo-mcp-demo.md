@@ -44,9 +44,10 @@ Use these calls in order:
 4. `fleet_refresh()` until the pod exposes SSH details
 5. `bootstrap_project(project_name="yolo-demo")`
 6. `run_project(project_name="yolo-demo", overrides={...})`
-7. `get_fleet_status(include_metrics=true)` while the run is live
-8. `collect_project_results(run_id=...)`
-9. `get_leaderboard(top_n=3)` after all runs have been collected
+7. `get_project_run_status(run_id=...)` while the run is live
+8. `get_fleet_status(include_metrics=true)` for broader node visibility
+9. `collect_project_results(run_id=...)`
+10. `get_leaderboard(top_n=3)` after all runs have been collected
 
 ## Recommended Run Set
 
@@ -69,6 +70,21 @@ Use `run_project()` overrides like:
   }
 }
 ```
+
+For single-node launches, `run_project()` returns a top-level `run_id`.
+
+For multi-node launches, `run_project()` returns:
+
+```json
+{
+  "launch_id": "yolo-demo_1774870000000000000_ab12cd",
+  "nodes": [
+    {"name": "yolo-demo-01", "run_id": "yolo-demo_1774870000000000000_ab12cd_yolo_demo_01", "pid": 4242, "status": "launched"}
+  ]
+}
+```
+
+Use `get_project_run_status(run_id=...)` to inspect lifecycle state and recent events before collection. Use `collect_project_results(launch_id=...)` when you launched multiple nodes in one batch.
 
 ## Why It Uses Stdout Metrics
 
