@@ -23,7 +23,9 @@ from crucible.fleet.inventory import (
 from crucible.fleet.sync import (
     checked_remote_exec,
     local_git_sha,
+    rsync_base,
     ssh_ok,
+    _run,
     sync_env_file,
     sync_repo,
 )
@@ -183,6 +185,8 @@ def bootstrap_node(
 def bootstrap_project(
     node: dict[str, Any],
     spec: Any,
+    *,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     """Bootstrap an external project on a node. Idempotent and safe to retry.
 
@@ -263,7 +267,37 @@ def bootstrap_project(
                 f'{uv_pfx}{activate} && uv pip install "{pkg}"',
             )
 
-    # 5. Copy local files to workspace
+    # 5. Materialize shared launcher bundles into the external workspace.
+    if spec.launcher:
+        from crucible.core.config import ProjectConfig, load_config
+        from crucible.core.hub import HubStore
+        from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launcher_bundle
+
+        launcher_root = project_root or Path.cwd()
+        cfg_path = launcher_root / "crucible.yaml"
+        cfg = load_config(cfg_path) if cfg_path.exists() else ProjectConfig(project_root=launcher_root)
+        hub_dir = HubStore.resolve_hub_dir(config_hub_dir=getattr(cfg, "hub_dir", ""))
+        launcher = resolve_launcher_bundle(
+            project_root=launcher_root,
+            launcher_name=spec.launcher,
+            hub_dir=hub_dir,
+        )
+        if launcher is None:
+            raise FileNotFoundError(
+                f"Launcher bundle {spec.launcher!r} not found in local plugins, hub installs, or taps."
+            )
+
+        remote_root = launcher_runtime_dir(spec.workspace, spec.launcher)
+        bootstrap_step(node, "launcher_dir", f"mkdir -p {_shlex.quote(remote_root)}")
+        user = node.get("user", "root")
+        remote_dest = f"{user}@{node['ssh_host']}:{remote_root}/"
+        log_step(f"{name}: syncing launcher {spec.launcher!r} from {launcher['source']}")
+        _run(
+            rsync_base(node) + [f"{str(launcher['path'])}/", remote_dest],
+            check=True,
+        )
+
+    # 6. Copy local files to workspace
     if spec.local_files:
         from crucible.fleet.sync import scp_to_node
         log_step(f"{name}: copying {len(spec.local_files)} local files")
@@ -275,7 +309,7 @@ def bootstrap_project(
             remote_path = f"{spec.workspace}/{p.name}"
             scp_to_node(node, str(p), remote_path)
 
-    # 6. Forward env vars
+    # 7. Forward env vars
     log_step(f"{name}: forwarding env vars")
     write_remote_env(
         node,
@@ -284,7 +318,7 @@ def bootstrap_project(
         workspace=spec.workspace,
     )
 
-    # 6. Run setup commands
+    # 8. Run setup commands
     for i, cmd in enumerate(spec.setup):
         log_step(f"{name}: setup command {i + 1}/{len(spec.setup)}")
         bootstrap_step(
@@ -292,7 +326,7 @@ def bootstrap_project(
             f"{uv_pfx}{activate} && source {ws}/.env 2>/dev/null; {cmd}",
         )
 
-    # 7. Mark ready
+    # 9. Mark ready
     node["env_ready"] = True
     node["state"] = "ready"
     node["project"] = spec.name

@@ -31,6 +31,7 @@ from crucible.fleet.inventory import (
     load_nodes,
     load_nodes_if_exists,
     load_nodes_snapshot,
+    merge_node_snapshots,
     next_node_index,
     save_nodes,
     save_nodes_threadsafe,
@@ -123,6 +124,7 @@ class FleetManager:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         """Provision *count* nodes via the configured provider and persist."""
+        existing_nodes = load_nodes_if_exists(self.nodes_file)
         nodes = self.provider.provision(
             count=count,
             name_prefix=name_prefix,
@@ -130,8 +132,9 @@ class FleetManager:
             replacement=replacement,
             **kwargs,
         )
-        save_nodes_threadsafe(self.nodes_file, nodes)
-        return nodes
+        merged = merge_node_snapshots(existing_nodes, nodes)
+        save_nodes_threadsafe(self.nodes_file, merged)
+        return merged
 
     def provision_and_wait(
         self,
@@ -302,8 +305,9 @@ class FleetManager:
         if nodes is None:
             nodes = load_nodes(self.nodes_file)
         refreshed = self.provider.refresh(nodes)
-        save_nodes(self.nodes_file, refreshed)
-        return refreshed
+        merged = merge_node_snapshots(nodes, refreshed)
+        save_nodes(self.nodes_file, merged)
+        return merged
 
     # ------------------------------------------------------------------
     # Replacement helpers

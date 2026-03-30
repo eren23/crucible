@@ -1,0 +1,18 @@
+name: lewm_upstream
+type: launchers
+version: "0.1.0"
+entry: lewm_upstream.py
+description: Upstream LE-WM external-project launcher with reusable slim and compression overrides
+author: eren23
+tags: [world-model, lewm, launcher, external-project, slim, compression]
+parameters:
+  LEWM_MODE: "Selects launcher mode. Supported values: slim, compressed."
+  LEWM_VARIANT: "Human-readable variant name recorded in Crucible metadata and W&B."
+  TRAIN_SCRIPT: "Optional override for the runtime launcher path."
+  SLIM_DIM: "Override wm.embed_dim."
+  SLIM_ENC_DEPTH: "Trim upstream encoder depth before training starts."
+  SLIM_PRED_DEPTH: "Override predictor depth."
+  SLIM_MAX_EPOCHS: "Override trainer.max_epochs."
+  SLIM_BATCH_SIZE: "Override loader.batch_size."
+  SLIM_NUM_WORKERS: "Override loader.num_workers and cfg.num_workers."
+  SLIM_SIGREG_PROJ: "Override loss.sigreg.kwargs.num_proj."

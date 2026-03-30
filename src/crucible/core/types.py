@@ -69,7 +69,7 @@ class ExperimentConfig(TypedDict, total=False):
 
 
 class ExperimentResult(TypedDict, total=False):
-    """Result from a completed (or failed) experiment."""
+    """Result or live snapshot for an experiment."""
     id: str
     name: str
     timestamp: str
@@ -78,7 +78,7 @@ class ExperimentResult(TypedDict, total=False):
     config: dict[str, str]
     result: dict[str, Any] | None  # metric keys depend on training script output
     model_bytes: int | None
-    status: str  # completed | partial_recoverable | failed | timeout | killed
+    status: str  # launching | launched | running | completed | partial_recoverable | failed | timeout | killed | interrupted
     tags: list[str]
     error: str | None
     failure_class: str | None
@@ -187,6 +187,53 @@ class ExperimentNote(TypedDict, total=False):
     created_at: str
     file_path: str
     body: str
+
+
+class ProjectRunRecord(TypedDict, total=False):
+    """Latest known snapshot for an external project run."""
+    run_id: str
+    launch_id: str
+    project: str
+    name: str
+    variant_name: str
+    node_name: str
+    remote_node: str
+    pid: int | None
+    status: str  # launching | launched | running | completed | failed | timeout | killed | interrupted
+    status_reason: str | None
+    failure_class: str | None
+    launched_at: str | None
+    last_observed_at: str | None
+    completed_at: str | None
+    updated_at: str
+    ssh_host: str | None
+    ssh_port: int | None
+    workspace_path: str | None
+    launcher: str | None
+    launcher_source: str | None
+    launcher_runtime_path: str | None
+    resolved_overrides: dict[str, str]
+    result: dict[str, Any] | None
+    log_path: str | None
+    execution_provider: str | None
+    contract_status: str | None
+    wandb: dict[str, Any] | None
+    remote_node_state: str | None
+
+
+class ProjectRunEvent(TypedDict, total=False):
+    """Append-only lifecycle event for an external project run."""
+    ts: str
+    run_id: str
+    launch_id: str | None
+    project: str | None
+    event: str
+    status: str | None
+    node_name: str | None
+    reason: str | None
+    failure_class: str | None
+    pid: int | None
+    details: dict[str, Any] | None
 
 
 # ---------------------------------------------------------------------------

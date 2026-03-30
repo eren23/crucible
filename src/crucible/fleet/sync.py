@@ -39,6 +39,7 @@ def ssh_base(node: dict[str, Any]) -> list[str]:
     return [
         "ssh",
         "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
         "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
         "-i", ssh_key,
@@ -55,6 +56,7 @@ def scp_to_node(node: dict[str, Any], local_path: str, remote_path: str) -> None
     cmd = [
         "scp",
         "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
         "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
         "-i", ssh_key,
@@ -71,6 +73,7 @@ def rsync_base(node: dict[str, Any]) -> list[str]:
     ssh_cmd = " ".join([
         "ssh",
         "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
         "-o", "BatchMode=yes",
         "-o", f"ConnectTimeout={node.get('connect_timeout', 12)}",
         "-i", ssh_key,

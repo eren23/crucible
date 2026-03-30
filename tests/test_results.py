@@ -70,6 +70,22 @@ class TestLoadResults:
         assert len(results) == 1
         assert results[0]["name"] == "fleet_1"
 
+    def test_load_project_runs(self, tmp_path):
+        cfg = _make_cfg(tmp_path)
+        project_runs = tmp_path / ".crucible" / "projects" / "runs.jsonl"
+        _write_results(project_runs, [{
+            "run_id": "proj_1",
+            "project": "demo",
+            "variant_name": "lewm_slim_48d_2e_2p",
+            "status": "launched",
+            "resolved_overrides": {"SLIM_DIM": "48"},
+        }])
+        results = load_results(cfg, source="project")
+        assert len(results) == 1
+        assert results[0]["id"] == "proj_1"
+        assert results[0]["name"] == "lewm_slim_48d_2e_2p"
+        assert results[0]["config"]["SLIM_DIM"] == "48"
+
     def test_load_missing_file_returns_empty(self, tmp_path):
         cfg = _make_cfg(tmp_path)
         results = load_results(cfg, source="local")
@@ -85,26 +101,54 @@ class TestMergedResults:
         cfg = _make_cfg(tmp_path)
         _write_results(tmp_path / "experiments.jsonl", [_make_result("local_exp")])
         _write_results(tmp_path / "fleet.jsonl", [_make_result("fleet_exp")])
+        _write_results(tmp_path / ".crucible" / "projects" / "runs.jsonl", [{
+            "run_id": "project_run_1",
+            "project": "demo",
+            "variant_name": "project_exp",
+            "status": "launched",
+        }])
 
         merged = merged_results(cfg)
         names = {r["name"] for r in merged}
         assert "local_exp" in names
         assert "fleet_exp" in names
+        assert "project_exp" in names
 
     def test_dedup_by_name(self, tmp_path):
         cfg = _make_cfg(tmp_path)
         _write_results(tmp_path / "experiments.jsonl", [
-            _make_result("shared", val_bpb=2.0),
+            {**_make_result("shared", val_bpb=2.0), "id": "local_shared"},
+        ])
+        _write_results(tmp_path / ".crucible" / "projects" / "runs.jsonl", [
+            {
+                "run_id": "run_shared",
+                "project": "demo",
+                "variant_name": "shared",
+                "status": "launched",
+            },
         ])
         _write_results(tmp_path / "fleet.jsonl", [
-            _make_result("shared", val_bpb=1.5),
+            {"id": "run_shared", **_make_result("shared", val_bpb=1.5)},
         ])
 
         merged = merged_results(cfg)
-        # Latest (fleet) should win since it comes after local in the list
+        # Latest (fleet) should win since it comes after project in the list and shares the same run id.
         shared = [r for r in merged if r["name"] == "shared"]
-        assert len(shared) == 1
-        assert shared[0]["result"]["val_bpb"] == 1.5
+        assert len(shared) == 2
+        fleet = [r for r in shared if r["id"] == "run_shared"]
+        assert len(fleet) == 1
+        assert fleet[0]["result"]["val_bpb"] == 1.5
+
+    def test_project_record_latest_write_wins(self, tmp_path):
+        cfg = _make_cfg(tmp_path)
+        _write_results(tmp_path / ".crucible" / "projects" / "runs.jsonl", [
+            {"run_id": "proj_1", "project": "demo", "variant_name": "demo_a", "status": "launched"},
+            {"run_id": "proj_1", "project": "demo", "variant_name": "demo_a", "status": "completed", "result": {"val_bpb": 1.1}},
+        ])
+        merged = merged_results(cfg)
+        assert len(merged) == 1
+        assert merged[0]["status"] == "completed"
+        assert merged[0]["result"]["val_bpb"] == 1.1
 
     def test_empty_sources(self, tmp_path):
         cfg = _make_cfg(tmp_path)

@@ -48,6 +48,7 @@ class TestScpToNode:
         assert cmd[p_idx + 1] == "2222"
         assert "-i" in cmd
         assert "StrictHostKeyChecking=no" in cmd
+        assert "UserKnownHostsFile=/dev/null" in cmd
         assert "BatchMode=yes" in cmd
         assert "/tmp/local_file.py" in cmd
         assert "ubuntu@10.0.0.1:/workspace/project/file.py" in cmd

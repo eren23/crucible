@@ -258,6 +258,31 @@ class TestInstall:
         result = tap_manager.install("lion", tap="specific-tap")
         assert result["tap"] == "specific-tap"
 
+    def test_install_launcher_copies_bundle_directory(self, tap_manager: TapManager, tmp_path: Path):
+        tap = _create_local_tap(
+            tmp_path,
+            name="launcher-tap",
+            plugins=[{
+                "type": "launchers",
+                "name": "demo_launcher",
+                "version": "0.1.0",
+                "description": "Demo launcher bundle",
+                "author": "test",
+                "tags": ["launcher"],
+                "code": "print('launcher')\n",
+            }],
+        )
+        manifest_path = tap / "launchers" / "demo_launcher" / "plugin.yaml"
+        manifest = yaml.safe_load(manifest_path.read_text())
+        manifest["entry"] = "demo_launcher.py"
+        manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+        tap_manager.add_tap(str(tap), name="launcher-tap")
+        result = tap_manager.install("demo_launcher")
+        assert result["type"] == "launchers"
+        assert (tap_manager._plugins_dir / "launchers" / "demo_launcher" / "plugin.yaml").exists()
+        assert (tap_manager._plugins_dir / "launchers" / "demo_launcher" / "demo_launcher.py").exists()
+
 
 class TestUninstall:
     def test_uninstall_removes_file_and_record(self, tap_manager: TapManager, local_tap: Path):
@@ -272,6 +297,27 @@ class TestUninstall:
     def test_uninstall_not_installed_raises(self, tap_manager: TapManager):
         with pytest.raises(TapError, match="not installed"):
             tap_manager.uninstall("ghost")
+
+    def test_uninstall_launcher_removes_directory(self, tap_manager: TapManager, tmp_path: Path):
+        tap = _create_local_tap(
+            tmp_path,
+            name="launcher-uninstall",
+            plugins=[{
+                "type": "launchers",
+                "name": "bundle_launcher",
+                "version": "0.1.0",
+                "description": "Bundle launcher",
+                "author": "test",
+                "tags": ["launcher"],
+                "code": "print('bundle')\n",
+            }],
+        )
+        tap_manager.add_tap(str(tap), name="launcher-uninstall")
+        tap_manager.install("bundle_launcher")
+        assert (tap_manager._plugins_dir / "launchers" / "bundle_launcher").exists()
+
+        tap_manager.uninstall("bundle_launcher")
+        assert not (tap_manager._plugins_dir / "launchers" / "bundle_launcher").exists()
 
 
 class TestListInstalled:
@@ -349,6 +395,26 @@ class TestPublish:
         tap_manager.add_tap(str(local_tap), name="badtype")
         with pytest.raises(TapError, match="Invalid plugin type"):
             tap_manager.publish("x", "invalid_type", "badtype", project_root=tmp_path)
+
+    def test_publish_launcher_bundle(self, tap_manager: TapManager, local_tap: Path, tmp_path: Path):
+        tap_manager.add_tap(str(local_tap), name="launcher-publish")
+        project = tmp_path / "project_launcher"
+        bundle_dir = project / ".crucible" / "plugins" / "launchers" / "demo_launcher"
+        bundle_dir.mkdir(parents=True)
+        (bundle_dir / "demo_launcher.py").write_text("print('ok')\n", encoding="utf-8")
+        (bundle_dir / "plugin.yaml").write_text(
+            yaml.safe_dump({
+                "name": "demo_launcher",
+                "type": "launchers",
+                "version": "0.1.0",
+                "entry": "demo_launcher.py",
+            }),
+            encoding="utf-8",
+        )
+
+        result = tap_manager.publish("demo_launcher", "launchers", "launcher-publish", project_root=project)
+        assert result["status"] == "published"
+        assert (tap_manager._taps_dir / "launcher-publish" / "launchers" / "demo_launcher" / "demo_launcher.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -444,5 +510,6 @@ class TestValidPluginTypes:
             "optimizers", "schedulers", "callbacks", "loggers",
             "providers", "architectures", "data_adapters", "objectives",
             "block_types", "stack_patterns", "augmentations", "activations",
+            "launchers",
         }
         assert VALID_PLUGIN_TYPES == expected

@@ -38,6 +38,7 @@ class TestSshBase:
         assert "ssh" in cmd
         assert "-o" in cmd
         assert "StrictHostKeyChecking=no" in cmd
+        assert "UserKnownHostsFile=/dev/null" in cmd
         assert "BatchMode=yes" in cmd
         assert "root@10.0.0.1" in cmd
         assert "-p" in cmd
@@ -65,6 +66,7 @@ class TestRsyncBase:
         e_idx = cmd.index("-e")
         ssh_cmd = cmd[e_idx + 1]
         assert "StrictHostKeyChecking=no" in ssh_cmd
+        assert "UserKnownHostsFile=/dev/null" in ssh_cmd
 
 
 class TestSyncRepo:
