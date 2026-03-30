@@ -16,6 +16,7 @@ class ProviderConfig:
     ssh_key: str = "~/.ssh/id_ed25519_runpod"
     image: str = ""
     gpu_types: list[str] = field(default_factory=list)
+    interruptible: bool = True
     defaults: dict[str, Any] = field(default_factory=dict)
 
 
@@ -123,6 +124,7 @@ def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
         ssh_key=raw.get("ssh_key", "~/.ssh/id_ed25519"),
         image=raw.get("image", ""),
         gpu_types=raw.get("gpu_types", []),
+        interruptible=raw.get("interruptible", True),
         defaults=raw.get("defaults", {}),
     )
 
@@ -258,6 +260,7 @@ class PodOverrides:
     gpu_type: str = ""
     container_disk: int = 0
     volume_disk: int = 0
+    interruptible: bool | None = None
 
 
 @dataclass
@@ -283,10 +286,12 @@ class ProjectSpec:
     launcher: str = ""                       # reusable launcher bundle name
     launcher_entry: str = ""                # entry script inside launcher bundle
     local_files: list[str] = field(default_factory=list)  # local paths to scp to workspace
+    system_packages: list[str] = field(default_factory=list)  # extra OS packages for bootstrap
     setup: list[str] = field(default_factory=list)
     setup_timeout: int = 3600
     train: str = ""
     timeout: int = 0                         # training timeout, 0 = no limit
+    launch_timeout: int = 300               # SSH timeout for detached launch
     env_forward: list[str] = field(default_factory=list)
     env_set: dict[str, str] = field(default_factory=dict)
     pod: PodOverrides = field(default_factory=PodOverrides)
@@ -301,6 +306,7 @@ def _build_pod_overrides(raw: dict[str, Any]) -> PodOverrides:
         gpu_type=raw.get("gpu_type", ""),
         container_disk=raw.get("container_disk", 0),
         volume_disk=raw.get("volume_disk", 0),
+        interruptible=raw.get("interruptible"),
     )
 
 
@@ -334,10 +340,12 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         launcher=raw.get("launcher", ""),
         launcher_entry=raw.get("launcher_entry", ""),
         local_files=raw.get("local_files", []),
+        system_packages=raw.get("system_packages", []),
         setup=raw.get("setup", []),
         setup_timeout=raw.get("setup_timeout", 3600),
         train=raw.get("train", ""),
         timeout=raw.get("timeout", 0),
+        launch_timeout=raw.get("launch_timeout", 300),
         env_forward=raw.get("env_forward", []),
         env_set=raw.get("env_set", {}),
         pod=_build_pod_overrides(raw.get("pod", {})),
@@ -392,6 +400,7 @@ provider:
   ssh_key: ~/.ssh/id_ed25519_runpod
   # image: runpod/pytorch:...            # container image (RunPod only)
   # gpu_types: ["NVIDIA GeForce RTX 4090"]
+  # interruptible: true                  # false = secure/on-demand RunPod pods
 
 # Data pipeline
 data:

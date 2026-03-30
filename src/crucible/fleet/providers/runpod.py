@@ -174,6 +174,12 @@ def build_pod_payload(
     ports: list[str],
 ) -> dict[str, Any]:
     """Construct the JSON body for a POST /pods request."""
+    if container_disk_gb < 0 or volume_gb < 0:
+        raise FleetError("RunPod disk sizes must be non-negative.")
+    if volume_gb and volume_gb < container_disk_gb:
+        raise FleetError(
+            "RunPod volume size must be greater than or equal to container disk size.",
+        )
     return {
         "allowedCudaVersions": ["12.8"],
         "cloudType": cloud_type,
@@ -344,6 +350,18 @@ class RunPodProvider(FleetProvider):
         if isinstance(eff_gpu_type_ids, str):
             eff_gpu_type_ids = [eff_gpu_type_ids]
         eff_image = kwargs.pop("image_name", self.image_name)
+        eff_interruptible = bool(kwargs.pop("interruptible", self.interruptible))
+        eff_cloud_types = kwargs.pop("cloud_types", None)
+        if eff_cloud_types is None:
+            eff_cloud_types = (
+                list(self.cloud_types)
+                if eff_interruptible == self.interruptible
+                else default_cloud_types(interruptible=eff_interruptible)
+            )
+        else:
+            eff_cloud_types = list(eff_cloud_types)
+        if not eff_interruptible:
+            eff_cloud_types = [ct for ct in eff_cloud_types if str(ct).upper() != "COMMUNITY"] or ["SECURE"]
 
         created: list[dict[str, Any]] = []
         for index in range(start_index, start_index + count):
@@ -351,14 +369,14 @@ class RunPodProvider(FleetProvider):
             name = f"{name_prefix}-{index:02d}"
             last_error: str | None = None
             log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB)")
-            for cloud_type in self.cloud_types:
+            for cloud_type in eff_cloud_types:
                 try:
                     raw = create_api_pod(
                         name=name,
                         gpu_type_ids=eff_gpu_type_ids or self.gpu_type_ids,
                         image_name=eff_image,
                         cloud_type=cloud_type,
-                        interruptible=self.interruptible,
+                        interruptible=eff_interruptible,
                         container_disk_gb=eff_container_disk,
                         volume_gb=eff_volume_gb,
                         volume_mount_path=self.volume_mount_path,

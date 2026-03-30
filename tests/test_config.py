@@ -69,6 +69,7 @@ class TestProjectConfigDefaults:
         cfg = ProjectConfig()
         assert isinstance(cfg.provider, ProviderConfig)
         assert cfg.provider.type == "runpod"
+        assert cfg.provider.interruptible is True
 
     def test_default_training_is_empty_list(self):
         cfg = ProjectConfig()
@@ -125,13 +126,14 @@ class TestLoadConfig:
     def test_load_from_yaml_file(self, tmp_path):
         yaml_path = tmp_path / "crucible.yaml"
         yaml_path.write_text(
-            "name: test-project\nversion: '0.2.0'\nprovider:\n  type: ssh\n",
+            "name: test-project\nversion: '0.2.0'\nprovider:\n  type: ssh\n  interruptible: false\n",
             encoding="utf-8",
         )
         cfg = load_config(yaml_path)
         assert cfg.name == "test-project"
         assert cfg.version == "0.2.0"
         assert cfg.provider.type == "ssh"
+        assert cfg.provider.interruptible is False
 
     def test_project_root_set_from_yaml_parent(self, tmp_path):
         yaml_path = tmp_path / "crucible.yaml"

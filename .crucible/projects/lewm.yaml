@@ -8,6 +8,7 @@ pod:
   gpu_type: "NVIDIA GeForce RTX 4090"
   container_disk: 40
   volume_disk: 80
+  interruptible: false
 
 python: "3.10"
 
@@ -24,12 +25,13 @@ launcher: lewm_upstream
 launcher_entry: lewm_upstream.py
 
 setup:
-  - "export STABLEWM_HOME=/workspace/stable-wm-data && mkdir -p $STABLEWM_HOME && test -f $STABLEWM_HOME/pusht_expert_train.h5 && echo 'data exists' || python3 -c \"from huggingface_hub import hf_hub_download; import zstandard,os; os.makedirs('/workspace/stable-wm-data',exist_ok=True); p=hf_hub_download('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset',cache_dir='/workspace/hf_cache'); f=open(p,'rb'); o=open('/workspace/stable-wm-data/pusht_expert_train.h5','wb'); zstandard.ZstdDecompressor().copy_stream(f,o); f.close(); o.close(); os.remove(p); print('downloaded')\""
-setup_timeout: 900
+  - "export STABLEWM_HOME=/root/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/root/stable-wm-data',exist_ok=True); final=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\""
+setup_timeout: 3600
 
 # TRAIN_SCRIPT defaults to the resolved launcher runtime path copied by bootstrap_project.
-train: "LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=/workspace/stable-wm-data python ${TRAIN_SCRIPT:-.crucible/launchers/lewm_upstream/lewm_upstream.py} data=pusht trainer.max_epochs=100 wandb.enabled=true wandb.config.entity=eren23 wandb.config.project=crucible-lewm"
+train: "LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=${STABLEWM_HOME:-/root/stable-wm-data} python ${TRAIN_SCRIPT:-.crucible/launchers/lewm_upstream/lewm_upstream.py} data=pusht trainer.max_epochs=100 wandb.enabled=true wandb.config.entity=eren23 wandb.config.project=crucible-lewm"
 timeout: 14400
+launch_timeout: 300
 
 env_forward:
   - WANDB_API_KEY
@@ -52,7 +54,7 @@ env_forward:
 env_set:
   WANDB_PROJECT: crucible-lewm
   WANDB_MODE: online
-  STABLEWM_HOME: /workspace/stable-wm-data
+  STABLEWM_HOME: /root/stable-wm-data
 
 metrics:
   source: wandb

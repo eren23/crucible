@@ -33,12 +33,14 @@ class TestLoadProjectSpec:
             "install": ["numpy", "torch"],
             "install_torch": "torch==2.6.0",
             "install_flags": "--index-url https://example.com",
+            "system_packages": ["ffmpeg", "git"],
             "setup": ["echo hello"],
             "train": "python train.py",
             "timeout": 7200,
+            "launch_timeout": 480,
             "env_forward": ["WANDB_API_KEY"],
             "env_set": {"FOO": "bar"},
-            "pod": {"gpu_type": "A100", "container_disk": 40},
+            "pod": {"gpu_type": "A100", "container_disk": 40, "interruptible": False},
             "metrics": {"source": "wandb", "primary": "val_loss"},
         })
         spec = load_project_spec("myproj", tmp_path)
@@ -49,12 +51,15 @@ class TestLoadProjectSpec:
         assert spec.python == "3.11"
         assert spec.install == ["numpy", "torch"]
         assert spec.install_torch == "torch==2.6.0"
+        assert spec.system_packages == ["ffmpeg", "git"]
         assert spec.train == "python train.py"
         assert spec.timeout == 7200
+        assert spec.launch_timeout == 480
         assert spec.env_forward == ["WANDB_API_KEY"]
         assert spec.env_set == {"FOO": "bar"}
         assert spec.pod.gpu_type == "A100"
         assert spec.pod.container_disk == 40
+        assert spec.pod.interruptible is False
         assert spec.metrics.source == "wandb"
         assert spec.metrics.primary == "val_loss"
 
@@ -65,7 +70,10 @@ class TestLoadProjectSpec:
         assert spec.branch == "main"
         assert spec.shallow is True
         assert spec.install == []
+        assert spec.system_packages == []
         assert spec.pod.image == ""
+        assert spec.pod.interruptible is None
+        assert spec.launch_timeout == 300
         assert spec.metrics.direction == "minimize"
 
     def test_load_missing_spec(self, tmp_path):
@@ -107,6 +115,7 @@ class TestDefaults:
         assert p.image == ""
         assert p.gpu_type == ""
         assert p.container_disk == 0
+        assert p.interruptible is None
 
     def test_project_metrics_defaults(self):
         m = ProjectMetrics()

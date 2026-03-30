@@ -7,9 +7,11 @@ import yaml
 
 from crucible.mcp.tools import (
     _make_launch_id,
+    bootstrap_project_tool,
     collect_project_results,
     get_project_run_status,
     list_projects,
+    provision_project,
 )
 
 
@@ -109,6 +111,89 @@ class TestProjectRunStatus:
 
         assert result["status"] == "running"
         assert [event["event"] for event in result["events"]] == ["launch_requested", "launch_succeeded"]
+
+
+class TestProvisionProject:
+    def test_uses_next_index_and_interruptible_override(self, tmp_path):
+        from crucible.core.config import ProjectConfig
+
+        cfg = ProjectConfig(project_root=tmp_path)
+        _write_spec(
+            tmp_path,
+            "lewm",
+            {
+                "name": "lewm",
+                "repo": "https://example.com/lewm.git",
+                "pod": {
+                    "gpu_type": "NVIDIA GeForce RTX 4090",
+                    "container_disk": 40,
+                    "volume_disk": 80,
+                    "interruptible": False,
+                },
+            },
+        )
+        (tmp_path / cfg.nodes_file).write_text(
+            '[{"name":"lewm-01","node_id":"n1"},{"name":"lewm-04","node_id":"n4"}]',
+            encoding="utf-8",
+        )
+        merged_nodes = [
+            {"name": "lewm-01", "node_id": "n1"},
+            {"name": "lewm-04", "node_id": "n4"},
+            {"name": "lewm-05", "node_id": "n5"},
+        ]
+
+        with patch("crucible.mcp.tools._get_config", return_value=cfg):
+            with patch("crucible.mcp.tools._project_contract_env", return_value={}):
+                with patch("crucible.fleet.manager.FleetManager.provision", return_value=merged_nodes) as mock_provision:
+                    result = provision_project({"project_name": "lewm", "count": 1})
+
+        assert result["created"] == 1
+        assert result["new_nodes"] == [{"name": "lewm-05", "node_id": "n5"}]
+        mock_provision.assert_called_once_with(
+            count=1,
+            name_prefix="lewm",
+            start_index=5,
+            gpu_type_id="NVIDIA GeForce RTX 4090",
+            container_disk_gb=40,
+            volume_gb=80,
+            interruptible=False,
+        )
+
+
+class TestBootstrapProjectTool:
+    def test_includes_node_error_details(self, tmp_path):
+        from crucible.core.config import ProjectConfig
+
+        cfg = ProjectConfig(project_root=tmp_path)
+        _write_spec(
+            tmp_path,
+            "demo",
+            {
+                "name": "demo",
+                "repo": "https://example.com/demo.git",
+            },
+        )
+        (tmp_path / cfg.nodes_file).write_text(
+            '[{"name":"demo-01","ssh_host":"1.2.3.4","project":"demo"}]',
+            encoding="utf-8",
+        )
+
+        with patch("crucible.mcp.tools._get_config", return_value=cfg):
+            with patch(
+                "crucible.fleet.bootstrap.bootstrap_project",
+                side_effect=RuntimeError("bootstrap:system_tools failed: unsupported_package_manager"),
+            ):
+                result = bootstrap_project_tool({"project_name": "demo"})
+
+        assert result["bootstrapped"] == 0
+        assert result["nodes"] == [
+            {
+                "name": "demo-01",
+                "state": "boot_failed",
+                "project": "demo",
+                "error": "bootstrap:system_tools failed: unsupported_package_manager",
+            }
+        ]
 
 
 class TestRunPersistence:

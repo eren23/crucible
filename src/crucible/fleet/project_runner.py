@@ -71,7 +71,12 @@ def launch_project(
     )
 
     log_step(f"{name}: launching {spec.name!r} training (run_id={run_id})")
-    proc = remote_exec(node, cmd, check=False)
+    proc = remote_exec(
+        node,
+        cmd,
+        check=False,
+        timeout=max(int(getattr(spec, "launch_timeout", 300) or 300), 1),
+    )
 
     if proc.returncode != 0:
         raise RunnerError(
