@@ -174,29 +174,71 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
         slim_details = _apply_slim_overrides(cfg)
         encoder_depth = slim_details["encoder_depth"]
 
-    dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
-    transforms = [get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)]
+    batch_size = int(cfg.loader.batch_size)
+    num_workers = int(cfg.loader.num_workers)
 
-    with open_dict(cfg):
-        for col in cfg.data.dataset.keys_to_load:
-            if col.startswith("pixels"):
-                continue
-            normalizer = get_column_normalizer(dataset, col, col)
-            transforms.append(normalizer)
-            setattr(cfg.wm, f"{col}_dim", dataset.get_dim(col))
+    precomputed = os.environ.get("PRECOMPUTED_DATASET", "")
+    if precomputed:
+        # Fast path: load precomputed HF dataset (pre-resized, pre-normalized)
+        from datasets import load_dataset as _load_hf
+        _hf_ds = _load_hf(precomputed)
+        _hf_ds.set_format("torch")
+        train_set = _hf_ds["train"]
+        val_set = _hf_ds["validation"] if "validation" in _hf_ds else _hf_ds["test"]
 
-    transform = spt.data.transforms.Compose(*transforms)
-    dataset.transform = transform
+        # Still need column dims in cfg.wm for model construction
+        with open_dict(cfg):
+            for col in cfg.data.dataset.keys_to_load:
+                if col.startswith("pixels"):
+                    continue
+                # Infer dim from the first sample
+                sample = train_set[0]
+                if col in sample:
+                    dim = sample[col].shape[-1] if sample[col].dim() > 1 else 1
+                    setattr(cfg.wm, f"{col}_dim", dim)
 
-    rnd_gen = torch.Generator().manual_seed(cfg.seed)
-    train_set, val_set = spt.data.random_split(
-        dataset,
-        lengths=[cfg.train_split, 1 - cfg.train_split],
-        generator=rnd_gen,
-    )
+        train = torch.utils.data.DataLoader(
+            train_set, batch_size=batch_size, shuffle=True, drop_last=True,
+            num_workers=num_workers, pin_memory=True,
+            prefetch_factor=4 if num_workers > 0 else None,
+            persistent_workers=num_workers > 0,
+        )
+        val = torch.utils.data.DataLoader(
+            val_set, batch_size=batch_size, shuffle=False, drop_last=False,
+            num_workers=num_workers, pin_memory=True,
+            prefetch_factor=4 if num_workers > 0 else None,
+            persistent_workers=num_workers > 0,
+        )
+    else:
+        # Original HDF5 path
+        dataset = swm.data.HDF5Dataset(**cfg.data.dataset, transform=None)
+        transforms = [get_img_preprocessor(source="pixels", target="pixels", img_size=cfg.img_size)]
 
-    train = torch.utils.data.DataLoader(train_set, **cfg.loader, shuffle=True, drop_last=True, generator=rnd_gen)
-    val = torch.utils.data.DataLoader(val_set, **cfg.loader, shuffle=False, drop_last=False)
+        with open_dict(cfg):
+            for col in cfg.data.dataset.keys_to_load:
+                if col.startswith("pixels"):
+                    continue
+                normalizer = get_column_normalizer(dataset, col, col)
+                transforms.append(normalizer)
+                setattr(cfg.wm, f"{col}_dim", dataset.get_dim(col))
+
+        transform = spt.data.transforms.Compose(*transforms)
+        dataset.transform = transform
+
+        rnd_gen = torch.Generator().manual_seed(cfg.seed)
+        train_set, val_set = spt.data.random_split(
+            dataset,
+            lengths=[cfg.train_split, 1 - cfg.train_split],
+            generator=rnd_gen,
+        )
+
+        train = torch.utils.data.DataLoader(
+            train_set, **cfg.loader, shuffle=True, drop_last=True,
+            generator=rnd_gen,
+        )
+        val = torch.utils.data.DataLoader(
+            val_set, **cfg.loader, shuffle=False, drop_last=False,
+        )
 
     encoder = spt.backbone.utils.vit_hf(
         cfg.encoder_scale,
@@ -268,7 +310,13 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
         output["sigreg_loss"] = self.sigreg(emb.transpose(0, 1))
         output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]
         losses = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
-        self.log_dict(losses, on_step=True, sync_dist=True)
+        is_val = stage == "validate"
+        self.log_dict(
+            losses,
+            on_step=not is_val,
+            on_epoch=is_val,
+            sync_dist=True,
+        )
         return output
 
     data_module = spt.data.DataModule(train=train, val=val)

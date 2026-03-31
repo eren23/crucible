@@ -5,9 +5,9 @@ shallow: true
 workspace: /workspace/le-wm
 
 pod:
-  gpu_type: "NVIDIA GeForce RTX 4090"
-  container_disk: 40
-  volume_disk: 80
+  gpu_type: "NVIDIA GeForce RTX 3090"
+  container_disk: 80
+  volume_disk: 120
   interruptible: false
 
 python: "3.10"
@@ -50,11 +50,15 @@ env_forward:
   - SLIM_NUM_WORKERS
   - SLIM_SIGREG_PROJ
   - TRAIN_SCRIPT
+  - PRECOMPUTED_DATASET
+  - HF_PUSH_REPO
+  - HF_SAVE_DIR
 
 env_set:
   WANDB_PROJECT: crucible-lewm
   WANDB_MODE: online
   STABLEWM_HOME: /root/stable-wm-data
+  SLIM_BATCH_SIZE: "256"
 
 metrics:
   source: wandb
