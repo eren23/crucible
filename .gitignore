@@ -92,3 +92,7 @@ CLAUDE.md
 notebooks/
 wandb/
 videos
+
+# gsd / local agent tooling
+.gsd/
+.bg-shell/
