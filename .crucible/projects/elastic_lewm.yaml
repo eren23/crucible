@@ -1,4 +1,4 @@
-name: lewm
+name: elastic_lewm
 repo: https://github.com/lucas-maes/le-wm.git
 branch: main
 shallow: true
@@ -21,15 +21,15 @@ install:
 install_torch: "torch==2.6.0 torchvision==0.21.0"
 install_flags: "--index-url https://download.pytorch.org/whl/cu124"
 
-launcher: lewm_upstream
-launcher_entry: lewm_upstream.py
+launcher: elastic_lewm_upstream
+launcher_entry: elastic_lewm_upstream.py
 
 setup:
   - "export STABLEWM_HOME=/root/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/root/stable-wm-data',exist_ok=True); final=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\""
 setup_timeout: 3600
 
 # TRAIN_SCRIPT defaults to the resolved launcher runtime path copied by bootstrap_project.
-train: "LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=${STABLEWM_HOME:-/root/stable-wm-data} python ${TRAIN_SCRIPT:-.crucible/launchers/lewm_upstream/lewm_upstream.py} data=pusht trainer.max_epochs=100 wandb.enabled=true wandb.config.entity=eren23 wandb.config.project=crucible-lewm"
+train: "LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=${STABLEWM_HOME:-/root/stable-wm-data} python ${TRAIN_SCRIPT:-.crucible/launchers/elastic_lewm_upstream/elastic_lewm_upstream.py} data=pusht trainer.max_epochs=100 wandb.enabled=true wandb.config.entity=eren23 wandb.config.project=crucible-lewm"
 timeout: 14400
 launch_timeout: 300
 
@@ -50,9 +50,17 @@ env_forward:
   - SLIM_NUM_WORKERS
   - SLIM_SIGREG_PROJ
   - TRAIN_SCRIPT
+  # Elastic-specific env vars
+  - ELASTIC_NUM_BUDGETS
+  - ELASTIC_WARMUP_FRACTION
+  - ELASTIC_KD_WEIGHT
+  - ELASTIC_ROUTER_COST
+  - ELASTIC_ROUTER_ENTROPY
+  - ELASTIC_GUMBEL_TEMP
+  - ELASTIC_GUMBEL_TEMP_MIN
+  - ELASTIC_FIXED_BUDGET
+  - ELASTIC_SANDWICH
   - PRECOMPUTED_DATASET
-  - HF_PUSH_REPO
-  - HF_SAVE_DIR
 
 env_set:
   WANDB_PROJECT: crucible-lewm

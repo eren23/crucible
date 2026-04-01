@@ -61,14 +61,27 @@ final_model.*
 !/.crucible/projects/
 /.crucible/projects/*
 !/.crucible/projects/lewm.yaml
+!/.crucible/projects/hybrid_lewm.yaml
+!/.crucible/projects/elastic_lewm.yaml
 !/.crucible/plugins/
 /.crucible/plugins/*
+!/.crucible/plugins/architectures/
+/.crucible/plugins/architectures/*
+!/.crucible/plugins/architectures/hybrid_lewm.py
+!/.crucible/plugins/architectures/elastic_lewm.py
 !/.crucible/plugins/launchers/
 /.crucible/plugins/launchers/*
 !/.crucible/plugins/launchers/lewm_upstream/
 /.crucible/plugins/launchers/lewm_upstream/*
 !/.crucible/plugins/launchers/lewm_upstream/plugin.yaml
 !/.crucible/plugins/launchers/lewm_upstream/lewm_upstream.py
+!/.crucible/plugins/launchers/lewm_upstream/precompute_pusht.py
+!/.crucible/plugins/launchers/hybrid_lewm_upstream/
+/.crucible/plugins/launchers/hybrid_lewm_upstream/*
+!/.crucible/plugins/launchers/hybrid_lewm_upstream/hybrid_lewm_upstream.py
+!/.crucible/plugins/launchers/elastic_lewm_upstream/
+/.crucible/plugins/launchers/elastic_lewm_upstream/*
+!/.crucible/plugins/launchers/elastic_lewm_upstream/elastic_lewm_upstream.py
 
 # mcp
 .mcp.json

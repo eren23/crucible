@@ -2279,56 +2279,41 @@ def config_get_presets(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
-    """Full project configuration."""
+    """Get the full configuration of a project spec."""
     config = _get_config()
     try:
-        return {
-            "name": config.name,
-            "version": config.version,
-            "project_root": str(config.project_root),
-            "provider": {
-                "type": config.provider.type,
-                "gpu_types": config.provider.gpu_types,
-            },
-            "metrics": {
-                "primary": config.metrics.primary,
-                "secondary": config.metrics.secondary,
-                "size": config.metrics.size,
-                "direction": config.metrics.direction,
-            },
-            "researcher": {
-                "model": config.researcher.model,
-                "budget_hours": config.researcher.budget_hours,
-                "max_iterations": config.researcher.max_iterations,
-            },
-            "wandb": {
-                "required": config.wandb.required,
-                "project": config.wandb.project,
-                "entity": config.wandb.entity,
-                "mode": config.wandb.mode,
-            },
-            "execution_policy": {
-                "require_remote": config.execution_policy.require_remote,
-                "required_provider": config.execution_policy.required_provider,
-                "allow_local_dev": config.execution_policy.allow_local_dev,
-            },
-            "training": [
-                {"backend": t.backend, "script": t.script}
-                for t in config.training
-            ],
-            "data": {
-                "source": config.data.source,
-                "repo_id": config.data.repo_id,
-                "local_root": config.data.local_root,
-            },
-            "store_dir": config.store_dir,
-            "auto_commit_versions": config.auto_commit_versions,
-            "results_file": config.results_file,
-            "fleet_results_file": config.fleet_results_file,
-            "logs_dir": config.logs_dir,
-            "timeout_map": config.timeout_map,
-            "research_state_file": config.research_state_file,
+        from crucible.core.config import load_project_spec
+        project_name = args["project_name"]
+        spec = load_project_spec(project_name, config.project_root)
+        result: dict[str, Any] = {
+            "name": spec.name,
+            "repo": getattr(spec, "repo", ""),
+            "branch": getattr(spec, "branch", ""),
+            "workspace": getattr(spec, "workspace", ""),
+            "launcher": getattr(spec, "launcher", ""),
+            "launcher_entry": getattr(spec, "launcher_entry", ""),
         }
+        if spec.pod:
+            result["pod"] = {
+                "gpu_type": getattr(spec.pod, "gpu_type", ""),
+                "container_disk": getattr(spec.pod, "container_disk", 0),
+                "volume_disk": getattr(spec.pod, "volume_disk", 0),
+                "interruptible": getattr(spec.pod, "interruptible", False),
+                "image": getattr(spec.pod, "image", ""),
+            }
+        result["env_set"] = dict(getattr(spec, "env_set", {}) or {})
+        result["env_forward"] = list(getattr(spec, "env_forward", []) or [])
+        if spec.metrics:
+            result["metrics"] = {
+                "source": getattr(spec.metrics, "source", ""),
+                "primary": getattr(spec.metrics, "primary", ""),
+                "direction": getattr(spec.metrics, "direction", ""),
+            }
+        result["install"] = list(getattr(spec, "install", []) or [])
+        result["timeout"] = getattr(spec, "timeout", 0)
+        return result
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
         return {"error": f"[unexpected] {exc}"}
 

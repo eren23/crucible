@@ -1373,12 +1373,19 @@ TOOLS: list[Tool] = [
     Tool(
         name="config_get_project",
         description=(
-            "Full resolved project configuration: metrics, researcher, training, presets, provider.\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {name, metrics, researcher, training, presets, provider, paths}\n"
-            "NEXT: config_get_presets for preset details."
+            "Get full configuration of a project spec including pod config, env vars, launcher, and metrics.\n\n"
+            "REQUIRES: Project spec exists in .crucible/projects/.\n"
+            "RETURNS: {name, repo, branch, workspace, launcher, pod: {gpu_type, ...}, env_set, env_forward, metrics, install, timeout}\n"
+            "NEXT: provision_project to create nodes, run_project to launch training."
         ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "Name of the project spec (without .yaml)."},
+            },
+            "required": ["project_name"],
+            "additionalProperties": False,
+        },
     ),
     # -----------------------------------------------------------------------
     # Run logs tool
@@ -1597,12 +1604,12 @@ TOOLS: list[Tool] = [
     # -----------------------------------------------------------------------
     Tool(
         name="list_projects",
-        description="List all external project specs in .crucible/projects/.\n\nREQUIRES: Nothing.\nRETURNS: {projects: [{name, repo, train, metrics_primary}]}\nNEXT: provision_project or bootstrap_project.",
+        description="List all external project specs in .crucible/projects/.\n\nEach spec has its own WANDB_PROJECT in env_set. Best practice: use the same WANDB_PROJECT for related experiments (e.g., architecture variants) so results appear in one leaderboard.\n\nREQUIRES: Nothing.\nRETURNS: {projects: [{name, repo, train, metrics_primary}]}\nNEXT: config_get_project to inspect a spec, provision_project or bootstrap_project to launch.",
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
         name="provision_project",
-        description="Provision nodes for an external project, applying pod overrides (GPU, image, disk) from the project spec.\n\nREQUIRES: RUNPOD_API_KEY, project spec in .crucible/projects/.\nRETURNS: {created, new_nodes: [{name, node_id}]}\nNEXT: fleet_refresh (wait ~60s), then bootstrap_project.",
+        description="Provision nodes for an external project, applying pod overrides (GPU, image, disk) from the project spec.\n\nREQUIRES: RUNPOD_API_KEY, project spec in .crucible/projects/. Use config_get_project to inspect pod config first.\nRETURNS: {created, new_nodes: [{name, node_id}]}\nNEXT: fleet_refresh (wait ~60s), then bootstrap_project.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1628,7 +1635,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="run_project",
-        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
+        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nNOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. The variant name (LEWM_VARIANT / WANDB_RUN_NAME) distinguishes individual runs.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1642,7 +1649,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="collect_project_results",
-        description="Collect results from one external project run or an entire launch: rsync logs, parse metrics, fetch WandB data, and persist terminal status.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id|launch_id, status|summary, metrics|runs, log_tail}\nNEXT: get_leaderboard if completed.",
+        description="Collect results from one external project run or an entire launch: rsync logs, parse metrics, fetch WandB data, and persist terminal status.\n\nFetches W&B metrics from the project specified in the spec's env_set.WANDB_PROJECT.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id|launch_id, status|summary, metrics|runs, log_tail}\nNEXT: get_leaderboard if completed.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -1654,7 +1661,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="get_project_run_status",
-        description="Probe and reconcile the latest lifecycle state for an external project run, including recent lifecycle events.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id, status, failure_class?, remote_node_state?, events:[...]}\nNEXT: collect_project_results when terminal or get_fleet_status(include_metrics=true) for broader fleet state.",
+        description="Probe and reconcile the latest lifecycle state for an external project run, including recent lifecycle events.\n\nREQUIRES: run_project has been called. Use run_id from run_project response.\nRETURNS: {run_id, status, failure_class?, remote_node_state?, events:[{ts, event, detail}]}\nNEXT: collect_project_results when status is terminal (completed/failed/timeout), get_fleet_status(include_metrics=true) for broader fleet state, or get_run_logs for debugging failures.",
         inputSchema={
             "type": "object",
             "properties": {
