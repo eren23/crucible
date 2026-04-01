@@ -15,7 +15,13 @@ import math
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
+
+# Self-bootstrap: ensure src/ is on path when invoked directly
+_src = str(Path(__file__).resolve().parent.parent.parent)
+if _src not in sys.path:
+    sys.path.insert(0, _src)
 
 
 def _env(key: str, default: str = "") -> str:
@@ -199,7 +205,12 @@ def run_generic_training() -> None:
             print(f"metric:train_loss={loss_val:.6f}", flush=True)
             for key, val in step_result.items():
                 if key != "loss" and hasattr(val, "item"):
-                    print(f"metric:{key}={val.item():.6f}", flush=True)
+                    # Handle tensors with multiple elements by averaging
+                    try:
+                        scalar_val = val.item() if val.numel() == 1 else val.mean().item()
+                        print(f"metric:{key}={scalar_val:.6f}", flush=True)
+                    except Exception:
+                        pass
 
         # Validation
         if val_interval > 0 and (step % val_interval == 0 or step == iterations):
@@ -241,7 +252,11 @@ def run_generic_training() -> None:
     # Also emit all final metrics in generic format
     if last_val_metrics:
         for mk, mv in last_val_metrics.items():
-            print(f"metric:{mk}={mv:.6f}", flush=True)
+            try:
+                scalar_val = mv.item() if hasattr(mv, 'item') and mv.numel() == 1 else (mv.mean().item() if hasattr(mv, 'mean') else mv)
+                print(f"metric:{mk}={scalar_val:.6f}", flush=True)
+            except Exception:
+                pass
     else:
         print(f"metric:train_loss={last_train_loss:.6f}", flush=True)
 

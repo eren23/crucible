@@ -97,10 +97,17 @@ def main() -> None:
     # DISTRIBUTED + CUDA SETUP
     # -----------------------------
 
-    distributed = "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    # torchrun sets these env vars; also support GPU_COUNT for explicit multi-GPU detection
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    
+    # If torchrun didn't set WORLD_SIZE but GPU_COUNT > 1, infer world_size
+    if world_size == 1 and args.gpu_count > 1:
+        world_size = args.gpu_count
+    
+    distributed = "RANK" in os.environ or args.gpu_count > 1
+    
     if world_size <= 0:
         raise ValueError(f"WORLD_SIZE must be positive, got {world_size}")
     grad_accum_steps_env = os.environ.get("GRAD_ACCUM_STEPS")
@@ -157,6 +164,8 @@ def main() -> None:
             run_tags.append(f"resid:{args.residual_variant}")
         if args.embed_bottleneck_dim > 0:
             run_tags.append("factorized_embed")
+        if args.gpu_count > 1:
+            run_tags.append(f"gpu:{args.gpu_count}")
         run_preset = os.environ.get("RUN_PRESET", "").strip()
         if run_preset:
             run_tags.append(run_preset)
@@ -166,7 +175,12 @@ def main() -> None:
             script_path=Path(__file__),
             config=config,
             tags=run_tags,
-            extra={"trainer": "torch_backend", "run_preset": run_preset or None, "parent_run_id": args.parent_run_id or None},
+            extra={
+                "trainer": "torch_backend",
+                "run_preset": run_preset or None,
+                "parent_run_id": args.parent_run_id or None,
+                "gpu_count": args.gpu_count,
+            },
         )
         tracker.update(state="starting", phase="starting", backend="torch", config=config)
         wandb = WandbLogger.create(

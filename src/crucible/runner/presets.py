@@ -92,6 +92,31 @@ PRESET_DEFAULTS: dict[str, dict[str, str]] = {
         "WARMUP_STEPS": "20",
         "TRAIN_SHARD_LIMIT": "0",
     },
+    # Multi-GPU presets (scales batch size based on GPU_COUNT env var)
+    "screen_2gpu": {
+        "MAX_WALLCLOCK_SECONDS": "3600",
+        "ITERATIONS": "2000",
+        "TRAIN_BATCH_TOKENS": "131072",  # 2x for 2 GPUs
+        "GRAD_ACCUM_STEPS": "1",
+        "VAL_LOSS_EVERY": "500",
+        "VAL_BATCH_SIZE": "8192",
+        "TRAIN_LOG_EVERY": "20",
+        "WARMUP_STEPS": "10",
+        "TRAIN_SHARD_LIMIT": "8",
+        "GPU_COUNT": "2",
+    },
+    "proxy_2gpu": {
+        "MAX_WALLCLOCK_SECONDS": "1800",
+        "ITERATIONS": "6000",
+        "TRAIN_BATCH_TOKENS": "131072",  # 2x for 2 GPUs
+        "GRAD_ACCUM_STEPS": "1",
+        "VAL_LOSS_EVERY": "0",
+        "VAL_BATCH_SIZE": "8192",
+        "TRAIN_LOG_EVERY": "50",
+        "WARMUP_STEPS": "10",
+        "TRAIN_SHARD_LIMIT": "8",
+        "GPU_COUNT": "2",
+    },
 }
 
 # CLI timeout hints per backend per preset (seconds).
@@ -104,6 +129,8 @@ CLI_TIMEOUT_DEFAULTS: dict[str, dict[str, int]] = {
         "medium": 5400,
         "promotion": 10800,
         "overnight": 7200,
+        "screen_2gpu": 900,
+        "proxy_2gpu": 3600,
     },
     "torch": {
         "smoke": 900,
@@ -112,6 +139,8 @@ CLI_TIMEOUT_DEFAULTS: dict[str, dict[str, int]] = {
         "medium": 5400,
         "promotion": 10800,
         "overnight": 5400,
+        "screen_2gpu": 600,
+        "proxy_2gpu": 3600,
     },
 }
 

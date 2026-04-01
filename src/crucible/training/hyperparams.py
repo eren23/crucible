@@ -125,6 +125,9 @@ class Hyperparameters:
     # Lineage tracking.
     parent_run_id = os.environ.get("PARENT_RUN_ID", "")
 
+    # Multi-GPU support.
+    gpu_count = int(os.environ.get("GPU_COUNT", "1"))
+
     def __init__(self) -> None:
         """Validate critical hyperparameters on instantiation."""
         checks = {
