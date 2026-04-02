@@ -128,6 +128,12 @@ class Hyperparameters:
     # Multi-GPU support.
     gpu_count = int(os.environ.get("GPU_COUNT", "1"))
 
+    # Epoch-based training (0 = disabled, use ITERATIONS).
+    try:
+        epochs = int(os.environ.get("EPOCHS", "0"))
+    except ValueError:
+        epochs = 0
+
     def __init__(self) -> None:
         """Validate critical hyperparameters on instantiation."""
         checks = {

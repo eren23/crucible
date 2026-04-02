@@ -81,72 +81,19 @@ def launch_experiment(
         cmd += ["--set", f"{key}={value}"]
 
     launcher_log = f"{REMOTE_LOG_DIR}/{item['run_id']}.launcher.txt"
-    
-    # For multi-GPU nodes, use torchrun for distributed training
-    if gpu_count > 1:
-        # Build torchrun command
-        # torchrun handles RANK, WORLD_SIZE, LOCAL_RANK automatically
-        torchrun_cmd = [
-            "torchrun",
-            f"--nproc_per_node={gpu_count}",
-            "--master_port=29500",
-            run_script,
-        ]
-        # Add script args
-        torchrun_cmd += [
-            "--backend", item["backend"],
-            "--preset", item["tier"],
-            "--timeout", str(timeout),
-            "--name", item["experiment_name"],
-            "--experiment-id", item["run_id"],
-        ]
-        for tag in item.get("tags", []):
-            torchrun_cmd += ["--tag", tag]
-        torchrun_cmd += [
-            "--set", f"CRUCIBLE_REMOTE_NODE={node['name']}",
-            "--set", f"CRUCIBLE_EXECUTION_PROVIDER={node.get('provider', 'runpod')}",
-            "--set", f"GPU_COUNT={gpu_count}",
-            "--set", "CRUCIBLE_ENFORCE_CONTRACT=1",
-        ]
-        for key, value in item["config"].items():
-            torchrun_cmd += ["--set", f"{key}={value}"]
-        
-        # Write a launcher script to a temp file and execute it
-        # This avoids heredoc escaping issues with complex commands
-        launcher_script = f"""#!/usr/bin/env python3
-import subprocess
-import os
-from pathlib import Path
 
-log_path = Path("{launcher_log}")
-log_path.parent.mkdir(parents=True, exist_ok=True)
-
-cmd = {torchrun_cmd!r}
-
-with log_path.open('a', encoding='utf-8') as log:
-    env = os.environ.copy()
-    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
-    print(proc.pid)
-"""
-        # Escape the launcher script for heredoc
-        escaped_script = launcher_script.replace("'", "'\"'\"'")
-        launcher = (
-            f"cd {shlex.quote(workspace)} && {shlex.quote(py)} -c '{escaped_script}'"
-        )
-    else:
-        # Single GPU: direct Python execution
-        launcher = (
-            f"cd {shlex.quote(workspace)} && {shlex.quote(py)} - <<'PY'\n"
-            "from pathlib import Path\n"
-            "import subprocess\n"
-            f"log_path = Path({launcher_log!r})\n"
-            "log_path.parent.mkdir(parents=True, exist_ok=True)\n"
-            "with log_path.open('a', encoding='utf-8') as log:\n"
-            f"    proc = subprocess.Popen({cmd!r}, stdout=log, stderr=subprocess.STDOUT, "
-            "stdin=subprocess.DEVNULL, start_new_session=True)\n"
-            "print(proc.pid)\n"
-            "PY"
-        )
+    launcher = (
+        f"cd {shlex.quote(workspace)} && {shlex.quote(py)} - <<'PY'\n"
+        "from pathlib import Path\n"
+        "import subprocess\n"
+        f"log_path = Path({launcher_log!r})\n"
+        "log_path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "with log_path.open('a', encoding='utf-8') as log:\n"
+        f"    proc = subprocess.Popen({cmd!r}, stdout=log, stderr=subprocess.STDOUT, "
+        "stdin=subprocess.DEVNULL, start_new_session=True)\n"
+        "print(proc.pid)\n"
+        "PY"
+    )
     return remote_exec(node, launcher).stdout.strip()
 
 

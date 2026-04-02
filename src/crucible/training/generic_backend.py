@@ -209,8 +209,8 @@ def run_generic_training() -> None:
                     try:
                         scalar_val = val.item() if val.numel() == 1 else val.mean().item()
                         print(f"metric:{key}={scalar_val:.6f}", flush=True)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        print(f"warning: could not convert metric {key}: {exc}", file=sys.stderr, flush=True)
 
         # Validation
         if val_interval > 0 and (step % val_interval == 0 or step == iterations):
@@ -255,8 +255,8 @@ def run_generic_training() -> None:
             try:
                 scalar_val = mv.item() if hasattr(mv, 'item') and mv.numel() == 1 else (mv.mean().item() if hasattr(mv, 'mean') else mv)
                 print(f"metric:{mk}={scalar_val:.6f}", flush=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"warning: could not convert final metric {mk}: {exc}", file=sys.stderr, flush=True)
     else:
         print(f"metric:train_loss={last_train_loss:.6f}", flush=True)
 

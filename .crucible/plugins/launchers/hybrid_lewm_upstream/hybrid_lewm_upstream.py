@@ -585,7 +585,7 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
     )
 
     logger = None
-    if cfg.wandb.enabled:
+    if cfg.wandb.enabled and os.environ.get("WANDB_MODE", "online") != "disabled":
         logger = WandbLogger(**cfg.wandb.config)
         logger.log_hyperparams(OmegaConf.to_container(cfg))
 
