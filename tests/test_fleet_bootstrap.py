@@ -40,7 +40,21 @@ class TestBootstrapNode:
     @patch("crucible.fleet.bootstrap.sync_repo")
     def test_full_sequence(self, mock_sync, mock_env, mock_exec, mock_sha, tmp_path: Path):
         """Bootstrap runs sync → env → python check → torch check → pip → data."""
-        mock_exec.return_value = MagicMock(stdout="1\n")
+
+        def _exec_side_effect(
+            node: dict[str, Any],
+            label: str,
+            command: str,
+            *,
+            timeout: int | None = 600,
+        ) -> MagicMock:
+            if label == "data_source_partial_probe":
+                return MagicMock(stdout="0\n")
+            if label == "data_probe":
+                return MagicMock(stdout="1\n")
+            return MagicMock(stdout="\n")
+
+        mock_exec.side_effect = _exec_side_effect
 
         node = _make_node()
         result = bootstrap_node(

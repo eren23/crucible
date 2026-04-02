@@ -6,6 +6,8 @@ This document describes how to create and share custom data source plugins for C
 
 Data source plugins let you define custom ways to provide data for training - HuggingFace datasets, W&B artifacts, local files, or entirely custom sources.
 
+During fleet **bootstrap**, the pre-download data-source check reads `crucible.yaml` `data:` and runs **on the remote node workspace** (so `local_root` is resolved relative to the pod).
+
 ## Directory Structure
 
 Community data sources are distributed as directories within tap repositories:

@@ -163,7 +163,8 @@ class FleetManager:
         skip_install: bool = False,
         skip_data: bool = False,
         selected_names: set[str] | None = None,
-        data_source_name: str = "fineweb10B",
+        data_source_name: str | None = None,
+        data_source_config: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Bootstrap one or more nodes (sync, install, data download)."""
         if nodes is None:
@@ -182,6 +183,7 @@ class FleetManager:
                     skip_install=skip_install,
                     skip_data=skip_data,
                     data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
             )
         save_nodes(self.nodes_file, updated)
@@ -378,6 +380,8 @@ class FleetManager:
         needed: int,
         name_prefix: str,
         train_shards: int,
+        data_source_name: str | None = None,
+        data_source_config: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Provision, wait, and bootstrap replacement nodes."""
         if needed <= 0:
@@ -405,6 +409,8 @@ class FleetManager:
                     train_shards=train_shards,
                     skip_install=False,
                     skip_data=False,
+                    data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
             )
             log_success(f"{node['name']}: replacement ready")
@@ -430,6 +436,8 @@ class FleetManager:
         bootstrap_replacement_budget: int = 8,
         wave_specs: list[tuple[str, Path]] | None = None,
         wave_completion_thresholds: dict[str, int] | None = None,
+        data_source_name: str | None = None,
+        data_source_config: dict[str, Any] | None = None,
     ) -> Path:
         """Run the full multi-wave day automatically.
 
@@ -562,6 +570,8 @@ class FleetManager:
                     name, name_prefix=name_prefix,
                 ),
                 refresh_fn=self.provider.refresh,
+                data_source_name=data_source_name,
+                data_source_config=data_source_config,
             )
             accounted_bootstrap_replacements = 0
             launch_ready_recorded = False
@@ -619,6 +629,8 @@ class FleetManager:
                     needed=needed,
                     name_prefix=name_prefix,
                     train_shards=train_shards,
+                    data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
 
             # Run first wave immediately (bootstrap continues in background)
@@ -655,6 +667,8 @@ class FleetManager:
                     results_file_rel=self.results_file_rel,
                     run_script=self.config.runner_script,
                     timeout_map=self.config.timeout_map,
+                    data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
                 summary["waves"].append({
                     "name": first_wave_name,
@@ -717,6 +731,8 @@ class FleetManager:
                     results_file_rel=self.results_file_rel,
                     run_script=self.config.runner_script,
                     timeout_map=self.config.timeout_map,
+                    data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
                 summary["waves"].append({
                     "name": wave_name,
@@ -789,6 +805,8 @@ class FleetManager:
         dry_run: bool = False,
         fresh: bool = True,
         spec_path: Path,
+        data_source_name: str | None = None,
+        data_source_config: dict[str, Any] | None = None,
     ) -> Path:
         """Run a fresh overnight batch from a single spec file."""
         day_dir = create_day_run_dir(self.day_runs_dir)
@@ -935,6 +953,8 @@ class FleetManager:
                     name, name_prefix=name_prefix,
                 ),
                 refresh_fn=self.provider.refresh,
+                data_source_name=data_source_name,
+                data_source_config=data_source_config,
             )
 
             while True:
@@ -998,6 +1018,8 @@ class FleetManager:
                     needed=needed,
                     name_prefix=name_prefix,
                     train_shards=train_shards,
+                    data_source_name=data_source_name,
+                    data_source_config=data_source_config,
                 )
 
             results, nodes = run_wave(
@@ -1020,6 +1042,8 @@ class FleetManager:
                 provision_replacement_fn=_provision_replacements,
                 baseline_curve=baseline_curve or None,
                 results_file_rel=self.results_file_rel,
+                data_source_name=data_source_name,
+                data_source_config=data_source_config,
             )
             summary["waves"].append({
                 "name": "night",

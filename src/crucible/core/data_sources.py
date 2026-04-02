@@ -12,10 +12,13 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
+from crucible.core.config import DataConfig
 from crucible.core.plugin_registry import PluginRegistry
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+DEFAULT_PARAMETER_GOLF_HF_REPO = "willdepueoai/parameter-golf"
 
 
 class DataStatus(Enum):
@@ -141,13 +144,58 @@ def describe_data_source(name: str) -> Optional[dict[str, str]]:
     Returns:
         {"name": str, "type": str, "source": "builtin"|"global"|"local"} or None
     """
-    cls = _DATA_SOURCE_REGISTRY.get(name)
-    if cls is None:
+    return _DATA_SOURCE_REGISTRY.describe_plugin(name)
+
+
+def bootstrap_data_source_spec_from_data_config(
+    data: DataConfig,
+    *,
+    plugin_name_override: str | None = None,
+    config_override: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """Map project ``data:`` settings to a registered plugin name and constructor config.
+
+    Returns ``None`` when the source is not supported for fleet bootstrap pre-check
+    or required fields are missing (e.g. ``local_files`` without ``path``).
+    """
+    plugin = (plugin_name_override or data.source or "huggingface").strip()
+    cfg: dict[str, Any]
+
+    if plugin == "huggingface":
+        cfg = {
+            "repo_id": data.repo_id or DEFAULT_PARAMETER_GOLF_HF_REPO,
+            "variant": data.variant,
+            "remote_prefix": data.remote_prefix,
+            "manifest_path": data.manifest,
+            "local_root": data.local_root,
+        }
+    elif plugin == "local_files":
+        path = (data.path or "").strip()
+        if not path:
+            return None
+        cfg = {"path": path, "format": "binary"}
+        if (data.manifest or "").strip():
+            cfg["manifest_path"] = data.manifest
+    elif plugin == "wandb_artifact":
+        if not (
+            (data.wandb_entity or "").strip()
+            and (data.wandb_project or "").strip()
+            and (data.wandb_artifact or "").strip()
+        ):
+            return None
+        cfg = {
+            "entity": data.wandb_entity,
+            "project": data.wandb_project,
+            "artifact": data.wandb_artifact,
+            "artifact_type": data.wandb_artifact_type,
+            "local_root": data.local_root,
+        }
+    else:
         return None
-    # Access plugin metadata to get source
-    meta = _DATA_SOURCE_REGISTRY._meta.get(name, {})
-    source = meta.get("source", "unknown")
-    return {"name": name, "type": cls.__name__, "source": source}
+
+    if config_override:
+        cfg = {**cfg, **config_override}
+    return plugin, cfg
 
 
 def build_data_source(name: str, **kwargs: Any) -> DataSourcePlugin:

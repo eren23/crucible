@@ -1,14 +1,71 @@
 """Tests for crucible.core.data_sources module."""
 
 import pytest
+import crucible.data_sources  # noqa: F401 — register builtins
+from crucible.core.config import DataConfig
 from crucible.core.data_sources import (
     DataStatus,
     DataSourcePlugin,
     DataPipeline,
+    DEFAULT_PARAMETER_GOLF_HF_REPO,
+    bootstrap_data_source_spec_from_data_config,
+    describe_data_source,
     register_data_source,
     list_data_sources,
     build_data_source,
 )
+
+
+class TestBootstrapDataSourceSpec:
+    def test_huggingface_from_data_config(self):
+        data = DataConfig(
+            source="huggingface",
+            repo_id="org/ds",
+            variant="fineweb10B_sp1024",
+            manifest="manifest.json",
+            local_root="./data",
+        )
+        name, cfg = bootstrap_data_source_spec_from_data_config(data)
+        assert name == "huggingface"
+        assert cfg["repo_id"] == "org/ds"
+        assert cfg["variant"] == "fineweb10B_sp1024"
+        assert cfg["manifest_path"] == "manifest.json"
+        assert cfg["local_root"] == "./data"
+
+    def test_huggingface_empty_repo_uses_default(self):
+        data = DataConfig(source="huggingface", repo_id="")
+        name, cfg = bootstrap_data_source_spec_from_data_config(data)
+        assert cfg["repo_id"] == DEFAULT_PARAMETER_GOLF_HF_REPO
+
+    def test_config_override_merges(self):
+        data = DataConfig(source="huggingface", repo_id="a/b")
+        name, cfg = bootstrap_data_source_spec_from_data_config(
+            data, config_override={"variant": "custom"}
+        )
+        assert name == "huggingface"
+        assert cfg["repo_id"] == "a/b"
+        assert cfg["variant"] == "custom"
+
+    def test_local_files_without_path_returns_none(self):
+        data = DataConfig(source="local_files", path="")
+        assert bootstrap_data_source_spec_from_data_config(data) is None
+
+    def test_local_files_with_path(self):
+        data = DataConfig(source="local_files", path="/tmp/shards")
+        name, cfg = bootstrap_data_source_spec_from_data_config(data)
+        assert name == "local_files"
+        assert cfg["path"] == "/tmp/shards"
+
+
+class TestDescribeDataSource:
+    def test_describe_huggingface_builtin(self):
+        info = describe_data_source("huggingface")
+        assert info is not None
+        assert info == {
+            "name": "huggingface",
+            "type": "HuggingFaceDataSource",
+            "source": "builtin",
+        }
 
 
 class TestDataStatusEnum:
