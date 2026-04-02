@@ -32,7 +32,7 @@ from crucible.fleet.sync import (
 
 BOOTSTRAP_ATTEMPTS = 3
 DEFAULT_PROJECT_SYSTEM_PACKAGES = ("git", "rsync", "curl")
-DEFAULT_DATA_SOURCE_NAME = "fineweb10B"
+DEFAULT_DATA_SOURCE_NAME = "huggingface"
 
 
 # ---------------------------------------------------------------------------
@@ -207,11 +207,18 @@ def bootstrap_node(
     if not skip_data:
         try:
             from crucible.core.data_sources import build_data_source, DataStatus
-            source = build_data_source(data_source_name, config={})
+            source = build_data_source(
+                "huggingface",
+                config={
+                    "repo_id": "willdepueoai/parameter-golf",
+                    "variant": "fineweb10B_sp1024",
+                    "local_root": "./data",
+                },
+            )
             status_result = source.status()
-            if status_result.status == DataStatus.STALE:
+            if status_result.status == DataStatus.PARTIAL:
                 log_warn(
-                    f"{node['name']}: data source {data_source_name!r} is stale "
+                    f"{node['name']}: data source huggingface is stale "
                     f"(last_prepared: {status_result.last_prepared}). "
                     f"Skipping auto-download. Agent should verify data freshness."
                 )

@@ -135,6 +135,21 @@ def list_data_sources() -> list[str]:
     return _DATA_SOURCE_REGISTRY.list_plugins()
 
 
+def describe_data_source(name: str) -> Optional[dict[str, str]]:
+    """Return metadata for a registered data source, or None if not found.
+
+    Returns:
+        {"name": str, "type": str, "source": "builtin"|"global"|"local"} or None
+    """
+    cls = _DATA_SOURCE_REGISTRY.get(name)
+    if cls is None:
+        return None
+    # Access plugin metadata to get source
+    meta = _DATA_SOURCE_REGISTRY._meta.get(name, {})
+    source = meta.get("source", "unknown")
+    return {"name": name, "type": cls.__name__, "source": source}
+
+
 def build_data_source(name: str, **kwargs: Any) -> DataSourcePlugin:
     """Build a data source plugin instance by name.
 

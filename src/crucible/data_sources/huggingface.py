@@ -45,6 +45,10 @@ class HuggingFaceDataSource(DataSourcePlugin):
         return self.local_root / safe_repo / safe_remote_prefix / safe_variant
 
     def status(self) -> DataStatusResult:
+        # NOTE: DataStatus.STALE is reserved for future use.
+        # A source should return STALE when the remote has changed since preparation,
+        # indicating local data may be outdated. Not yet implemented — HF API
+        # does not provide lightweight mtime checks without downloading file metadata.
         manifest_local = self._get_manifest_local_path()
         if not manifest_local.exists():
             return DataStatusResult(

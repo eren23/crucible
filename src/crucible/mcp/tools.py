@@ -4285,12 +4285,13 @@ def trace_get(args: dict[str, Any]) -> dict[str, Any]:
 def data_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered data sources."""
     try:
-        from crucible.core.data_sources import list_data_sources, _DATA_SOURCE_REGISTRY
+        from crucible.core.data_sources import list_data_sources, describe_data_source
 
         sources = []
         for name in list_data_sources():
-            cls = _DATA_SOURCE_REGISTRY.get(name)
-            sources.append({"name": name, "type": cls.__name__ if cls else "unknown"})
+            info = describe_data_source(name)
+            if info:
+                sources.append(info)
 
         return {"sources": sources}
     except Exception as exc:
