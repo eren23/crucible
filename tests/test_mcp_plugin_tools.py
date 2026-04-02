@@ -275,4 +275,4 @@ class TestToolDispatchWiring:
 
     def test_dispatch_count_is_115(self):
         from crucible.mcp.tools import TOOL_DISPATCH
-        assert len(TOOL_DISPATCH) == 115
+        assert len(TOOL_DISPATCH) == 123
