@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import RunnerError
-from crucible.core.io import append_jsonl, _json_ready
+from crucible.core.io import append_jsonl, read_jsonl, _json_ready
 from crucible.core.log import log_info, log_warn
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
@@ -293,6 +293,7 @@ def run_experiment(
         "remote_node": contract["remote_node"],
         "contract_status": contract["contract_status"],
         "wandb": contract["wandb"],
+        "data_sources": [],
     }
 
     oom_retry_used = False
@@ -560,6 +561,19 @@ def run_experiment(
             "enabled": False,
             "run_name": env.get("WANDB_RUN_NAME", exp_id),
         }
+
+    # -- Attach data provenance from store.jsonl --
+    store_path = root / ".crucible" / "store.jsonl"
+    if store_path.exists():
+        try:
+            data_links = []
+            for entry in read_jsonl(store_path):
+                if entry.get("type") == "data_link" and entry.get("run_id") == exp_id:
+                    data_links.append(entry.get("data_name"))
+            if data_links:
+                result["data_sources"] = data_links
+        except Exception:
+            pass  # data provenance is best-effort
 
     # -- Persist result --
     append_jsonl(results_path, result)
