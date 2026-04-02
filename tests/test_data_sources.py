@@ -69,7 +69,7 @@ class TestDataPipeline:
                 from crucible.core.data_sources import ValidationResult
                 return ValidationResult(valid=True, errors=[], warnings=[])
 
-        instance = DummySource()
+        instance = DummySource(name="dummy", config={})
         pipeline.register_source("dummy", instance)
         sources = pipeline.list_sources()
         assert any(s["name"] == "dummy" for s in sources)

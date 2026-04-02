@@ -73,6 +73,10 @@ class DataSourcePlugin(ABC):
     Implementors must provide status(), prepare(), and validate() methods.
     """
 
+    def __init__(self, name: str, config: dict[str, Any]) -> None:
+        self.name = name
+        self.config = config
+
     @abstractmethod
     def status(self) -> DataStatusResult:
         """Check the current status of the data source."""
@@ -114,7 +118,7 @@ def register_data_source(name: str, cls: type[DataSourcePlugin], source: str = "
         cls: DataSourcePlugin subclass.
         source: Source of the plugin (builtin, global, local).
     """
-    _DATA_SOURCE_REGISTRY.register(name, cls, source)
+    _DATA_SOURCE_REGISTRY.register(name, cls, source=source)
 
 
 def list_data_sources() -> list[str]:
