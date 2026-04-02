@@ -4277,6 +4277,213 @@ def trace_get(args: dict[str, Any]) -> dict[str, Any]:
     return {"session_id": session_id, "entries": entries, "meta": meta}
 
 
+# ---------------------------------------------------------------------------
+# Data tools
+# ---------------------------------------------------------------------------
+
+
+def data_register(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a data source."""
+    try:
+        from crucible.core.data_sources import build_data_source, DataPipeline
+
+        name = args.get("name")
+        source_type = args.get("type")
+        config = args.get("config", {})
+
+        if not name or not source_type:
+            return {"error": "name and type are required"}
+
+        supported = ["huggingface", "wandb_artifact", "local_files"]
+        if source_type not in supported:
+            return {"error": f"Unsupported type: {source_type}. Supported: {supported}"}
+
+        source = build_data_source(source_type, name=name, config=config)
+        pipeline = DataPipeline()
+        pipeline.register_source(name, source)
+
+        return {
+            "registered": True,
+            "name": name,
+            "type": source_type,
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List registered data sources."""
+    try:
+        from crucible.core.data_sources import list_data_sources, _DATA_SOURCE_REGISTRY
+
+        sources = []
+        for name in list_data_sources():
+            cls = _DATA_SOURCE_REGISTRY.get(name)
+            sources.append({"name": name, "type": cls.__name__ if cls else "unknown"})
+
+        return {"sources": sources}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Check data status for a source."""
+    try:
+        from crucible.core.data_sources import build_data_source
+
+        name = args.get("name")
+        if not name:
+            return {"error": "name is required"}
+
+        source_type = args.get("type", "huggingface")
+        config = args.get("config", {})
+
+        source = build_data_source(source_type, name=name, config=config)
+        status_result = source.status()
+
+        return {
+            "name": name,
+            "status": status_result.status.value,
+            "manifest": status_result.manifest,
+            "shard_count": status_result.shard_count,
+            "last_prepared": status_result.last_prepared.isoformat() if status_result.last_prepared else None,
+            "issues": status_result.issues,
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_prepare(args: dict[str, Any]) -> dict[str, Any]:
+    """Prepare (download/cache) data for a source."""
+    try:
+        from crucible.core.data_sources import build_data_source
+
+        name = args.get("name")
+        if not name:
+            return {"error": "name is required"}
+
+        source_type = args.get("type", "huggingface")
+        config = args.get("config", {})
+        force = args.get("force", False)
+        background = args.get("background", False)
+
+        source = build_data_source(source_type, name=name, config=config)
+        result = source.prepare(force=force, background=background)
+
+        return {
+            "success": result.success,
+            "job_id": result.job_id,
+            "message": result.message,
+            "shards_downloaded": result.shards_downloaded,
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_validate(args: dict[str, Any]) -> dict[str, Any]:
+    """Validate data integrity."""
+    try:
+        from crucible.core.data_sources import build_data_source
+
+        name = args.get("name")
+        if not name:
+            return {"error": "name is required"}
+
+        source_type = args.get("type", "huggingface")
+        config = args.get("config", {})
+
+        source = build_data_source(source_type, name=name, config=config)
+        result = source.validate()
+
+        return {
+            "valid": result.valid,
+            "errors": result.errors,
+            "warnings": result.warnings,
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search for available data."""
+    try:
+        from crucible.core.data_sources import build_data_source
+
+        query = args.get("query", "")
+        source_type = args.get("type", "huggingface")
+
+        source = build_data_source(source_type, name="_search", config={})
+        results = source.search(query)
+
+        return {
+            "results": [
+                {
+                    "name": r.name,
+                    "source": r.source,
+                    "description": r.description,
+                    "shard_count": r.shard_count,
+                }
+                for r in results
+            ]
+        }
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_link(args: dict[str, Any]) -> dict[str, Any]:
+    """Link data source to an experiment run."""
+    try:
+        run_id = args.get("run_id")
+        data_name = args.get("data_name")
+
+        if not run_id or not data_name:
+            return {"error": "run_id and data_name are required"}
+
+        from pathlib import Path
+        import json
+
+        store_path = Path(".crucible/store.jsonl")
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+
+        entry = {
+            "type": "data_link",
+            "run_id": run_id,
+            "data_name": data_name,
+        }
+        with open(store_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+        return {"linked": True, "run_id": run_id, "data_name": data_name}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
+    """Get data linked to an experiment run."""
+    try:
+        run_id = args.get("run_id")
+        if not run_id:
+            return {"error": "run_id is required"}
+
+        from pathlib import Path
+        import json
+
+        store_path = Path(".crucible/store.jsonl")
+        if not store_path.exists():
+            return {"data_sources": []}
+
+        links = []
+        with open(store_path) as f:
+            for line in f:
+                entry = json.loads(line)
+                if entry.get("type") == "data_link" and entry.get("run_id") == run_id:
+                    links.append({"name": entry.get("data_name")})
+
+        return {"data_sources": links}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -4414,4 +4621,13 @@ TOOL_DISPATCH: dict[str, Any] = {
     # Trace tools
     "trace_list": trace_list,
     "trace_get": trace_get,
+    # Data tools
+    "data_register": data_register,
+    "data_list": data_list,
+    "data_status": data_status,
+    "data_prepare": data_prepare,
+    "data_validate": data_validate,
+    "data_search": data_search,
+    "data_link": data_link,
+    "data_get_linked": data_get_linked,
 }
