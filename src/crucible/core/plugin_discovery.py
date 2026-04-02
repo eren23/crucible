@@ -20,6 +20,9 @@ from typing import Any
 
 from crucible.core.plugin_registry import PluginRegistry
 
+# Trigger builtin data source registrations
+import crucible.data_sources  # noqa: F401
+
 _DEFAULT_HUB_DIR = Path.home() / ".crucible-hub"
 
 
@@ -53,6 +56,10 @@ def discover_all_plugins(
     """
     hub_dir = hub_dir or _DEFAULT_HUB_DIR
     loaded: dict[str, list[str]] = {}
+
+    # Merge data_sources registry so it is handled uniformly with all other plugin types
+    from crucible.core.data_sources import _DATA_SOURCE_REGISTRY
+    registries = {**registries, "data_sources": _DATA_SOURCE_REGISTRY}
 
     for dir_name, registry in registries.items():
         names: list[str] = []

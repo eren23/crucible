@@ -130,6 +130,16 @@ class PluginRegistry(Generic[T]):
                 key=lambda d: d["name"],
             )
 
+    def describe_plugin(self, name: str) -> dict[str, str] | None:
+        """Return ``name``, implementation ``type``, and registration ``source``, or ``None``."""
+        with self._lock:
+            factory = self._registry.get(name)
+            if factory is None:
+                return None
+            source = self._meta.get(name, {}).get("source", "unknown")
+        type_name = getattr(factory, "__name__", type(factory).__name__)
+        return {"name": name, "type": type_name, "source": source}
+
     def __contains__(self, name: str) -> bool:
         with self._lock:
             return name in self._registry

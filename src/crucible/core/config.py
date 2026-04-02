@@ -28,6 +28,12 @@ class DataConfig:
     remote_prefix: str = "datasets"
     local_root: str = "./data"
     manifest: str = "manifest.json"
+    variant: str = "fineweb10B_sp1024"
+    path: str = ""  # root path when source is local_files
+    wandb_entity: str = ""
+    wandb_project: str = ""
+    wandb_artifact: str = ""
+    wandb_artifact_type: str = "dataset"
 
 
 @dataclass
@@ -138,6 +144,12 @@ def _build_data(raw: dict[str, Any]) -> DataConfig:
         remote_prefix=raw.get("remote_prefix", "datasets"),
         local_root=raw.get("local_root", "./data"),
         manifest=raw.get("manifest", "manifest.json"),
+        variant=raw.get("variant", "fineweb10B_sp1024"),
+        path=raw.get("path", ""),
+        wandb_entity=raw.get("wandb_entity", ""),
+        wandb_project=raw.get("wandb_project", ""),
+        wandb_artifact=raw.get("wandb_artifact", ""),
+        wandb_artifact_type=raw.get("wandb_artifact_type", "dataset"),
     )
 
 

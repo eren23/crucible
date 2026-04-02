@@ -508,8 +508,8 @@ class TestValidPluginTypes:
     def test_all_expected_types(self):
         expected = {
             "optimizers", "schedulers", "callbacks", "loggers",
-            "providers", "architectures", "data_adapters", "objectives",
-            "block_types", "stack_patterns", "augmentations", "activations",
-            "launchers",
+            "providers", "architectures", "data_adapters", "data_sources",
+            "objectives", "block_types", "stack_patterns", "augmentations",
+            "activations", "launchers",
         }
         assert VALID_PLUGIN_TYPES == expected

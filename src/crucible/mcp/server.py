@@ -190,6 +190,7 @@ _LONG_RUNNING_TOOLS: set[str] = {
     "bootstrap_project",
     "collect_results",
     "collect_project_results",
+    "data_prepare",
     "destroy_nodes",
     "dispatch_experiments",
     "fleet_refresh",
@@ -2196,6 +2197,124 @@ TOOLS: list[Tool] = [
                 "session_id": {"type": "string", "description": "Session ID from trace_list."},
             },
             "required": ["session_id"],
+            "additionalProperties": False,
+        },
+    ),
+    # Data tools
+    Tool(
+        name="data_list",
+        description=(
+            "List all registered data sources.\n\n"
+            "REQUIRES: Nothing\n"
+            "RETURNS: {sources: [{name, type}]}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="data_status",
+        description=(
+            "Check data state for a source.\n\n"
+            "REQUIRES: name\n"
+            "RETURNS: {name, status, manifest, shard_count, last_prepared, issues}\n"
+            "NEXT: data_prepare to refresh, data_validate to check integrity"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string"},
+                "config": {"type": "object"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="data_prepare",
+        description=(
+            "Prepare (download/cache) data. Long-running.\n\n"
+            "REQUIRES: name\n"
+            "RETURNS: {success, job_id, message, shards_downloaded}\n"
+            "NEXT: data_status to check completion"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string"},
+                "config": {"type": "object"},
+                "force": {"type": "boolean", "default": False},
+                "background": {"type": "boolean", "default": False},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="data_validate",
+        description=(
+            "Validate data integrity.\n\n"
+            "REQUIRES: name\n"
+            "RETURNS: {valid, errors, warnings}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "type": {"type": "string"},
+                "config": {"type": "object"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="data_search",
+        description=(
+            "Search for available data.\n\n"
+            "REQUIRES: query\n"
+            "RETURNS: {results: [{name, source, description, shard_count}]}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "type": {"type": "string"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="data_link",
+        description=(
+            "Link data source to experiment run for provenance.\n\n"
+            "REQUIRES: run_id, data_name\n"
+            "RETURNS: {linked, run_id, data_name}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "data_name": {"type": "string"},
+            },
+            "required": ["run_id", "data_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="data_get_linked",
+        description=(
+            "Get data linked to an experiment run.\n\n"
+            "REQUIRES: run_id\n"
+            "RETURNS: {data_sources: [{name}]}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+            },
+            "required": ["run_id"],
             "additionalProperties": False,
         },
     ),

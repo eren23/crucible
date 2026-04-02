@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import shlex
 import threading
 import time
@@ -32,6 +33,20 @@ from crucible.fleet.sync import (
 
 BOOTSTRAP_ATTEMPTS = 3
 DEFAULT_PROJECT_SYSTEM_PACKAGES = ("git", "rsync", "curl")
+
+
+def _remote_data_source_partial_probe_script(plugin_name: str, config_dict: dict[str, Any]) -> str:
+    """Python source run on the node: print 1 if data source status is PARTIAL, else 0."""
+    cfg_literal = repr(json.dumps(config_dict))
+    pl_literal = repr(plugin_name)
+    return (
+        "import json\n"
+        "import crucible.data_sources\n"
+        "from crucible.core.data_sources import build_data_source, DataStatus\n"
+        f"cfg = json.loads({cfg_literal})\n"
+        f"st = build_data_source({pl_literal}, name='_bootstrap_ds', config=cfg).status()\n"
+        "print(1 if st.status == DataStatus.PARTIAL else 0)\n"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +172,8 @@ def bootstrap_node(
     skip_install: bool = False,
     skip_data: bool = False,
     data_download_cmd: str | None = None,
+    data_source_name: str | None = None,
+    data_source_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Full bootstrap sequence for a single node.
 
@@ -166,13 +183,19 @@ def bootstrap_node(
     4. pip install (unless *skip_install*)
     5. download dataset (unless *skip_data*)
     6. record git sha
+
+    Data source pre-check (before auto-download) uses ``crucible.yaml`` ``data:`` when
+    *data_source_name* is ``None``. It runs on the **remote** workspace so paths match
+    the node. Optional *data_source_config* is shallow-merged onto the mapped config.
     """
     _materialize_global_architectures(project_root)
     sync_repo(node, project_root=project_root, sync_excludes=sync_excludes)
     sync_env_file(node, project_root=project_root)
 
-    workspace = shlex.quote(node.get("workspace_path", "/workspace/project"))
+    ws_path = node.get("workspace_path", "/workspace/project")
+    workspace = shlex.quote(ws_path)
     py = shlex.quote(node.get("python_bin", "python3"))
+    py_src = shlex.quote(str(Path(ws_path) / "src"))
 
     bootstrap_step(node, "python_version", f"cd {workspace} && {py} --version")
     bootstrap_step(
@@ -200,6 +223,41 @@ def bootstrap_node(
             f"{py} -m pip install --break-system-packages -r /tmp/crucible.requirements.txt",
         )
 
+    # Pre-download check: PARTIAL status on the remote node skips auto-download
+    _skip_auto_download = False
+    if not skip_data:
+        from crucible.core.config import ProjectConfig, load_config
+        from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
+
+        cfg_path = project_root / "crucible.yaml"
+        proj_cfg = load_config(cfg_path) if cfg_path.is_file() else ProjectConfig(
+            project_root=project_root.resolve(),
+        )
+        spec = bootstrap_data_source_spec_from_data_config(
+            proj_cfg.data,
+            plugin_name_override=data_source_name,
+            config_override=data_source_config,
+        )
+        if spec is not None:
+            plugin_name, ds_cfg = spec
+            try:
+                probe_body = _remote_data_source_partial_probe_script(plugin_name, ds_cfg)
+                status_step = bootstrap_step(
+                    node,
+                    "data_source_partial_probe",
+                    f"cd {workspace} && PYTHONPATH={py_src} {py} - <<'PY'\n{probe_body}\nPY\n",
+                )
+                out = (status_step.stdout or "").strip()
+                if out == "1":
+                    _skip_auto_download = True
+                    log_warn(
+                        f"{node['name']}: data source {plugin_name!r} is PARTIAL "
+                        f"(incomplete vs manifest); skipping auto-download. "
+                        f"Verify shard layout on the node."
+                    )
+            except Exception:
+                pass
+
     data_probe = None
     if not skip_data:
         data_probe = bootstrap_step(
@@ -220,13 +278,23 @@ def bootstrap_node(
     node["state"] = "ready"
 
     if not skip_data:
-        if data_probe is not None and data_probe.stdout.strip().endswith("0"):
-            download_cmd = data_download_cmd or (
-                f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
-                f"--variant sp1024 --train-shards {train_shards}"
-            )
-            bootstrap_step(node, "data_download", download_cmd)
-        node["dataset_ready"] = True
+        data_missing = data_probe is not None and data_probe.stdout.strip().endswith("0")
+        if data_missing:
+            if _skip_auto_download:
+                log_warn(
+                    f"{node['name']}: auto-download skipped due to partial/incomplete "
+                    f"data source status"
+                )
+            else:
+                download_cmd = data_download_cmd or (
+                    f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
+                    f"--variant sp1024 --train-shards {train_shards}"
+                )
+                bootstrap_step(node, "data_download", download_cmd)
+                node["dataset_ready"] = True
+        else:
+            # Data exists on remote, mark as ready
+            node["dataset_ready"] = True
 
     node["git_sha"] = local_git_sha(project_root)
     if node["git_sha"] is None:
@@ -413,6 +481,8 @@ def bootstrap_node_worker(
     sync_excludes: list[str],
     train_shards: int,
     data_download_cmd: str | None = None,
+    data_source_name: str | None = None,
+    data_source_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bootstrap a node with automatic retries."""
     last_exc: BaseException | None = None
@@ -426,6 +496,8 @@ def bootstrap_node_worker(
                 skip_install=False,
                 skip_data=False,
                 data_download_cmd=data_download_cmd,
+                data_source_name=data_source_name,
+                data_source_config=data_source_config,
             )
             upsert_node_record(nodes_file, updated)
             return updated
@@ -461,6 +533,8 @@ def start_bootstrap_supervisor(
     replace_fn: Any = None,
     refresh_fn: Any = None,
     data_download_cmd: str | None = None,
+    data_source_name: str | None = None,
+    data_source_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Launch a background thread that bootstraps all nodes in parallel.
 
@@ -562,6 +636,8 @@ def start_bootstrap_supervisor(
                                 sync_excludes=sync_excludes,
                                 train_shards=train_shards,
                                 data_download_cmd=data_download_cmd,
+                                data_source_name=data_source_name,
+                                data_source_config=data_source_config,
                             )
                             future_to_node[future] = n
                             append_event(day_dir, "node_bootstrap_started", node=name)

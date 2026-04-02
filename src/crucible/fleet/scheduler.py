@@ -426,6 +426,8 @@ def recover_bootstrap_incomplete_nodes(
     train_shards: int,
     target_total_nodes: int,
     data_download_cmd: str | None = None,
+    data_source_name: str | None = None,
+    data_source_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Try to bootstrap partially-ready nodes when more capacity is needed."""
     wq = wave_rows(queue, wave_name)
@@ -451,6 +453,8 @@ def recover_bootstrap_incomplete_nodes(
             sync_excludes=sync_excludes,
             train_shards=train_shards,
             data_download_cmd=data_download_cmd,
+            data_source_name=data_source_name,
+            data_source_config=data_source_config,
         )
         upsert_node_record(nodes_file, updated)
         append_event(day_dir, "bootstrap_recovery_completed", wave=wave_name, node=node["name"])
@@ -514,6 +518,8 @@ def run_wave(
     run_script: str = "crucible/runner/run_experiment.py",
     timeout_map: dict[str, dict[str, int]] | None = None,
     results_file_rel: str = "experiments.jsonl",
+    data_source_name: str | None = None,
+    data_source_config: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Run a single wave: enqueue, dispatch, monitor, collect, until done.
 
@@ -615,6 +621,8 @@ def run_wave(
             sync_excludes=sync_excludes,
             train_shards=recovery["train_shards"],
             target_total_nodes=recovery["target_total_nodes"],
+            data_source_name=data_source_name,
+            data_source_config=data_source_config,
         )
         queue = load_queue(queue_path)
 

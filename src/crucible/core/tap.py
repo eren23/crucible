@@ -31,9 +31,9 @@ from crucible.core.log import utc_now_iso
 
 VALID_PLUGIN_TYPES = frozenset({
     "optimizers", "schedulers", "callbacks", "loggers",
-    "providers", "architectures", "data_adapters", "objectives",
-    "block_types", "stack_patterns", "augmentations", "activations",
-    "launchers",
+    "providers", "architectures", "data_adapters", "data_sources",
+    "objectives", "block_types", "stack_patterns", "augmentations",
+    "activations", "launchers",
 })
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")

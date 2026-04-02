@@ -50,6 +50,19 @@ class TestRegister:
         assert len(registry) == 1
 
 
+class TestDescribePlugin:
+    def test_describe_plugin_returns_metadata(self, registry: PluginRegistry):
+        class EchoFactory:
+            pass
+
+        registry.register("echo", EchoFactory, source="global")
+        info = registry.describe_plugin("echo")
+        assert info == {"name": "echo", "type": "EchoFactory", "source": "global"}
+
+    def test_describe_plugin_unknown_is_none(self, registry: PluginRegistry):
+        assert registry.describe_plugin("missing") is None
+
+
 # ---------------------------------------------------------------------------
 # 3-tier precedence
 # ---------------------------------------------------------------------------

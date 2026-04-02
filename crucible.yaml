@@ -21,6 +21,7 @@ provider:
 data:
   source: huggingface
   repo_id: willdepueoai/parameter-golf
+  variant: fineweb10B_sp1024
   local_root: ./data
   manifest: manifest.json
 
