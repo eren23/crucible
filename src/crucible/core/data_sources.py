@@ -30,9 +30,9 @@ class DataStatusResult:
     """Result of checking data source status."""
 
     status: DataStatus
-    manifest: Optional["Path"]
-    shard_count: int
-    last_prepared: Optional[datetime]
+    manifest: Optional[dict[str, Any]]
+    shard_count: dict[str, int] = field(default_factory=dict)
+    last_prepared: Optional[datetime] = None
     issues: list[str] = field(default_factory=list)
 
 
@@ -123,7 +123,7 @@ def list_data_sources() -> list[str]:
     Returns:
         List of registered data source names.
     """
-    return _DATA_SOURCE_REGISTRY.list()
+    return _DATA_SOURCE_REGISTRY.list_plugins()
 
 
 def build_data_source(name: str, **kwargs: Any) -> DataSourcePlugin:
@@ -140,39 +140,19 @@ def build_data_source(name: str, **kwargs: Any) -> DataSourcePlugin:
 
 
 class DataPipeline:
-    """Pipeline for managing multiple data sources."""
+    """Orchestrates data sources, tracks state, and manages preparation."""
 
     def __init__(self) -> None:
-        """Initialize the data pipeline."""
-        self._sources: dict[str, type[DataSourcePlugin]] = {}
+        self._sources: dict[str, DataSourcePlugin] = {}
 
-    def register_source(self, name: str, cls: type[DataSourcePlugin]) -> None:
-        """Register a data source plugin with the pipeline.
+    def register_source(self, name: str, plugin: DataSourcePlugin) -> None:
+        self._sources[name] = plugin
 
-        Args:
-            name: Unique name for the data source.
-            cls: DataSourcePlugin subclass.
-        """
-        self._sources[name] = cls
+    def list_sources(self) -> list[dict[str, Any]]:
+        return [
+            {"name": name, "type": type(plugin).__name__}
+            for name, plugin in self._sources.items()
+        ]
 
-    def list_sources(self) -> list[str]:
-        """List all registered source names.
-
-        Returns:
-            List of registered source names.
-        """
-        return list(self._sources.keys())
-
-    def get_source(self, name: str, **kwargs: Any) -> DataSourcePlugin:
-        """Get a data source instance by name.
-
-        Args:
-            name: Registered name of the data source.
-            **kwargs: Arguments to pass to the plugin constructor.
-
-        Returns:
-            Instance of the requested DataSourcePlugin.
-        """
-        if name not in self._sources:
-            raise KeyError(f"Data source '{name}' not found")
-        return self._sources[name](**kwargs)
+    def get_source(self, name: str) -> Optional[DataSourcePlugin]:
+        return self._sources.get(name)

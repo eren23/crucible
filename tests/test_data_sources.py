@@ -51,7 +51,7 @@ class TestDataPipeline:
                 return DataStatusResult(
                     status=DataStatus.FRESH,
                     manifest=None,
-                    shard_count=0,
+                    shard_count={},
                     last_prepared=None,
                     issues=[],
                 )
@@ -69,6 +69,7 @@ class TestDataPipeline:
                 from crucible.core.data_sources import ValidationResult
                 return ValidationResult(valid=True, errors=[], warnings=[])
 
-        pipeline.register_source("dummy", DummySource)
+        instance = DummySource()
+        pipeline.register_source("dummy", instance)
         sources = pipeline.list_sources()
-        assert "dummy" in sources
+        assert any(s["name"] == "dummy" for s in sources)
