@@ -68,4 +68,16 @@ def discover_all_plugins(
 
         loaded[dir_name] = names
 
+    # Data sources — imported here to avoid circular imports
+    from crucible.core.data_sources import _DATA_SOURCE_REGISTRY
+
+    global_ds_dir = hub_dir / plugins_subdir / "data_sources"
+    if global_ds_dir.is_dir():
+        _DATA_SOURCE_REGISTRY.load_plugins(str(global_ds_dir), source="global")
+
+    if project_root is not None:
+        local_ds_dir = project_root / store_dir / plugins_subdir / "data_sources"
+        if local_ds_dir.is_dir():
+            _DATA_SOURCE_REGISTRY.load_plugins(str(local_ds_dir), source="local")
+
     return loaded
