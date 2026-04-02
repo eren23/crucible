@@ -32,6 +32,7 @@ from crucible.fleet.sync import (
 
 BOOTSTRAP_ATTEMPTS = 3
 DEFAULT_PROJECT_SYSTEM_PACKAGES = ("git", "rsync", "curl")
+DEFAULT_DATA_SOURCE_NAME = "fineweb10B"
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +158,7 @@ def bootstrap_node(
     skip_install: bool = False,
     skip_data: bool = False,
     data_download_cmd: str | None = None,
+    data_source_name: str = DEFAULT_DATA_SOURCE_NAME,
 ) -> dict[str, Any]:
     """Full bootstrap sequence for a single node.
 
@@ -200,6 +202,24 @@ def bootstrap_node(
             f"{py} -m pip install --break-system-packages -r /tmp/crucible.requirements.txt",
         )
 
+    # Pre-download check: check data source status before auto-downloading
+    _skip_auto_download = False
+    if not skip_data:
+        try:
+            from crucible.core.data_sources import build_data_source, DataStatus
+            source = build_data_source(data_source_name, config={})
+            status_result = source.status()
+            if status_result.status == DataStatus.STALE:
+                log_warn(
+                    f"{node['name']}: data source {data_source_name!r} is stale "
+                    f"(last_prepared: {status_result.last_prepared}). "
+                    f"Skipping auto-download. Agent should verify data freshness."
+                )
+                _skip_auto_download = True
+        except Exception:
+            # If data source check fails, proceed with existing auto-download logic
+            pass
+
     data_probe = None
     if not skip_data:
         data_probe = bootstrap_step(
@@ -220,13 +240,20 @@ def bootstrap_node(
     node["state"] = "ready"
 
     if not skip_data:
-        if data_probe is not None and data_probe.stdout.strip().endswith("0"):
-            download_cmd = data_download_cmd or (
-                f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
-                f"--variant sp1024 --train-shards {train_shards}"
-            )
-            bootstrap_step(node, "data_download", download_cmd)
-        node["dataset_ready"] = True
+        data_missing = data_probe is not None and data_probe.stdout.strip().endswith("0")
+        if data_missing:
+            if _skip_auto_download:
+                log_warn(f"{node['name']}: auto-download skipped due to stale data source")
+            else:
+                download_cmd = data_download_cmd or (
+                    f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
+                    f"--variant sp1024 --train-shards {train_shards}"
+                )
+                bootstrap_step(node, "data_download", download_cmd)
+                node["dataset_ready"] = True
+        else:
+            # Data exists on remote, mark as ready
+            node["dataset_ready"] = True
 
     node["git_sha"] = local_git_sha(project_root)
     if node["git_sha"] is None:
@@ -413,6 +440,7 @@ def bootstrap_node_worker(
     sync_excludes: list[str],
     train_shards: int,
     data_download_cmd: str | None = None,
+    data_source_name: str = DEFAULT_DATA_SOURCE_NAME,
 ) -> dict[str, Any]:
     """Bootstrap a node with automatic retries."""
     last_exc: BaseException | None = None
@@ -426,6 +454,7 @@ def bootstrap_node_worker(
                 skip_install=False,
                 skip_data=False,
                 data_download_cmd=data_download_cmd,
+                data_source_name=data_source_name,
             )
             upsert_node_record(nodes_file, updated)
             return updated
@@ -461,6 +490,7 @@ def start_bootstrap_supervisor(
     replace_fn: Any = None,
     refresh_fn: Any = None,
     data_download_cmd: str | None = None,
+    data_source_name: str = DEFAULT_DATA_SOURCE_NAME,
 ) -> dict[str, Any]:
     """Launch a background thread that bootstraps all nodes in parallel.
 
@@ -562,6 +592,7 @@ def start_bootstrap_supervisor(
                                 sync_excludes=sync_excludes,
                                 train_shards=train_shards,
                                 data_download_cmd=data_download_cmd,
+                                data_source_name=data_source_name,
                             )
                             future_to_node[future] = n
                             append_event(day_dir, "node_bootstrap_started", node=name)

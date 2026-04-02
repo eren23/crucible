@@ -163,6 +163,7 @@ class FleetManager:
         skip_install: bool = False,
         skip_data: bool = False,
         selected_names: set[str] | None = None,
+        data_source_name: str = "fineweb10B",
     ) -> list[dict[str, Any]]:
         """Bootstrap one or more nodes (sync, install, data download)."""
         if nodes is None:
@@ -180,6 +181,7 @@ class FleetManager:
                     train_shards=train_shards,
                     skip_install=skip_install,
                     skip_data=skip_data,
+                    data_source_name=data_source_name,
                 )
             )
         save_nodes(self.nodes_file, updated)
