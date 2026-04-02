@@ -31,9 +31,12 @@ class WandBArtifactSource(DataSourcePlugin):
         self.local_root = Path(config.get("local_root", "./data"))
         self.api_key = config.get("api_key") or os.environ.get("WANDB_API_KEY")
 
+    def _sanitize_path(self, s: str) -> str:
+        return s.replace("..", "").replace("/", "--").replace(":", "--")
+
     def _get_local_artifact_path(self) -> Path:
         safe_name = self.artifact.replace(":", "--").replace("/", "--")
-        return self.local_root / "wandb" / self.entity / self.project / safe_name
+        return self.local_root / "wandb" / self._sanitize_path(self.entity) / self._sanitize_path(self.project) / safe_name
 
     def status(self) -> DataStatusResult:
         artifact_path = self._get_local_artifact_path()
@@ -46,7 +49,7 @@ class WandBArtifactSource(DataSourcePlugin):
                 issues=["Artifact not downloaded"],
             )
 
-        manifest_path = artifact_path / "manifest.json"
+        manifest_path = artifact_path / "crucible_manifest.json"
         if not manifest_path.exists():
             return DataStatusResult(
                 status=DataStatus.PARTIAL,
@@ -57,7 +60,7 @@ class WandBArtifactSource(DataSourcePlugin):
             )
 
         try:
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
             shard_files = list(artifact_path.glob("**/*.bin"))
             return DataStatusResult(
@@ -111,7 +114,7 @@ class WandBArtifactSource(DataSourcePlugin):
                 "project": self.project,
                 "files": [f.name for f in artifact_path.glob("*")],
             }
-            with open(artifact_path / "manifest.json", "w") as f:
+            with open(artifact_path / "crucible_manifest.json", "w") as f:
                 json.dump(manifest, f)
 
             shard_files = list(artifact_path.glob("**/*.bin"))
@@ -135,9 +138,9 @@ class WandBArtifactSource(DataSourcePlugin):
         errors = []
         warnings = []
 
-        manifest_path = artifact_path / "manifest.json"
+        manifest_path = artifact_path / "crucible_manifest.json"
         if not manifest_path.exists():
-            errors.append("manifest.json not found in artifact")
+            errors.append("crucible_manifest.json not found in artifact")
 
         shard_files = list(artifact_path.glob("**/*.bin"))
         if len(shard_files) == 0:

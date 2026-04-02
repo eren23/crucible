@@ -4282,35 +4282,6 @@ def trace_get(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def data_register(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a data source."""
-    try:
-        from crucible.core.data_sources import build_data_source, DataPipeline
-
-        name = args.get("name")
-        source_type = args.get("type")
-        config = args.get("config", {})
-
-        if not name or not source_type:
-            return {"error": "name and type are required"}
-
-        supported = ["huggingface", "wandb_artifact", "local_files"]
-        if source_type not in supported:
-            return {"error": f"Unsupported type: {source_type}. Supported: {supported}"}
-
-        source = build_data_source(source_type, name=name, config=config)
-        pipeline = DataPipeline()
-        pipeline.register_source(name, source)
-
-        return {
-            "registered": True,
-            "name": name,
-            "type": source_type,
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
-
-
 def data_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered data sources."""
     try:
@@ -4442,7 +4413,8 @@ def data_link(args: dict[str, Any]) -> dict[str, Any]:
         from pathlib import Path
         import json
 
-        store_path = Path(".crucible/store.jsonl")
+        config = _get_config()
+        store_path = config.project_root / ".crucible" / "store.jsonl"
         store_path.parent.mkdir(parents=True, exist_ok=True)
 
         entry = {
@@ -4468,7 +4440,8 @@ def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
         from pathlib import Path
         import json
 
-        store_path = Path(".crucible/store.jsonl")
+        config = _get_config()
+        store_path = config.project_root / ".crucible" / "store.jsonl"
         if not store_path.exists():
             return {"data_sources": []}
 
@@ -4622,7 +4595,6 @@ TOOL_DISPATCH: dict[str, Any] = {
     "trace_list": trace_list,
     "trace_get": trace_get,
     # Data tools
-    "data_register": data_register,
     "data_list": data_list,
     "data_status": data_status,
     "data_prepare": data_prepare,

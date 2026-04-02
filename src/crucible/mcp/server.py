@@ -2202,25 +2202,6 @@ TOOLS: list[Tool] = [
     ),
     # Data tools
     Tool(
-        name="data_register",
-        description=(
-            "Register a data source.\n\n"
-            "REQUIRES: name, type, config\n"
-            "RETURNS: {registered, name, type} or {error}\n"
-            "NEXT: data_status to check state, data_prepare to download"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "type": {"type": "string", "enum": ["huggingface", "wandb_artifact", "local_files"]},
-                "config": {"type": "object"},
-            },
-            "required": ["name", "type"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
         name="data_list",
         description=(
             "List all registered data sources.\n\n"

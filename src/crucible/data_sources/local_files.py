@@ -54,7 +54,7 @@ class LocalFilesSource(DataSourcePlugin):
         if self.manifest_path:
             manifest_file = self.path / self.manifest_path
             if manifest_file.exists():
-                with open(manifest_file) as f:
+                with open(manifest_file, encoding="utf-8") as f:
                     manifest = json.load(f)
 
         return DataStatusResult(
@@ -100,15 +100,17 @@ class LocalFilesSource(DataSourcePlugin):
         """Search local files by walking directory."""
         results = []
         query_lower = query.lower()
+        all_shards = len(list(self.path.glob("**/*.bin")))
+        if all_shards == 0:
+            all_shards = len(list(self.path.glob("**/*.jsonl")))
         for f in self.path.glob("**/*"):
             if f.is_file() and query_lower in f.name.lower():
-                shard_count = len(list(self.path.glob("**/*.bin")))
                 results.append(
                     SearchResult(
                         name=str(f.relative_to(self.path)),
                         source="local",
                         description=str(f),
-                        shard_count=shard_count,
+                        shard_count=all_shards,
                     )
                 )
                 if len(results) >= 10:

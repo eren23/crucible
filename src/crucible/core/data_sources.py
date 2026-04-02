@@ -4,6 +4,8 @@ Provides a plugin architecture for registering and managing data sources
 with status checking, preparation, and validation capabilities.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -97,8 +99,11 @@ class DataSourcePlugin(ABC):
         """Validate the data source configuration and accessibility."""
         ...
 
-    def search(self) -> list[SearchResult]:
+    def search(self, query: str = "") -> list[SearchResult]:
         """Search for available data sources from this plugin.
+
+        Args:
+            query: Search query to filter data sources.
 
         Returns:
             List of SearchResult objects describing available data sources.

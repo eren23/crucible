@@ -38,6 +38,10 @@ def format_data_status_message(name: str, status_result) -> str:
 def should_reprocess(choice: str | int, status: DataStatus) -> tuple[bool | None, str]:
     """Parse user's confirmation choice.
 
+    Args:
+        choice: User's numeric choice (1-4).
+        status: Reserved for future logic where status affects recommendation.
+
     Returns:
         Tuple of (should_reprocess: bool | None, action: str)
         should_reprocess is None when action is "find_new" or "skip"

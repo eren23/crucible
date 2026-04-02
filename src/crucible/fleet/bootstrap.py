@@ -217,7 +217,8 @@ def bootstrap_node(
                 )
                 _skip_auto_download = True
         except Exception:
-            # If data source check fails, proceed with existing auto-download logic
+            # If data source check fails (unknown name, not yet registered, or
+            # status check error), skip the pre-download check and fall through
             pass
 
     data_probe = None

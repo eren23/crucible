@@ -31,13 +31,18 @@ class HuggingFaceDataSource(DataSourcePlugin):
         self.local_root = Path(config.get("local_root", "./data"))
         self.token = config.get("token") or os.environ.get("HF_TOKEN")
 
+    def _sanitize_path(self, s: str) -> str:
+        return s.replace("..", "").replace("/", "--").replace(":", "--")
+
     def _get_manifest_local_path(self) -> Path:
-        safe_repo = self.repo_id.replace("/", "--")
+        safe_repo = self._sanitize_path(self.repo_id)
         return self.local_root / safe_repo / self.manifest_path
 
     def _get_shard_root(self) -> Path:
-        safe_repo = self.repo_id.replace("/", "--")
-        return self.local_root / safe_repo / self.remote_prefix / self.variant
+        safe_repo = self._sanitize_path(self.repo_id)
+        safe_remote_prefix = self._sanitize_path(self.remote_prefix)
+        safe_variant = self._sanitize_path(self.variant)
+        return self.local_root / safe_repo / safe_remote_prefix / safe_variant
 
     def status(self) -> DataStatusResult:
         manifest_local = self._get_manifest_local_path()
@@ -60,12 +65,31 @@ class HuggingFaceDataSource(DataSourcePlugin):
                 shard_count = {"train": len(train_shards), "val": len(val_shards)}
             else:
                 shard_count = {}
+
+            # Cross-check against manifest stats
+            issues = []
+            status = DataStatus.FRESH
+            for ds in manifest.get("datasets", []):
+                if ds.get("name") == self.variant:
+                    stats = ds.get("stats", {})
+                    expected_train = stats.get("files_train", 0)
+                    expected_val = stats.get("files_val", 0)
+                    actual_train = shard_count.get("train", 0)
+                    actual_val = shard_count.get("val", 0)
+                    if actual_train < expected_train or actual_val < expected_val:
+                        status = DataStatus.PARTIAL
+                        issues.append(
+                            f"Shard count mismatch: train={actual_train}/{expected_train}, "
+                            f"val={actual_val}/{expected_val}"
+                        )
+                    break
+
             return DataStatusResult(
-                status=DataStatus.FRESH,
+                status=status,
                 manifest=manifest,
                 shard_count=shard_count,
                 last_prepared=datetime.fromtimestamp(manifest_local.stat().st_mtime),
-                issues=[],
+                issues=issues,
             )
         except Exception as e:
             return DataStatusResult(
@@ -78,6 +102,8 @@ class HuggingFaceDataSource(DataSourcePlugin):
 
     def prepare(self, force: bool = False, background: bool = False) -> PreparationResult:
         """Download data from HuggingFace using huggingface_hub directly."""
+        if background:
+            raise NotImplementedError("background=True not yet implemented")
         job_id = str(uuid.uuid4())
 
         current_status = self.status()
@@ -173,10 +199,15 @@ class HuggingFaceDataSource(DataSourcePlugin):
         for dataset in manifest.get("datasets", []):
             if dataset.get("name") != self.variant:
                 continue
-            expected = dataset.get("stats", {}).get("files_train", 0)
-            actual = len([f for f in shard_files if "train" in f.name])
-            if actual < expected:
-                errors.append(f"Train shards: expected {expected}, found {actual}")
+            stats = dataset.get("stats", {})
+            expected_train = stats.get("files_train", 0)
+            expected_val = stats.get("files_val", 0)
+            actual_train = len([f for f in shard_files if "train" in f.name])
+            actual_val = len([f for f in shard_files if "val" in f.name])
+            if actual_train < expected_train:
+                errors.append(f"Train shards: expected {expected_train}, found {actual_train}")
+            if actual_val < expected_val:
+                errors.append(f"Val shards: expected {expected_val}, found {actual_val}")
 
         return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
