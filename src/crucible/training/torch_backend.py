@@ -97,10 +97,12 @@ def main() -> None:
     # DISTRIBUTED + CUDA SETUP
     # -----------------------------
 
-    distributed = "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    # torchrun sets RANK, WORLD_SIZE, LOCAL_RANK automatically. Trust them.
     rank = int(os.environ.get("RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    distributed = world_size > 1
+    
     if world_size <= 0:
         raise ValueError(f"WORLD_SIZE must be positive, got {world_size}")
     grad_accum_steps_env = os.environ.get("GRAD_ACCUM_STEPS")
@@ -157,6 +159,8 @@ def main() -> None:
             run_tags.append(f"resid:{args.residual_variant}")
         if args.embed_bottleneck_dim > 0:
             run_tags.append("factorized_embed")
+        if args.gpu_count > 1:
+            run_tags.append(f"gpu:{args.gpu_count}")
         run_preset = os.environ.get("RUN_PRESET", "").strip()
         if run_preset:
             run_tags.append(run_preset)
@@ -166,7 +170,12 @@ def main() -> None:
             script_path=Path(__file__),
             config=config,
             tags=run_tags,
-            extra={"trainer": "torch_backend", "run_preset": run_preset or None, "parent_run_id": args.parent_run_id or None},
+            extra={
+                "trainer": "torch_backend",
+                "run_preset": run_preset or None,
+                "parent_run_id": args.parent_run_id or None,
+                "gpu_count": args.gpu_count,
+            },
         )
         tracker.update(state="starting", phase="starting", backend="torch", config=config)
         wandb = WandbLogger.create(
@@ -379,6 +388,16 @@ def main() -> None:
         device,
         shard_limit=args.train_shard_limit,
     )
+
+    # Epoch-based training: resolve EPOCHS to iterations from dataset size
+    if args.epochs > 0:
+        from crucible.training.data_loader import count_shard_tokens
+        total_tokens = count_shard_tokens(args.train_files, shard_limit=args.train_shard_limit)
+        if total_tokens > 0:
+            iterations = int(args.epochs * total_tokens / args.train_batch_tokens)
+            log0(f"epoch_mode:epochs={args.epochs} total_tokens={total_tokens:,} "
+                 f"tokens_per_step={args.train_batch_tokens} iterations={iterations}")
+            args.iterations = iterations
 
     def zero_grad_all() -> None:
         for opt in optimizers:

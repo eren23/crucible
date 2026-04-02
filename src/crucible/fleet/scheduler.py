@@ -55,6 +55,7 @@ def launch_experiment(
     """Launch an experiment on a remote node.  Returns the remote PID."""
     workspace = node.get("workspace_path", "/workspace/project")
     py = node.get("python_bin", "python3")
+    gpu_count = node.get("gpu_count", 1)
 
     # Determine timeout
     timeout = 1800  # default 30 min
@@ -74,11 +75,13 @@ def launch_experiment(
         cmd += ["--tag", tag]
     cmd += ["--set", f"CRUCIBLE_REMOTE_NODE={node['name']}"]
     cmd += ["--set", f"CRUCIBLE_EXECUTION_PROVIDER={node.get('provider', 'runpod')}"]
+    cmd += ["--set", f"GPU_COUNT={gpu_count}"]
     cmd += ["--set", "CRUCIBLE_ENFORCE_CONTRACT=1"]
     for key, value in item["config"].items():
         cmd += ["--set", f"{key}={value}"]
 
     launcher_log = f"{REMOTE_LOG_DIR}/{item['run_id']}.launcher.txt"
+
     launcher = (
         f"cd {shlex.quote(workspace)} && {shlex.quote(py)} - <<'PY'\n"
         "from pathlib import Path\n"

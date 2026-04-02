@@ -13,6 +13,19 @@ import torch
 from torch import Tensor
 
 
+def count_shard_tokens(pattern: str, shard_limit: int = 0) -> int:
+    """Count total tokens across shards by reading headers only (no data loaded)."""
+    files = sorted(glob.glob(pattern))
+    if shard_limit > 0:
+        files = files[:shard_limit]
+    total = 0
+    for f in files:
+        header = np.fromfile(f, dtype="<i4", count=3)
+        if header.size >= 3 and int(header[0]) == 20240520:
+            total += int(header[2])
+    return total
+
+
 def load_data_shard(file: Path) -> Tensor:
     header_bytes = 256 * np.dtype("<i4").itemsize
     token_bytes = np.dtype("<u2").itemsize

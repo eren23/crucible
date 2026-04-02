@@ -16,6 +16,7 @@ class ProviderConfig:
     ssh_key: str = "~/.ssh/id_ed25519_runpod"
     image: str = ""
     gpu_types: list[str] = field(default_factory=list)
+    gpu_count: int = 1  # Number of GPUs per node (multi-GPU support)
     interruptible: bool = True
     defaults: dict[str, Any] = field(default_factory=dict)
 
@@ -124,6 +125,7 @@ def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
         ssh_key=raw.get("ssh_key", "~/.ssh/id_ed25519"),
         image=raw.get("image", ""),
         gpu_types=raw.get("gpu_types", []),
+        gpu_count=raw.get("gpu_count", 1),
         interruptible=raw.get("interruptible", True),
         defaults=raw.get("defaults", {}),
     )

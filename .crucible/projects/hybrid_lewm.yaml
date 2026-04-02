@@ -5,7 +5,7 @@ shallow: true
 workspace: /workspace/le-wm
 
 pod:
-  gpu_type: "NVIDIA GeForce RTX 3090"
+  gpu_type: "NVIDIA RTX A6000"
   container_disk: 80
   volume_disk: 120
   interruptible: false
@@ -25,11 +25,12 @@ launcher: hybrid_lewm_upstream
 launcher_entry: hybrid_lewm_upstream.py
 
 setup:
-  - "export STABLEWM_HOME=/root/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/root/stable-wm-data',exist_ok=True); final=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\""
+  - "export STABLEWM_HOME=/workspace/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/workspace/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/workspace/stable-wm-data',exist_ok=True); final=pathlib.Path('/workspace/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\""
 setup_timeout: 3600
 
 # TRAIN_SCRIPT defaults to the resolved launcher runtime path copied by bootstrap_project.
-train: "LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=${STABLEWM_HOME:-/root/stable-wm-data} python ${TRAIN_SCRIPT:-.crucible/launchers/hybrid_lewm_upstream/hybrid_lewm_upstream.py} data=pusht trainer.max_epochs=100 wandb.enabled=true wandb.config.entity=eren23 wandb.config.project=crucible-lewm"
+# Direct python (not torchrun) to avoid stable_pretraining subprocess launcher conflicts.
+train: "WANDB_MODE=online LEWM_MODE=${LEWM_MODE:-slim} STABLEWM_HOME=${STABLEWM_HOME:-/root/stable-wm-data} torchrun --nproc_per_node=2 --master_port=29500 ${TRAIN_SCRIPT:-.crucible/launchers/hybrid_lewm_upstream/hybrid_lewm_upstream.py} data=pusht trainer.max_epochs=${SLIM_MAX_EPOCHS:-3} +trainer.strategy=ddp_find_unused_parameters_true"
 timeout: 14400
 launch_timeout: 300
 
@@ -60,8 +61,14 @@ env_forward:
 env_set:
   WANDB_PROJECT: crucible-lewm
   WANDB_MODE: online
-  STABLEWM_HOME: /root/stable-wm-data
+  STABLEWM_HOME: /workspace/stable-wm-data
+  SLIM_DIM: "64"
+  SLIM_ENC_DEPTH: "4"
+  SLIM_ENC_HEADS: "4"
+  SLIM_PRED_DEPTH: "4"
+  HYBRID_ENCODER_PATTERN: ALAL
   SLIM_BATCH_SIZE: "256"
+  PRECOMPUTED_DATASET: ""
 
 metrics:
   source: wandb

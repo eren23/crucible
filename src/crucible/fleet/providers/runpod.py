@@ -172,6 +172,7 @@ def build_pod_payload(
     volume_mount_path: str,
     public_key: str,
     ports: list[str],
+    gpu_count: int = 1,
 ) -> dict[str, Any]:
     """Construct the JSON body for a POST /pods request."""
     if container_disk_gb < 0 or volume_gb < 0:
@@ -190,7 +191,7 @@ def build_pod_payload(
             "PUBLIC_KEY": public_key,
             "SSH_PUBLIC_KEY": public_key,
         },
-        "gpuCount": 1,
+        "gpuCount": gpu_count,
         "gpuTypeIds": gpu_type_ids,
         "gpuTypePriority": "availability",
         "imageName": image_name,
@@ -217,6 +218,7 @@ def create_api_pod(
     volume_mount_path: str,
     public_key: str,
     ports: list[str],
+    gpu_count: int = 1,
 ) -> dict[str, Any]:
     """Create a RunPod pod and return the raw API response."""
     payload = build_pod_payload(
@@ -224,7 +226,7 @@ def create_api_pod(
         cloud_type=cloud_type, interruptible=interruptible,
         container_disk_gb=container_disk_gb, volume_gb=volume_gb,
         volume_mount_path=volume_mount_path, public_key=public_key,
-        ports=ports,
+        ports=ports, gpu_count=gpu_count,
     )
     created = runpod_request("POST", "/pods", payload=payload)
     if not isinstance(created, dict):
@@ -264,6 +266,7 @@ def inventory_record_from_api(
         "node_id": raw["id"],
         "pod_id": raw["id"],  # backward compat
         "gpu": gpu.get("displayName") or previous.get("gpu") or "-",
+        "gpu_count": raw.get("gpuCount") or previous.get("gpu_count") or 1,
         "interruptible": bool(
             raw.get("interruptible", previous.get("interruptible", True)),
         ),
@@ -318,6 +321,7 @@ class RunPodProvider(FleetProvider):
         ports: list[str] | None = None,
         ssh_key: str = "~/.ssh/id_ed25519_runpod",
         defaults: dict[str, Any] | None = None,
+        gpu_count: int = 1,
     ) -> None:
         self.image_name = image_name
         self.gpu_type_ids = gpu_type_ids or list(DEFAULT_GPU_TYPE_IDS)
@@ -330,6 +334,7 @@ class RunPodProvider(FleetProvider):
         self.ports = ports or list(DEFAULT_PORTS)
         self.ssh_key = ssh_key
         self.defaults = defaults or {}
+        self.gpu_count = gpu_count
 
     # -- FleetProvider interface ------------------------------------------
 
@@ -352,6 +357,7 @@ class RunPodProvider(FleetProvider):
         eff_image = kwargs.pop("image_name", self.image_name)
         eff_interruptible = bool(kwargs.pop("interruptible", self.interruptible))
         eff_cloud_types = kwargs.pop("cloud_types", None)
+        eff_gpu_count = kwargs.pop("gpu_count", self.gpu_count)
         if eff_cloud_types is None:
             eff_cloud_types = (
                 list(self.cloud_types)
@@ -368,7 +374,7 @@ class RunPodProvider(FleetProvider):
             ordinal = index - start_index + 1
             name = f"{name_prefix}-{index:02d}"
             last_error: str | None = None
-            log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB)")
+            log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB, gpus={eff_gpu_count})")
             for cloud_type in eff_cloud_types:
                 try:
                     raw = create_api_pod(
@@ -382,13 +388,14 @@ class RunPodProvider(FleetProvider):
                         volume_mount_path=self.volume_mount_path,
                         public_key=public_key,
                         ports=self.ports,
+                        gpu_count=eff_gpu_count,
                     )
                     node = inventory_record_from_api(raw, defaults=self.defaults)
                     node["state"] = "creating"
                     node["replacement"] = replacement
                     node["ssh_key"] = self.ssh_key
                     created.append(node)
-                    log_success(f"Created {name} ({cloud_type})")
+                    log_success(f"Created {name} ({cloud_type}, {eff_gpu_count} GPU(s))")
                     break
                 except FleetError as exc:
                     last_error = str(exc)

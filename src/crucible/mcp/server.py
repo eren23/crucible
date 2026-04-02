@@ -9,7 +9,10 @@ from __future__ import annotations
 import asyncio
 import atexit
 import json
+import logging
 import os
+import socket
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -26,6 +29,31 @@ from crucible.mcp.tools import TOOL_DISPATCH
 load_env_files(Path(__file__).resolve().parent.parent.parent.parent)
 
 app = Server("crucible-fleet")
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+_log = logging.getLogger("crucible.mcp")
+_CRUCIBLE_DEBUG = os.environ.get("CRUCIBLE_DEBUG", "0") == "1"
+
+
+def _setup_logging() -> None:
+    """Configure structured logging based on CRUCIBLE_DEBUG."""
+    if _CRUCIBLE_DEBUG:
+        level = logging.DEBUG
+    else:
+        level = logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+
+
+_setup_logging()
+
 
 # ---------------------------------------------------------------------------
 # Session tracer (enabled via --trace flag or CRUCIBLE_TRACE=1 env var)
@@ -46,12 +74,37 @@ def _error_text(msg: str) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps({"error": msg}))]
 
 
-def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> list[TextContent]:
+def _format_error(exc: BaseException, tb: str | None = None) -> dict[str, Any]:
+    """Build a structured error response with full context.
+
+    Returns a dict that will be JSON-serialized as the tool response.
+    """
+    exc_type = type(exc).__name__
+    exc_module = type(exc).__module__
+    tb_str = tb or traceback.format_exc()
+
+    return {
+        "error": str(exc),
+        "error_type": exc_type,
+        "error_module": exc_module,
+        "traceback": tb_str,
+    }
+
+
+def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
+    """Call a tool handler and return (result, is_error, exception).
+
+    Never raises for normal tool failures (Exception). KeyboardInterrupt, SystemExit,
+    and asyncio.CancelledError propagate so the host can shut down or cancel cleanly.
+    """
     try:
         result = fn(*args, **kwargs)
-        return _json_text(result)
-    except Exception:
-        return _error_text(traceback.format_exc())
+        return (_json_text(result), False, None)
+    except Exception as exc:
+        tb = traceback.format_exc()
+        # Log at error level — appears in stderr for debugging without CRUCIBLE_DEBUG
+        _log.error("Tool %s raised %s: %s\n%s", fn.__name__, type(exc).__name__, exc, tb)
+        return (_json_text(_format_error(exc, tb)), True, exc)
 
 
 def _extract_trace_identifiers(name: str, arguments: dict[str, Any], raw: Any) -> dict[str, Any]:
@@ -156,21 +209,30 @@ async def _run_with_keepalive(
     tool_name: str,
     session: Any,
     request_id: Any,
-) -> list[TextContent]:
+) -> tuple[list[TextContent], bool, BaseException | None]:  # type: ignore[type-arg]
     """Run a tool handler in a thread while sending periodic log messages.
 
     Long-running MCP tool calls can cause the stdio client to time out
     if no data flows on the pipe.  We send periodic ``notifications/message``
     (log-level "info") to keep the connection alive.
+
+    Returns (result, is_error, exception) to match _safe_call signature.
     """
     done = asyncio.Event()
-    result_box: list[list[TextContent] | None] = [None]
+    result_box: list[Any] = [None]  # holds _safe_call's 3-tuple
     exc_box: list[BaseException | None] = [None]
 
     async def _worker() -> None:
         try:
+            # _safe_call returns a 3-tuple for tool failures; it only raises for
+            # BaseException subclasses we intentionally do not catch (e.g. cancel).
             result_box[0] = await asyncio.to_thread(_safe_call, handler, arguments)
-        except BaseException as exc:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # e.g. thread pool / serialization failure — return JSON instead of killing stdio
+            tb = traceback.format_exc()
+            _log.critical("Worker raised in %s: %s\n%s", tool_name, exc, tb)
             exc_box[0] = exc
         finally:
             done.set()
@@ -192,14 +254,25 @@ async def _run_with_keepalive(
                     logger="crucible.mcp.keepalive",
                     related_request_id=request_id,
                 )
-            except Exception:
-                pass  # Never let keepalive errors break the tool
+            except Exception as exc:
+                # Log but never let keepalive errors break the tool
+                _log.warning("Keepalive send failed for %s: %s", tool_name, exc)
 
     await asyncio.gather(_worker(), _keepalive())
 
     if exc_box[0] is not None:
-        raise exc_box[0]
-    return result_box[0]  # type: ignore[return-value]
+        exc = exc_box[0]
+        tb_str = "".join(traceback.format_exception(exc))
+        return (_json_text(_format_error(exc, tb_str)), True, exc)
+
+    # result_box[0] is the raw output from _safe_call: (list[TextContent], is_error, exc)
+    raw_result = result_box[0]
+    if raw_result is None:
+        return (_error_text("Tool returned no result"), False, None)
+    if isinstance(raw_result, tuple) and len(raw_result) == 3:
+        return raw_result
+    # Fallback: treat as raw TextContent list (should not happen)
+    return (raw_result, False, None)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -2138,6 +2211,7 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: ignore[type-arg]
     handler = TOOL_DISPATCH.get(name)
     if handler is None:
+        _log.warning("Unknown tool requested: %s", name)
         return _error_text(f"Unknown tool: {name}")
 
     t0 = time.monotonic()
@@ -2145,21 +2219,35 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
     # For long-running tools, send periodic keepalive log messages to prevent
     # the stdio client from timing out on pipe reads.
     use_keepalive = name in _LONG_RUNNING_TOOLS
+    session = None
+    request_id = None
     if use_keepalive:
         try:
             ctx = app.request_context
             session = ctx.session
             request_id = ctx.request_id
         except LookupError:
+            _log.debug("No request context available for keepalive, falling back to direct call")
+            use_keepalive = False
+        if session is None:
+            _log.debug("No MCP session for keepalive, falling back to direct call")
             use_keepalive = False
 
+    is_error = False
+    exc: BaseException | None = None
     try:
         if use_keepalive:
-            result = await _run_with_keepalive(handler, arguments, name, session, request_id)
+            result, is_error, exc = await _run_with_keepalive(handler, arguments, name, session, request_id)
         else:
-            result = await asyncio.to_thread(_safe_call, handler, arguments)
-    except Exception as exc:
-        result = _error_text(f"[unexpected] {exc}")
+            result, is_error, exc = await asyncio.to_thread(_safe_call, handler, arguments)
+    except asyncio.CancelledError:
+        raise
+    except Exception as call_exc:
+        tb = traceback.format_exc()
+        _log.critical("Unexpected exception in call_tool for %s: %s\n%s", name, call_exc, tb)
+        result = _json_text(_format_error(call_exc, tb))
+        is_error = True
+        exc = call_exc
 
     duration_ms = (time.monotonic() - t0) * 1000
 
@@ -2167,18 +2255,25 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: i
         try:
             # Extract the raw result dict from TextContent for the trace
             raw = json.loads(result[0].text) if result else None
-            is_error = isinstance(raw, dict) and "error" in raw
+            error_has_error_key = isinstance(raw, dict) and "error" in raw
+            # Trace errors with the full structured error dict
+            trace_error = raw if error_has_error_key else (str(exc) if exc else None)
             _tracer.record(
                 tool=name,
                 arguments=arguments,
                 result=raw,
                 duration_ms=duration_ms,
-                status="error" if is_error else "ok",
-                error=raw.get("error") if is_error else None,
+                status="error" if (is_error or error_has_error_key) else "ok",
+                error=trace_error,
                 identifiers=_extract_trace_identifiers(name, arguments, raw),
             )
-        except Exception:
-            pass  # Never let tracing break tool execution
+        except Exception as trace_exc:
+            # Log but never let tracing break tool execution
+            _log.warning("Tracing failed for %s: %s", name, trace_exc)
+
+    # Log all errors to stderr for visibility in agent output
+    if is_error:
+        _log.error("Tool %s failed in %.0fms", name, duration_ms)
 
     return result
 
@@ -2194,30 +2289,79 @@ def _init_tracer() -> None:
     if os.environ.get("CRUCIBLE_TRACE") != "1":
         return
 
-    from crucible.mcp.tracer import SessionTracer
+    try:
+        from crucible.mcp.tracer import SessionTracer
+    except Exception as exc:
+        _log.warning("Failed to import SessionTracer (tracing disabled): %s", exc)
+        return
 
     # Determine trace directory: .crucible/traces/ under the project root
     project_root = Path(__file__).resolve().parent.parent.parent.parent
     trace_dir = project_root / ".crucible" / "traces"
     session_id = os.environ.get("CRUCIBLE_TRACE_ID") or None
-    _tracer = SessionTracer(trace_dir, session_id=session_id)
+    try:
+        _tracer = SessionTracer(trace_dir, session_id=session_id)
+        _log.info("Tracing enabled (session=%s, dir=%s)", session_id, trace_dir)
+    except Exception as exc:
+        _log.warning("Failed to initialize SessionTracer: %s", exc)
+        return
 
     def _finalize_tracer() -> None:
-        if _tracer is not None:
-            _tracer.finalize()
+        try:
+            if _tracer is not None:
+                _tracer.finalize()
+        except Exception as exc:
+            _log.warning("Failed to finalize tracer: %s", exc)
 
     atexit.register(_finalize_tracer)
 
 
 async def _run_server() -> None:
     _init_tracer()
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(read_stream, write_stream, app.create_initialization_options())
+    except KeyboardInterrupt:
+        _log.info("MCP server interrupted by user")
+    except Exception as exc:
+        tb = traceback.format_exc()
+        _log.critical("MCP server crashed: %s\n%s", exc, tb)
+        # Write crash info to a file for debugging
+        _write_crash_report(exc, tb)
+        raise
+
+
+def _write_crash_report(exc: BaseException, tb: str) -> None:
+    """Write crash information to a file so it can be retrieved later."""
+    try:
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        crash_file = project_root / ".crucible" / "mcp_crash.log"
+        crash_file.parent.mkdir(parents=True, exist_ok=True)
+        import socket
+        crash_file.write_text(
+            f"MCP server crash at {time.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+            f"Hostname: {socket.gethostname()}\n"
+            f"Exception: {type(exc).__name__}: {exc}\n"
+            f"Module: {type(exc).__module__}\n"
+            f"\nTraceback:\n{tb}\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass  # Never let crash reporting itself crash
 
 
 def main_cli() -> None:
     """Entry point for crucible-mcp console script."""
-    asyncio.run(_run_server())
+    try:
+        asyncio.run(_run_server())
+    except KeyboardInterrupt:
+        pass  # Already handled above
+    except Exception as exc:
+        tb = traceback.format_exc()
+        _log.critical("MCP server fatal error: %s\n%s", exc, tb)
+        _write_crash_report(exc, tb)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

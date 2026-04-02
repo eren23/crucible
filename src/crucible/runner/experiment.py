@@ -322,8 +322,19 @@ def run_experiment(
                 },
             )
 
+            gpu_count = int(env.get("GPU_COUNT", "1"))
+            if gpu_count > 1 and backend == "torch":
+                cmd = [
+                    "torchrun",
+                    f"--nproc_per_node={gpu_count}",
+                    "--master_port=29500",
+                    str(script),
+                ]
+            else:
+                cmd = [python, str(script)]
+
             proc = subprocess.Popen(
-                [python, str(script)],
+                cmd,
                 env=env,
                 cwd=str(root),
                 stdout=subprocess.PIPE,

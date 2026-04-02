@@ -107,6 +107,7 @@ class FleetManager:
             ssh_key=config.provider.ssh_key,
             image_name=config.provider.image or "",
             gpu_type_ids=config.provider.gpu_types or None,
+            gpu_count=config.provider.gpu_count or 1,
             interruptible=config.provider.interruptible,
             defaults=config.provider.defaults,
         )
