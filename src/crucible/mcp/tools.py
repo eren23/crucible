@@ -3233,6 +3233,8 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
             provider_overrides["volume_gb"] = spec.pod.volume_disk
         if spec.pod.interruptible is not None:
             provider_overrides["interruptible"] = spec.pod.interruptible
+        if spec.pod.gpu_count:
+            provider_overrides["gpu_count"] = spec.pod.gpu_count
 
         previous_ids = {
             n.get("node_id") or n.get("pod_id")

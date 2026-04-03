@@ -338,19 +338,26 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
     if precomputed:
         # Fast path: load precomputed HF dataset (pre-resized, pre-normalized)
         from datasets import load_dataset as _load_hf
-        _hf_ds = _load_hf(precomputed)
+        _hf_token = os.environ.get("HF_TOKEN") or None
+        _hf_ds = _load_hf(precomputed, token=_hf_token)
         _hf_ds.set_format("torch")
         train_set = _hf_ds["train"]
         val_set = _hf_ds["validation"] if "validation" in _hf_ds else _hf_ds["test"]
 
         with open_dict(cfg):
+            frameskip = int(cfg.data.dataset.get("frameskip", 1))
             for col in cfg.data.dataset.keys_to_load:
                 if col.startswith("pixels"):
                     continue
                 sample = train_set[0]
                 if col in sample:
-                    dim = sample[col].shape[-1] if sample[col].dim() > 1 else 1
-                    setattr(cfg.wm, f"{col}_dim", dim)
+                    # Precomputed tensors already include frameskip expansion,
+                    # but cfg.wm.*_dim must match get_dim() semantics (raw dim
+                    # before frameskip), because effective_act_dim = frameskip * action_dim.
+                    raw_dim = sample[col].shape[-1] if sample[col].dim() > 1 else 1
+                    if col == "action" and frameskip > 1:
+                        raw_dim = raw_dim // frameskip
+                    setattr(cfg.wm, f"{col}_dim", raw_dim)
 
         train = torch.utils.data.DataLoader(
             train_set, batch_size=batch_size, shuffle=True, drop_last=True,
@@ -649,8 +656,12 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
     )
 
     logger = None
+    wandb_log_model = _env_int("WANDB_LOG_MODEL", 1)
     if cfg.wandb.enabled:
-        logger = WandbLogger(**cfg.wandb.config)
+        wandb_cfg = dict(cfg.wandb.config)
+        if wandb_log_model:
+            wandb_cfg["log_model"] = "all"
+        logger = WandbLogger(**wandb_cfg)
         logger.log_hyperparams(OmegaConf.to_container(cfg))
 
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -662,9 +673,22 @@ def run_training(cfg: Any, *, mode: str, slim: bool) -> None:
         filename=cfg.output_model_name,
         epoch_interval=1,
     )
+
+    from lightning.pytorch.callbacks import ModelCheckpoint
+    ckpt_callback = ModelCheckpoint(
+        dirpath=run_dir,
+        filename="{epoch:02d}-{step}",
+        every_n_epochs=1,
+        save_top_k=-1,
+    )
+
+    with open_dict(cfg):
+        cfg.trainer.accelerator = "gpu"
+        cfg.trainer.devices = 1
+
     trainer = pl.Trainer(
         **cfg.trainer,
-        callbacks=[object_dump_callback],
+        callbacks=[object_dump_callback, ckpt_callback],
         num_sanity_val_steps=1,
         logger=logger,
         enable_checkpointing=True,

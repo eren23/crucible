@@ -6,7 +6,32 @@ This document describes how to create and share custom data source plugins for C
 
 Data source plugins let you define custom ways to provide data for training - HuggingFace datasets, W&B artifacts, local files, or entirely custom sources.
 
-During fleet **bootstrap**, the pre-download data-source check reads `crucible.yaml` `data:` and runs **on the remote node workspace** (so `local_root` is resolved relative to the pod).
+### Bootstrap Pre-Check Behavior
+
+During fleet **bootstrap**, Crucible performs a smart pre-check before downloading data:
+
+1. Reads `crucible.yaml` `data:` configuration (including the `variant` field for variant-specific configs like `fineweb10B_sp1024`)
+2. Runs a probe script **on the remote node** that checks if data status is `PARTIAL`
+3. If status is `PARTIAL` (some shards present but incomplete), auto-download is skipped with a warning
+4. If status is `MISSING` or `FRESH`, proceeds with normal download/preparation
+
+This avoids wasteful re-downloads when data already exists on the node from a prior run.
+
+### DataConfig Variant Field
+
+The `variant` field in `DataConfig` specifies which data variant to use:
+
+```yaml
+data:
+  source: huggingface
+  repo_id: my-org/my-dataset
+  variant: fineweb10B_sp1024  # Specific configuration variant
+```
+
+Common variants for FineWeb:
+- `fineweb10B_sp1024` — 10B tokens, 1024 sequence length
+- `fineweb10B_sp2048` — 10B tokens, 2048 sequence length
+- `fineweb10B_sp4096` — 10B tokens, 4096 sequence length
 
 ## Directory Structure
 
