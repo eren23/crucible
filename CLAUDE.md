@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (112 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (120 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -152,7 +152,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 2. **Wave Spec** → JSON array in `specs/` (or use `design_enqueue_batch` directly)
 3. **Provision** → `provision_nodes` creates RunPod pods
 4. **Refresh** → `fleet_refresh` gets SSH endpoints
-5. **Bootstrap** → `bootstrap_nodes` syncs code, installs deps, downloads data
+5. **Bootstrap** → `bootstrap_nodes` syncs code, installs deps, probes data source status, skips download if PARTIAL
 6. **Enqueue** → `design_enqueue_batch` or `enqueue_experiment` adds to queue
 7. **Dispatch** → `dispatch_experiments` assigns queued runs to idle nodes
 8. **Monitor** → `get_fleet_status` + `get_queue_status` for progress
@@ -168,7 +168,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., lewm architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`LEWM_VARIANT` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (115 total)
+### MCP Tools (120 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -295,6 +295,7 @@ All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-
 | Stack Patterns | `models/composer.py` | sequential, encoder_decoder_skip, looped, prefix_memory_stack |
 | Augmentations | `models/composer.py` | smear_gate, bigram_hash, trigram_hash |
 | Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
+| Data Sources | `core/data_sources.py` | huggingface, local_files, wandb_artifact |
 
 **Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.
 
@@ -335,6 +336,7 @@ optimizers/lion/
 
 ## What NOT to do
 - Don't add new architectures to core — build plugins in `.crucible/architectures/`
+- Don't add new data source implementations to core — build plugins in `.crucible/plugins/data_sources/`
 - Don't build a full experiment tracking UI — the TUI and REST API cover agent/developer needs; use W&B/MLflow for dashboards
 - Don't build Kubernetes support — use SkyPilot when ready
 - Don't reinvent HPO math — integrate Optuna/Ax

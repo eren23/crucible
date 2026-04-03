@@ -24,8 +24,14 @@ install_flags: "--index-url https://download.pytorch.org/whl/cu124"
 launcher: elastic_lewm_upstream
 launcher_entry: elastic_lewm_upstream.py
 
+local_files:
+  - ".env.lewm"
+
 setup:
-  - "export STABLEWM_HOME=/root/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/root/stable-wm-data',exist_ok=True); final=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\""
+  # 1. HF auth for private dataset access
+  - "if [ -f /workspace/le-wm/.env.lewm ]; then HF_TOKEN=$(grep -E '^HF_TOKEN=' /workspace/le-wm/.env.lewm | head -1 | cut -d= -f2); if [ -n \"$HF_TOKEN\" ]; then mkdir -p ~/.cache/huggingface && echo -n \"$HF_TOKEN\" > ~/.cache/huggingface/token && echo 'HF auth configured'; fi; rm -f /workspace/le-wm/.env.lewm; fi"
+  # 2. Download HDF5 only if NOT using precomputed dataset
+  - "if [ -n \"${PRECOMPUTED_DATASET}\" ]; then echo \"Using precomputed dataset: ${PRECOMPUTED_DATASET}, skipping HDF5 download\"; else export STABLEWM_HOME=/root/stable-wm-data && mkdir -p $STABLEWM_HOME && python3 -c \"import h5py,pathlib; p=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); ok=p.exists() and h5py.is_hdf5(p); (not ok and p.exists()) and p.unlink(); print('data exists' if ok else 'downloading'); raise SystemExit(0 if ok else 1)\" || python3 -c \"from huggingface_hub import hf_hub_url; import zstandard,os,pathlib,urllib.request; os.makedirs('/root/stable-wm-data',exist_ok=True); final=pathlib.Path('/root/stable-wm-data/pusht_expert_train.h5'); tmp=final.with_suffix('.h5.tmp'); url=hf_hub_url('quentinll/lewm-pusht','pusht_expert_train.h5.zst',repo_type='dataset'); r=urllib.request.urlopen(url); o=open(tmp,'wb'); zstandard.ZstdDecompressor().copy_stream(r,o); r.close(); o.close(); os.replace(tmp, final); print('downloaded')\"; fi"
 setup_timeout: 3600
 
 # TRAIN_SCRIPT defaults to the resolved launcher runtime path copied by bootstrap_project.
@@ -67,6 +73,8 @@ env_set:
   WANDB_MODE: online
   STABLEWM_HOME: /root/stable-wm-data
   SLIM_BATCH_SIZE: "256"
+  HF_HOME: /workspace/hf_cache
+  PRECOMPUTED_DATASET: "eren23/lewm-pusht-processed"
 
 metrics:
   source: wandb

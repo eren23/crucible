@@ -5,7 +5,7 @@ title: MCP Tools Reference
 
 # MCP Tools Reference
 
-Crucible exposes 112 MCP tools for AI agents. Start the server:
+Crucible exposes 120 MCP tools for AI agents. Start the server:
 ```bash
 crucible mcp serve
 ```
@@ -31,7 +31,86 @@ Configure in Claude Desktop or any MCP client:
 | `destroy_nodes` | Tear down tracked nodes |
 | `sync_code` | Push local code to nodes via rsync |
 | `fleet_refresh` | Refresh node states from cloud provider API |
-| `bootstrap_nodes` | Sync code, install deps, download data on nodes |
+| `bootstrap_nodes` | Sync code, install deps, probe data sources, skip download if data is PARTIAL |
+
+## Data Sources (7 tools)
+
+Manage data sources for training via a unified plugin system. Supports HuggingFace datasets, W&B artifacts, and local files.
+
+| Tool | Description |
+|------|-------------|
+| `data_list` | List all registered data source plugins |
+| `data_status` | Check data source status (FRESH/STALE/MISSING/PARTIAL) |
+| `data_prepare` | Download/cache data for a source |
+| `data_validate` | Validate data integrity and configuration |
+| `data_search` | Search for available data from a source |
+| `data_link` | Link a data source to an experiment run (provenance) |
+| `data_get_linked` | Get data sources linked to a run |
+
+### data_list
+
+List all registered data source plugins (builtin + global + local).
+
+**Parameters:** None.
+
+**Example:** `{}`
+
+### data_status
+
+Check the current status of a data source.
+
+**Parameters:**
+- `name` (string, required) — Data source name
+- `type` (string, optional) — Plugin type (huggingface, local_files, wandb_artifact)
+- `config` (object, optional) — Plugin-specific configuration
+
+**Example:**
+```json
+{"name": "fineweb", "type": "huggingface", "config": {"repo_id": "..."}}
+```
+
+### data_prepare
+
+Download/cache data for a source. Long-running operation.
+
+**Parameters:**
+- `name` (string, required) — Data source name
+- `type` (string, optional) — Plugin type
+- `config` (object, optional) — Plugin configuration
+- `force` (bool, optional) — Force re-download even if fresh (default: false)
+- `background` (bool, optional) — Not implemented yet
+
+### data_validate
+
+Validate data integrity and configuration.
+
+**Parameters:**
+- `name` (string, required) — Data source name
+- `type` (string, optional) — Plugin type
+- `config` (object, optional) — Plugin configuration
+
+### data_search
+
+Search for available data from a source.
+
+**Parameters:**
+- `query` (string, optional) — Search query
+- `type` (string, optional) — Plugin type to search within
+
+### data_link
+
+Link a data source to an experiment run for provenance tracking.
+
+**Parameters:**
+- `run_id` (string, required) — The experiment run ID
+- `data_name` (string, required) — Data source name
+
+### data_get_linked
+
+Get data sources linked to an experiment run.
+
+**Parameters:**
+- `run_id` (string, required) — The experiment run ID
 
 ## Experiment Queue (5 tools)
 

@@ -272,6 +272,7 @@ class PodOverrides:
     """Pod config overrides for external projects."""
     image: str = ""
     gpu_type: str = ""
+    gpu_count: int = 0
     container_disk: int = 0
     volume_disk: int = 0
     interruptible: bool | None = None
@@ -318,6 +319,7 @@ def _build_pod_overrides(raw: dict[str, Any]) -> PodOverrides:
     return PodOverrides(
         image=raw.get("image", ""),
         gpu_type=raw.get("gpu_type", ""),
+        gpu_count=raw.get("gpu_count", 0),
         container_disk=raw.get("container_disk", 0),
         volume_disk=raw.get("volume_disk", 0),
         interruptible=raw.get("interruptible"),
