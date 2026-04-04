@@ -110,6 +110,8 @@ class FleetManager:
             gpu_count=config.provider.gpu_count or 1,
             interruptible=config.provider.interruptible,
             defaults=config.provider.defaults,
+            network_volume_id=config.provider.network_volume_id,
+            template_id=config.provider.template_id,
         )
 
     # ------------------------------------------------------------------
@@ -278,6 +280,36 @@ class FleetManager:
         remaining = self.provider.destroy(nodes, selected_names=selected_names)
         save_nodes(self.nodes_file, remaining)
         return remaining
+
+    # ------------------------------------------------------------------
+    # Stop / Start (pod lifecycle)
+    # ------------------------------------------------------------------
+
+    def stop(
+        self,
+        nodes: list[dict[str, Any]] | None = None,
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Stop nodes via the provider (preserves disk/bootstrap state)."""
+        if nodes is None:
+            nodes = load_nodes_if_exists(self.nodes_file)
+        updated = self.provider.stop(nodes, selected_names=selected_names)
+        save_nodes_threadsafe(self.nodes_file, updated)
+        return updated
+
+    def start(
+        self,
+        nodes: list[dict[str, Any]] | None = None,
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Start stopped nodes via the provider and wait for SSH."""
+        if nodes is None:
+            nodes = load_nodes_if_exists(self.nodes_file)
+        updated = self.provider.start(nodes, selected_names=selected_names)
+        save_nodes_threadsafe(self.nodes_file, updated)
+        return updated
 
     # ------------------------------------------------------------------
     # Status

@@ -19,6 +19,8 @@ class ProviderConfig:
     gpu_count: int = 1  # Number of GPUs per node (multi-GPU support)
     interruptible: bool = True
     defaults: dict[str, Any] = field(default_factory=dict)
+    network_volume_id: str = ""  # RunPod network volume ID for shared storage
+    template_id: str = ""        # RunPod template ID for standardized provisioning
 
 
 @dataclass
@@ -134,6 +136,8 @@ def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
         gpu_count=raw.get("gpu_count", 1),
         interruptible=raw.get("interruptible", True),
         defaults=raw.get("defaults", {}),
+        network_volume_id=raw.get("network_volume_id", ""),
+        template_id=raw.get("template_id", ""),
     )
 
 

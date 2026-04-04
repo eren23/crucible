@@ -18,7 +18,9 @@ from crucible.fleet.inventory import (
     upsert_node_record,
     count_bootstrapped_ready,
     next_node_index,
+    classify_health,
     BAD_API_STATES,
+    PAUSED_STATES,
 )
 
 
@@ -174,6 +176,18 @@ class TestSummarizeNodes:
         summary = summarize_nodes(nodes)
         assert summary["nodes_bootstrapped"] == 1
 
+    def test_summarize_counts_stopped_separately(self):
+        """Stopped nodes count in nodes_stopped but NOT in nodes_failed."""
+        nodes = [
+            _ready_node("gpu-1"),
+            {**_ready_node("gpu-2"), "state": "stopped"},
+            {**_unready_node("gpu-3"), "state": "terminated"},
+        ]
+        summary = summarize_nodes(nodes)
+        assert summary["nodes_stopped"] == 1
+        assert summary["nodes_failed"] == 1  # only 'terminated', not 'stopped'
+        assert summary["nodes_ready"] == 1
+
 
 # ---------------------------------------------------------------------------
 # merge_node_record
@@ -222,6 +236,49 @@ class TestMergeNodeRecord:
         merged = merge_node_record(existing, incoming)
         assert merged["project"] == "lewm"
         assert merged["workspace_path"] == "/workspace/le-wm"
+
+    # --- PAUSED_STATES guard -------------------------------------------------
+
+    def test_merge_stopped_api_returns_stopped_state(self):
+        """incoming api_state='stopped', existing state='ready' -> merged state='stopped'."""
+        existing = _ready_node("gpu-1")
+        incoming = {**_ready_node("gpu-1"), "api_state": "stopped"}
+        merged = merge_node_record(existing, incoming)
+        assert merged["state"] == "stopped"
+
+    def test_merge_stopped_preserves_bootstrap_flags(self):
+        """incoming api_state='stopped', existing env_ready=True -> preserved via early return."""
+        existing = {**_ready_node("gpu-1"), "env_ready": True, "dataset_ready": True, "git_sha": "abc"}
+        incoming = {**_unready_node("gpu-1"), "api_state": "stopped"}
+        merged = merge_node_record(existing, incoming)
+        assert merged["env_ready"] is True
+        assert merged["dataset_ready"] is True
+        assert merged["git_sha"] == "abc"
+
+    def test_merge_stopped_does_not_promote_to_ready(self):
+        """Fully bootstrapped + api_state='stopped' -> state='stopped', NOT 'ready'."""
+        existing = {
+            **_ready_node("gpu-1"),
+            "env_ready": True,
+            "dataset_ready": True,
+            "git_sha": "abc",
+        }
+        incoming = {
+            **_ready_node("gpu-1"),
+            "env_ready": True,
+            "dataset_ready": True,
+            "git_sha": "abc",
+            "api_state": "stopped",
+        }
+        merged = merge_node_record(existing, incoming)
+        assert merged["state"] == "stopped"
+
+    def test_merge_starting_not_clobbered_by_stopped_api(self):
+        """existing state='starting', incoming api_state='stopped' -> NOT 'stopped'."""
+        existing = {**_unready_node("gpu-1"), "state": "starting"}
+        incoming = {**_unready_node("gpu-1"), "api_state": "stopped", "state": "starting"}
+        merged = merge_node_record(existing, incoming)
+        assert merged["state"] != "stopped"
 
 
 # ---------------------------------------------------------------------------
@@ -307,3 +364,21 @@ class TestUtilityFunctions:
         ]
         assert next_node_index(nodes, "gpu") == 2
         assert next_node_index(nodes, "cpu") == 3
+
+
+# ---------------------------------------------------------------------------
+# classify_health — stopped / paused pods
+# ---------------------------------------------------------------------------
+
+class TestClassifyHealthStopped:
+    """Verify classify_health returns 'stopped' for paused pods, not a BAD_API_STATE."""
+
+    def test_classify_stopped_node_returns_stopped(self):
+        """Node with state='stopped' returns 'stopped', not a BAD_API_STATE label."""
+        node = {**_ready_node("gpu-1"), "state": "stopped", "api_state": "stopped"}
+        assert classify_health(node) == "stopped"
+
+    def test_classify_exited_returns_stopped(self):
+        """Node with api_state='exited' returns 'stopped' (paused, not failed)."""
+        node = {**_ready_node("gpu-1"), "state": "exited", "api_state": "exited"}
+        assert classify_health(node) == "stopped"
