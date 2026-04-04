@@ -472,8 +472,9 @@ def build_pod_payload(
         "containerDiskInGb": container_disk_gb,
         "env": {
             "JUPYTER_PASSWORD": uuid.uuid4().hex[:16],
-            "PUBLIC_KEY": public_key,
-            "SSH_PUBLIC_KEY": public_key,
+            # SSH key is set via top-level "publicKey" field (not env vars).
+            # Env-var approach (PUBLIC_KEY / SSH_PUBLIC_KEY) is unreliable on
+            # community pods — depends on image entrypoint parsing them.
         },
         "gpuCount": gpu_count,
         "gpuTypeIds": gpu_type_ids,
@@ -484,6 +485,8 @@ def build_pod_payload(
         "minVCPUPerGPU": 2,
         "name": name,
         "ports": ports,
+        # RunPod API-level SSH key injection — reliable across all pod types.
+        "publicKey": public_key,
         "supportPublicIp": True,
         "volumeInGb": volume_gb,
         "volumeMountPath": volume_mount_path,

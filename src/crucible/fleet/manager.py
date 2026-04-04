@@ -138,7 +138,9 @@ class FleetManager:
         )
         merged = merge_node_snapshots(existing_nodes, nodes)
         save_nodes_threadsafe(self.nodes_file, merged)
-        return merged
+        # Return only the newly created nodes, not the full merged inventory.
+        # The MCP layer uses len(result) as the "created" count.
+        return nodes
 
     def provision_and_wait(
         self,
