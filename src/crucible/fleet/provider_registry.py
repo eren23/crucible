@@ -58,7 +58,7 @@ def list_providers_detailed() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: Any = None, defaults: Any = None, gpu_count: int = 1, **kwargs: Any) -> Any:
+def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: Any = None, defaults: Any = None, gpu_count: int = 1, network_volume_id: str = "", template_id: str = "", **kwargs: Any) -> Any:
     from crucible.fleet.providers.runpod import RunPodProvider
     return RunPodProvider(
         image_name=image_name or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
@@ -67,6 +67,8 @@ def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: An
         interruptible=bool(kwargs.get("interruptible", True)),
         defaults=defaults or {},
         gpu_count=gpu_count,
+        network_volume_id=network_volume_id,
+        template_id=template_id,
     )
 
 

@@ -1,6 +1,9 @@
-"""RunPod REST API provider: provision, destroy, refresh, wait, inventory_record_from_api.
+"""RunPod fleet provider: REST + GraphQL APIs.
 
 Uses stdlib ``urllib`` only -- no ``requests`` dependency required.
+REST API (``rest.runpod.io/v1``) handles pod CRUD.
+GraphQL API (``api.runpod.io/graphql``) handles stop/start, network volumes,
+GPU availability, and templates.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import remote_exec, ssh_ok
 
 RUNPOD_REST_BASE = os.environ.get("RUNPOD_REST_BASE", "https://rest.runpod.io/v1")
+RUNPOD_GRAPHQL_URL = os.environ.get("RUNPOD_GRAPHQL_URL", "https://api.runpod.io/graphql")
 DEFAULT_IMAGE_NAME = "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404"
 DEFAULT_GPU_TYPE_IDS = ["NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 4090"]
 DEFAULT_OVERNIGHT_GPU_TYPE_IDS = ["NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090"]
@@ -90,8 +94,49 @@ def runpod_request(
         raise FleetError(f"RunPod API {method} {path} failed: {exc}") from exc
 
 
+def runpod_graphql(
+    query: str,
+    variables: dict[str, Any] | None = None,
+    *,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    """Perform a RunPod GraphQL query/mutation.
+
+    Returns the ``data`` dict from the response.  Raises ``FleetError``
+    on HTTP errors or GraphQL-level errors.
+    """
+    api_key = runpod_api_key()
+    payload: dict[str, Any] = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    req = urlrequest.Request(RUNPOD_GRAPHQL_URL, data=body, headers=headers, method="POST")
+    try:
+        with urlrequest.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            result = json.loads(raw)
+    except urlerror.HTTPError as exc:
+        body_text = exc.read().decode("utf-8", errors="replace")
+        raise FleetError(f"RunPod GraphQL failed: {exc.code} {body_text}") from exc
+    except urlerror.URLError as exc:
+        raise FleetError(f"RunPod GraphQL failed: {exc}") from exc
+
+    errors = result.get("errors")
+    if errors:
+        msg = errors[0].get("message", str(errors[0]))
+        raise FleetError(f"RunPod GraphQL error: {msg}")
+    data = result.get("data")
+    if data is None:
+        raise FleetError(f"RunPod GraphQL returned no data: {raw[:200]}")
+    return data
+
+
 # ---------------------------------------------------------------------------
-# Low-level API operations
+# Low-level API operations (REST)
 # ---------------------------------------------------------------------------
 
 def runpod_list_api_pods(*, name: str | None = None) -> list[dict[str, Any]]:
@@ -144,6 +189,243 @@ def default_cloud_types(*, interruptible: bool) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# GraphQL operations: pod lifecycle (stop / start)
+# ---------------------------------------------------------------------------
+
+def runpod_stop_pod(pod_id: str) -> dict[str, Any]:
+    """Stop a running pod (preserves disk).  Returns the mutation result."""
+    data = runpod_graphql(
+        """
+        mutation stopPod($podId: String!) {
+            podStop(input: {podId: $podId}) {
+                id
+                desiredStatus
+                lastStatusChange
+            }
+        }
+        """,
+        variables={"podId": pod_id},
+        timeout=120,
+    )
+    return data.get("podStop") or {}
+
+
+def runpod_start_pod(pod_id: str) -> dict[str, Any]:
+    """Resume a stopped on-demand pod.  Returns the mutation result."""
+    data = runpod_graphql(
+        """
+        mutation podResume($podId: String!) {
+            podResume(input: {podId: $podId}) {
+                id
+                costPerHr
+                desiredStatus
+                lastStatusChange
+            }
+        }
+        """,
+        variables={"podId": pod_id},
+        timeout=120,
+    )
+    return data.get("podResume") or {}
+
+
+def runpod_start_spot_pod(
+    pod_id: str,
+    bid_per_gpu: float,
+    gpu_count: int = 1,
+) -> dict[str, Any]:
+    """Resume a stopped spot/interruptible pod with a bid price."""
+    data = runpod_graphql(
+        """
+        mutation podBidResume($podId: String!, $bidPerGpu: Float!, $gpuCount: Int!) {
+            podBidResume(input: {podId: $podId, bidPerGpu: $bidPerGpu, gpuCount: $gpuCount}) {
+                id
+                costPerHr
+                desiredStatus
+                lastStatusChange
+            }
+        }
+        """,
+        variables={"podId": pod_id, "bidPerGpu": bid_per_gpu, "gpuCount": gpu_count},
+        timeout=120,
+    )
+    return data.get("podBidResume") or {}
+
+
+# ---------------------------------------------------------------------------
+# GraphQL operations: network volumes
+# ---------------------------------------------------------------------------
+
+def runpod_list_network_volumes() -> list[dict[str, Any]]:
+    """List all network volumes in the account."""
+    data = runpod_graphql(
+        """
+        query getNetworkVolumes {
+            myself {
+                networkVolumes {
+                    id
+                    dataCenterId
+                    name
+                    size
+                }
+            }
+        }
+        """,
+    )
+    myself = data.get("myself") or {}
+    return myself.get("networkVolumes") or []
+
+
+def runpod_create_network_volume(
+    name: str,
+    size_gb: int,
+    datacenter_id: str,
+) -> dict[str, Any]:
+    """Create a persistent network volume.  Returns ``{id, name, size, dataCenterId}``."""
+    data = runpod_graphql(
+        """
+        mutation createNetworkVolume($input: CreateNetworkVolumeInput!) {
+            createNetworkVolume(input: $input) {
+                id
+                name
+                size
+                dataCenterId
+            }
+        }
+        """,
+        variables={
+            "input": {
+                "name": name,
+                "size": size_gb,
+                "dataCenterId": datacenter_id,
+            },
+        },
+    )
+    return data.get("createNetworkVolume") or {}
+
+
+def runpod_delete_network_volume(volume_id: str) -> None:
+    """Delete a network volume by ID."""
+    data = runpod_graphql(
+        """
+        mutation deleteNetworkVolume($id: String!) {
+            deleteNetworkVolume(input: {id: $id})
+        }
+        """,
+        variables={"id": volume_id},
+    )
+    if not data.get("deleteNetworkVolume"):
+        raise FleetError(f"Failed to delete network volume {volume_id}")
+
+
+# ---------------------------------------------------------------------------
+# GraphQL operations: GPU availability & pricing
+# ---------------------------------------------------------------------------
+
+def runpod_list_gpu_types(
+    gpu_count: int = 1,
+    secure_cloud: bool | None = None,
+) -> list[dict[str, Any]]:
+    """List available GPU types with lowest spot & on-demand prices."""
+    gql_input: dict[str, Any] = {"gpuCount": gpu_count}
+    if secure_cloud is not None:
+        gql_input["secureCloud"] = secure_cloud
+    data = runpod_graphql(
+        """
+        query LowestPrice($input: GpuLowestPriceInput!) {
+            gpuTypes {
+                lowestPrice(input: $input) {
+                    gpuName
+                    gpuTypeId
+                    minimumBidPrice
+                    uninterruptablePrice
+                    minMemory
+                    minVcpu
+                }
+            }
+        }
+        """,
+        variables={"input": gql_input},
+    )
+    gpu_types = data.get("gpuTypes") or []
+    # Flatten: each element is {"lowestPrice": {...}} — extract the inner dict
+    result: list[dict[str, Any]] = []
+    for gt in gpu_types:
+        price = gt.get("lowestPrice")
+        if price and price.get("gpuName"):
+            result.append(price)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# GraphQL operations: templates
+# ---------------------------------------------------------------------------
+
+def runpod_list_templates() -> list[dict[str, Any]]:
+    """List the user's own templates."""
+    data = runpod_graphql(
+        """
+        query getTemplates {
+            myself {
+                podTemplates {
+                    id
+                    name
+                    imageName
+                    dockerArgs
+                    containerDiskInGb
+                    volumeInGb
+                    volumeMountPath
+                    ports
+                    isServerless
+                }
+            }
+        }
+        """,
+    )
+    myself = data.get("myself") or {}
+    return myself.get("podTemplates") or []
+
+
+def runpod_create_template(
+    name: str,
+    image: str,
+    *,
+    container_disk_gb: int = 20,
+    volume_gb: int = 40,
+    volume_mount_path: str = "/workspace",
+    ports: str = "22/tcp,8888/http",
+    docker_args: str = "",
+    env: dict[str, str] | None = None,
+    is_serverless: bool = False,
+) -> dict[str, Any]:
+    """Create a pod template.  Returns ``{id, name}``."""
+    gql_input: dict[str, Any] = {
+        "name": name,
+        "imageName": image,
+        "containerDiskInGb": container_disk_gb,
+        "volumeInGb": volume_gb,
+        "volumeMountPath": volume_mount_path,
+        "ports": ports,
+        "dockerArgs": docker_args,
+        "isServerless": is_serverless,
+    }
+    if env:
+        gql_input["env"] = [{"key": k, "value": v} for k, v in env.items()]
+    data = runpod_graphql(
+        """
+        mutation saveTemplate($input: SaveTemplateInput!) {
+            saveTemplate(input: $input) {
+                id
+                name
+            }
+        }
+        """,
+        variables={"input": gql_input},
+    )
+    return data.get("saveTemplate") or {}
+
+
+# ---------------------------------------------------------------------------
 # Pod payload / port parsing
 # ---------------------------------------------------------------------------
 
@@ -173,15 +455,17 @@ def build_pod_payload(
     public_key: str,
     ports: list[str],
     gpu_count: int = 1,
+    network_volume_id: str | None = None,
+    template_id: str | None = None,
 ) -> dict[str, Any]:
     """Construct the JSON body for a POST /pods request."""
     if container_disk_gb < 0 or volume_gb < 0:
         raise FleetError("RunPod disk sizes must be non-negative.")
-    if volume_gb and volume_gb < container_disk_gb:
+    if not network_volume_id and volume_gb > 0 and volume_gb < container_disk_gb:
         raise FleetError(
             "RunPod volume size must be greater than or equal to container disk size.",
         )
-    return {
+    payload: dict[str, Any] = {
         "allowedCudaVersions": ["12.8"],
         "cloudType": cloud_type,
         "computeType": "GPU",
@@ -204,6 +488,11 @@ def build_pod_payload(
         "volumeInGb": volume_gb,
         "volumeMountPath": volume_mount_path,
     }
+    if network_volume_id:
+        payload["networkVolumeId"] = network_volume_id
+    if template_id:
+        payload["templateId"] = template_id
+    return payload
 
 
 def create_api_pod(
@@ -219,6 +508,8 @@ def create_api_pod(
     public_key: str,
     ports: list[str],
     gpu_count: int = 1,
+    network_volume_id: str | None = None,
+    template_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a RunPod pod and return the raw API response."""
     payload = build_pod_payload(
@@ -227,6 +518,7 @@ def create_api_pod(
         container_disk_gb=container_disk_gb, volume_gb=volume_gb,
         volume_mount_path=volume_mount_path, public_key=public_key,
         ports=ports, gpu_count=gpu_count,
+        network_volume_id=network_volume_id, template_id=template_id,
     )
     created = runpod_request("POST", "/pods", payload=payload)
     if not isinstance(created, dict):
@@ -261,6 +553,14 @@ def inventory_record_from_api(
     state = local_state or api_state or "new"
     if local_state in {"", "creating", "new"} and api_state:
         state = api_state
+    # Intentional stop/start lifecycle transitions
+    if api_state in {"stopped", "exited"} and local_state not in {"stopped", "exited", "starting"}:
+        state = "stopped"
+    elif local_state == "stopped" and api_state in {"running", "ready", ""}:
+        state = "starting"
+    elif local_state == "starting" and api_state in {"running", "ready"}:
+        # Pod resumed — transition to "new" (SSH wait will promote to "ready")
+        state = "new"
     return {
         "name": raw.get("name") or previous.get("name") or raw["id"],
         "node_id": raw["id"],
@@ -290,6 +590,7 @@ def inventory_record_from_api(
         "git_sha": previous.get("git_sha"),
         "last_seen_at": previous.get("last_seen_at"),
         "replacement": bool(previous.get("replacement", False)),
+        "network_volume_id": raw.get("networkVolumeId") or previous.get("network_volume_id") or "",
         "provider": "runpod",
     }
 
@@ -322,6 +623,8 @@ class RunPodProvider(FleetProvider):
         ssh_key: str = "~/.ssh/id_ed25519_runpod",
         defaults: dict[str, Any] | None = None,
         gpu_count: int = 1,
+        network_volume_id: str = "",
+        template_id: str = "",
     ) -> None:
         self.image_name = image_name
         self.gpu_type_ids = gpu_type_ids or list(DEFAULT_GPU_TYPE_IDS)
@@ -335,6 +638,8 @@ class RunPodProvider(FleetProvider):
         self.ssh_key = ssh_key
         self.defaults = defaults or {}
         self.gpu_count = gpu_count
+        self.network_volume_id = network_volume_id
+        self.template_id = template_id
 
     # -- FleetProvider interface ------------------------------------------
 
@@ -358,6 +663,8 @@ class RunPodProvider(FleetProvider):
         eff_interruptible = bool(kwargs.pop("interruptible", self.interruptible))
         eff_cloud_types = kwargs.pop("cloud_types", None)
         eff_gpu_count = kwargs.pop("gpu_count", self.gpu_count)
+        eff_network_volume_id = kwargs.pop("network_volume_id", self.network_volume_id) or None
+        eff_template_id = kwargs.pop("template_id", self.template_id) or None
         if eff_cloud_types is None:
             eff_cloud_types = (
                 list(self.cloud_types)
@@ -389,11 +696,15 @@ class RunPodProvider(FleetProvider):
                         public_key=public_key,
                         ports=self.ports,
                         gpu_count=eff_gpu_count,
+                        network_volume_id=eff_network_volume_id,
+                        template_id=eff_template_id,
                     )
                     node = inventory_record_from_api(raw, defaults=self.defaults)
                     node["state"] = "creating"
                     node["replacement"] = replacement
                     node["ssh_key"] = self.ssh_key
+                    if eff_network_volume_id:
+                        node["network_volume_id"] = eff_network_volume_id
                     created.append(node)
                     log_success(f"Created {name} ({cloud_type}, {eff_gpu_count} GPU(s))")
                     break
@@ -520,6 +831,77 @@ class RunPodProvider(FleetProvider):
             except FleetError:
                 pass  # Best-effort: pod may already be gone
         return destroyed
+
+    # -- Stop / Start lifecycle -------------------------------------------
+
+    def stop(
+        self,
+        nodes: list[dict[str, Any]],
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Stop running pods.  Preserves disk and bootstrap state."""
+        updated: list[dict[str, Any]] = []
+        for node in nodes:
+            if selected_names and node["name"] not in selected_names:
+                updated.append(node)
+                continue
+            pod_id = node.get("pod_id") or node.get("node_id")
+            if not pod_id:
+                updated.append(node)
+                continue
+            try:
+                runpod_stop_pod(pod_id)
+                node = dict(node)
+                node["state"] = "stopped"
+                node["api_state"] = "stopped"
+                log_info(f"Stopped {node['name']} ({pod_id})")
+            except FleetError as exc:
+                log_warn(f"Failed to stop {node.get('name', '?')}: {exc}")
+            updated.append(node)
+        return updated
+
+    def start(
+        self,
+        nodes: list[dict[str, Any]],
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Start stopped pods and wait for SSH readiness."""
+        started: list[dict[str, Any]] = []
+        for node in nodes:
+            if selected_names and node["name"] not in selected_names:
+                started.append(node)
+                continue
+            pod_id = node.get("pod_id") or node.get("node_id")
+            if not pod_id:
+                started.append(node)
+                continue
+            try:
+                if node.get("interruptible"):
+                    cost = node.get("cost_per_hr", 0.0)
+                    bid = max(cost, 0.10)  # floor: never bid below $0.10/gpu
+                    gpu_count = node.get("gpu_count", 1)
+                    runpod_start_spot_pod(pod_id, bid_per_gpu=bid, gpu_count=gpu_count)
+                else:
+                    runpod_start_pod(pod_id)
+                node = dict(node)
+                node["state"] = "starting"
+                node["api_state"] = "starting"
+                log_info(f"Started {node['name']} ({pod_id})")
+            except FleetError as exc:
+                log_warn(f"Failed to start {node.get('name', '?')}: {exc}")
+            started.append(node)
+        # Wait for SSH on the started nodes, preserving original order
+        starting_names = {n["name"] for n in started if n.get("state") == "starting"}
+        if starting_names:
+            waited = self.wait_ready(
+                [n for n in started if n["name"] in starting_names],
+                timeout_seconds=600,
+            )
+            wait_map = {n["name"]: n for n in waited}
+            started = [wait_map.get(n["name"], n) for n in started]
+        return started
 
     # -- Internal helpers -------------------------------------------------
 

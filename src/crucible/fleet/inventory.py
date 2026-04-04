@@ -21,6 +21,9 @@ BAD_API_STATES: set[str] = frozenset(
     {"paused", "stopped", "terminated", "failed", "cancelled", "exited", "lost"}
 )
 
+# Intentionally paused states — not usable but not broken, bootstrap flags preserved.
+PAUSED_STATES: set[str] = frozenset({"stopped", "exited"})
+
 TERMINAL_RESULT_STATUSES: set[str] = frozenset(
     {"completed", "partial_recoverable", "failed", "timeout", "killed", "early_stopped"}
 )
@@ -112,6 +115,11 @@ def merge_node_record(existing: dict[str, Any] | None, incoming: dict[str, Any])
     merged["python_bin"] = incoming.get("python_bin") or existing.get("python_bin")
     api_state = str(merged.get("api_state") or "").lower()
     existing_state = str(existing.get("state") or "").lower()
+    # Intentionally paused pods: keep "stopped" state, preserve bootstrap flags.
+    # Skip if the existing local state is "starting" (pod is actively resuming).
+    if api_state in PAUSED_STATES and existing_state not in {"starting"}:
+        merged["state"] = "stopped"
+        return merged
     if existing_state in {"ready", "boot_failed", "unreachable", "ssh_timeout"} and api_state not in BAD_API_STATES:
         merged["state"] = existing_state
     if merged["env_ready"] and merged["dataset_ready"] and merged["git_sha"] and api_state not in BAD_API_STATES:
@@ -161,6 +169,9 @@ def classify_health(node: dict[str, Any]) -> str:
     """Probe a node and return a single health label (``ready``, ``unreachable``, etc.)."""
     api_state = str(node.get("api_state") or "").lower()
     state = str(node.get("state") or "").lower()
+    # Intentionally paused — not broken, just idle
+    if api_state in PAUSED_STATES or state in PAUSED_STATES:
+        return "stopped"
     if api_state in BAD_API_STATES or state in BAD_API_STATES:
         return api_state or state
     if state in {"creating", "new", "bootstrapping"}:
@@ -198,7 +209,7 @@ def next_node_index(nodes: list[dict[str, Any]], name_prefix: str) -> int:
 def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, int]:
     """Return a dict of aggregate counts for the fleet status display."""
     healthy_states = {"ready"}
-    unhealthy_states = BAD_API_STATES | {"unreachable", "ssh_timeout", "boot_failed"}
+    unhealthy_states = (BAD_API_STATES - PAUSED_STATES) | {"unreachable", "ssh_timeout", "boot_failed"}
     return {
         "nodes_total": len(nodes),
         "nodes_ready": sum(1 for n in nodes if str(n.get("state", "")).lower() in healthy_states),
@@ -208,6 +219,7 @@ def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, int]:
         "nodes_failed": sum(1 for n in nodes if str(n.get("state", "")).lower() in unhealthy_states),
         "nodes_healthy": sum(1 for n in nodes if str(n.get("state", "")).lower() in healthy_states),
         "nodes_unhealthy": sum(1 for n in nodes if str(n.get("state", "")).lower() in unhealthy_states),
+        "nodes_stopped": sum(1 for n in nodes if str(n.get("state", "")).lower() in PAUSED_STATES),
         "nodes_replaced": sum(1 for n in nodes if n.get("replacement")),
         "nodes_bootstrapping": sum(
             1 for n in nodes if str(n.get("state", "")).lower() in {"creating", "new", "bootstrapping"}

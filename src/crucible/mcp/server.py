@@ -197,6 +197,8 @@ _LONG_RUNNING_TOOLS: set[str] = {
     "provision_nodes",
     "provision_project",
     "run_project",
+    "start_nodes",
+    "stop_nodes",
     "sync_code",
     "tree_enqueue_pending",
 }
@@ -380,6 +382,8 @@ TOOLS: list[Tool] = [
             "properties": {
                 "count": {"type": "integer", "description": "Number of nodes to create.", "default": 2},
                 "name_prefix": {"type": "string", "description": "Node name prefix.", "default": "crucible"},
+                "network_volume_id": {"type": "string", "description": "RunPod network volume ID for shared storage."},
+                "template_id": {"type": "string", "description": "RunPod template ID for standardized provisioning."},
             },
             "required": ["count"],
             "additionalProperties": False,
@@ -412,6 +416,155 @@ TOOLS: list[Tool] = [
                     "default": [],
                 },
             },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="stop_nodes",
+        description=(
+            "Stop running pods to save cost. Disk and bootstrap state are preserved.\n\n"
+            "REQUIRES: Nodes in running/ready state.\n"
+            "RETURNS: {stopped: [node_names], status}\n"
+            "NEXT: start_nodes to resume. No re-bootstrapping needed."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "node_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Node names to stop. If empty, stops all.",
+                    "default": [],
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="start_nodes",
+        description=(
+            "Start stopped pods and wait for SSH readiness.\n\n"
+            "REQUIRES: Nodes in 'stopped' state.\n"
+            "RETURNS: {started: [node_names], status}\n"
+            "NEXT: dispatch_experiments (bootstrap state is preserved from before stop)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "node_names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Node names to start. If empty, starts all stopped.",
+                    "default": [],
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_list_volumes",
+        description=(
+            "List RunPod network volumes (persistent shared storage).\n\n"
+            "REQUIRES: RUNPOD_API_KEY.\n"
+            "RETURNS: {volumes: [{id, name, size, dataCenterId}], count}\n"
+            "NEXT: provision_nodes with network_volume_id to attach."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_create_volume",
+        description=(
+            "Create a persistent RunPod network volume for shared data across pods.\n\n"
+            "REQUIRES: RUNPOD_API_KEY.\n"
+            "RETURNS: {volume: {id, name, size, dataCenterId}, status}\n"
+            "NEXT: provision_nodes with network_volume_id=<id>."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Volume name."},
+                "size_gb": {"type": "integer", "description": "Volume size in GB.", "default": 100},
+                "datacenter_id": {"type": "string", "description": "Datacenter ID (e.g. US-GA-1).", "default": "US-GA-1"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_delete_volume",
+        description=(
+            "Delete a RunPod network volume.\n\n"
+            "REQUIRES: RUNPOD_API_KEY. No pods attached to the volume.\n"
+            "RETURNS: {deleted: volume_id, status}\n"
+            "NEXT: runpod_list_volumes to confirm deletion."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "volume_id": {"type": "string", "description": "Volume ID to delete."},
+            },
+            "required": ["volume_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_gpu_availability",
+        description=(
+            "List available GPU types with spot and on-demand pricing.\n\n"
+            "REQUIRES: RUNPOD_API_KEY.\n"
+            "RETURNS: {gpu_types: [{gpuName, gpuTypeId, minimumBidPrice, uninterruptablePrice, minMemory, minVcpu}]}\n"
+            "NEXT: provision_nodes with specific gpu_type_ids based on availability."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "gpu_count": {"type": "integer", "description": "GPUs per node.", "default": 1},
+                "secure_cloud": {"type": "boolean", "description": "Filter to secure cloud only."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_list_templates",
+        description=(
+            "List user's RunPod pod templates.\n\n"
+            "REQUIRES: RUNPOD_API_KEY.\n"
+            "RETURNS: {templates: [{id, name, imageName, ports}], count}\n"
+            "NEXT: provision_nodes with template_id=<id> to create pods from a template."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="runpod_create_template",
+        description=(
+            "Create a reusable RunPod pod template.\n\n"
+            "REQUIRES: RUNPOD_API_KEY.\n"
+            "RETURNS: {template: {id, name}, status}\n"
+            "NEXT: provision_nodes with template_id."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Template name."},
+                "image": {"type": "string", "description": "Docker image name."},
+                "container_disk_gb": {"type": "integer", "description": "Container disk size.", "default": 20},
+                "volume_gb": {"type": "integer", "description": "Volume size.", "default": 40},
+                "ports": {"type": "string", "description": "Ports spec.", "default": "22/tcp,8888/http"},
+                "env": {
+                    "type": "object",
+                    "description": "Environment variables.",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["name", "image"],
             "additionalProperties": False,
         },
     ),
@@ -1832,209 +1985,74 @@ TOOLS: list[Tool] = [
     ),
     # ---- Plugin registry tools ----
     Tool(
-        name="optimizer_list_available",
+        name="plugin_list",
         description=(
-            "List all registered optimizer plugins (builtin + global + local).\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {optimizers: [{name, source}, ...]}\n"
-            "NEXT: optimizer_add to register a new optimizer."
-        ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
-    ),
-    Tool(
-        name="optimizer_add",
-        description=(
-            "Register a new optimizer plugin from Python code. The code should import "
-            "register_optimizer from crucible.training.optimizers and call it.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}\n"
-            "NEXT: optimizer_list_available to verify."
+            "List all registered plugins of a given type (builtin + global + local).\n\n"
+            "REQUIRES: type — one of: optimizers, schedulers, providers, loggers, callbacks, "
+            "block_types, stack_patterns, augmentations.\n"
+            "RETURNS: {<type>: [{name, source}, ...]}\n"
+            "NEXT: plugin_add to register a new plugin, plugin_get_schema for config details."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Plugin name (e.g., 'lion', 'sophia')."},
-                "code": {"type": "string", "description": "Python source that calls register_optimizer()."},
+                "type": {
+                    "type": "string",
+                    "enum": ["optimizers", "schedulers", "providers", "loggers", "callbacks",
+                             "block_types", "stack_patterns", "augmentations"],
+                    "description": "Plugin type to list.",
+                },
             },
-            "required": ["name", "code"],
+            "required": ["type"],
             "additionalProperties": False,
         },
     ),
     Tool(
-        name="optimizer_get_config_schema",
-        description="Get the parameter schema for a named optimizer.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
-        inputSchema={
-            "type": "object",
-            "properties": {"name": {"type": "string", "description": "Optimizer name."}},
-            "required": ["name"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="scheduler_list_available",
+        name="plugin_add",
         description=(
-            "List all registered LR scheduler plugins.\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {schedulers: [{name, source}, ...]}\n"
-            "NEXT: scheduler_add to register a new scheduler."
-        ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
-    ),
-    Tool(
-        name="scheduler_add",
-        description=(
-            "Register a new LR scheduler plugin from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
+            "Register a new plugin from Python code at runtime.\n\n"
+            "The code should import the appropriate register function and call it:\n"
+            "  optimizers → register_optimizer, schedulers → register_scheduler,\n"
+            "  providers → register_provider, loggers → register_logger,\n"
+            "  callbacks → register_callback, block_types/stack_patterns/augmentations → register in composer.\n\n"
+            "REQUIRES: type, name, code.\n"
+            "RETURNS: {status, name, plugin_type, path}\n"
+            "NEXT: plugin_list to verify registration."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Plugin name (e.g., 'polynomial', 'warmup_cosine')."},
-                "code": {"type": "string", "description": "Python source that calls register_scheduler()."},
+                "type": {
+                    "type": "string",
+                    "enum": ["optimizers", "schedulers", "providers", "loggers", "callbacks",
+                             "block_types", "stack_patterns", "augmentations"],
+                    "description": "Plugin type.",
+                },
+                "name": {"type": "string", "description": "Plugin name (e.g., 'lion', 'cosine_warm')."},
+                "code": {"type": "string", "description": "Python source that registers the plugin."},
             },
-            "required": ["name", "code"],
+            "required": ["type", "name", "code"],
             "additionalProperties": False,
         },
     ),
     Tool(
-        name="scheduler_get_config_schema",
-        description="Get the parameter schema for a named scheduler.\n\nREQUIRES: name.\nRETURNS: {name, schema}",
-        inputSchema={
-            "type": "object",
-            "properties": {"name": {"type": "string", "description": "Scheduler name."}},
-            "required": ["name"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="provider_list_available",
+        name="plugin_get_schema",
         description=(
-            "List all registered fleet provider plugins.\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {providers: [{name, source}, ...]}\n"
-            "NEXT: provider_add to register a new cloud provider."
-        ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
-    ),
-    Tool(
-        name="provider_add",
-        description=(
-            "Register a new fleet provider plugin from Python code. The code should "
-            "subclass FleetProvider and call register_provider().\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
+            "Get the config parameter schema for a named plugin.\n\n"
+            "REQUIRES: type (optimizers or schedulers only), name.\n"
+            "RETURNS: {type, name, schema}"
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Provider name (e.g., 'lambda_labs', 'modal')."},
-                "code": {"type": "string", "description": "Python source that calls register_provider()."},
+                "type": {
+                    "type": "string",
+                    "enum": ["optimizers", "schedulers"],
+                    "description": "Plugin type (only optimizers and schedulers have schemas).",
+                },
+                "name": {"type": "string", "description": "Plugin name."},
             },
-            "required": ["name", "code"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="logger_list_available",
-        description=(
-            "List all registered logging backend plugins.\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {loggers: [{name, source}, ...]}"
-        ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
-    ),
-    Tool(
-        name="logger_add",
-        description=(
-            "Register a new logging backend plugin from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Logger name (e.g., 'tensorboard', 'neptune')."},
-                "code": {"type": "string", "description": "Python source that calls register_logger()."},
-            },
-            "required": ["name", "code"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="callback_list_available",
-        description=(
-            "List all registered training callback plugins.\n\n"
-            "REQUIRES: Nothing.\n"
-            "RETURNS: {callbacks: [{name, source}, ...]}"
-        ),
-        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
-    ),
-    Tool(
-        name="callback_add",
-        description=(
-            "Register a new training callback plugin from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Callback name (e.g., 'checkpoint', 'lr_finder')."},
-                "code": {"type": "string", "description": "Python source that calls register_callback()."},
-            },
-            "required": ["name", "code"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="composer_add_block_type",
-        description=(
-            "Register a new composer block type from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Block type name."},
-                "code": {"type": "string", "description": "Python source registering the block type."},
-            },
-            "required": ["name", "code"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="composer_add_stack_pattern",
-        description=(
-            "Register a new composer stack pattern from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Stack pattern name."},
-                "code": {"type": "string", "description": "Python source registering the stack pattern."},
-            },
-            "required": ["name", "code"],
-            "additionalProperties": False,
-        },
-    ),
-    Tool(
-        name="composer_add_augmentation",
-        description=(
-            "Register a new composer augmentation from Python code.\n\n"
-            "REQUIRES: name (str), code (str).\n"
-            "RETURNS: {status, name, path}"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Augmentation name."},
-                "code": {"type": "string", "description": "Python source registering the augmentation."},
-            },
-            "required": ["name", "code"],
+            "required": ["type", "name"],
             "additionalProperties": False,
         },
     ),

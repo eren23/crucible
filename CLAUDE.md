@@ -21,7 +21,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (120 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (118 tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)
@@ -168,12 +168,18 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., lewm architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`LEWM_VARIANT` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (120 total)
+### MCP Tools (130 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
 
-Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `cancel_experiment`, `clear_stale_queue`, `purge_queue`
+Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/disk), `get_queue_status`, `destroy_nodes`, `stop_nodes`, `start_nodes`, `cancel_experiment`, `clear_stale_queue`, `purge_queue`
+
+**Tier 1b — RunPod Enhanced Operations** (GraphQL-powered):
+`runpod_gpu_availability` — GPU types with spot/on-demand pricing.
+`runpod_list_volumes`, `runpod_create_volume`, `runpod_delete_volume` — Persistent shared storage.
+`runpod_list_templates`, `runpod_create_template` — Reusable pod templates.
+`provision_nodes` also accepts optional `network_volume_id` and `template_id` params.
 
 **Tier 2 — Experiment Design:**
 `version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
@@ -203,13 +209,10 @@ Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, and agen
 **Tier 9 — Session Recipes:**
 `recipe_save`, `recipe_list`, `recipe_get` — Save and retrieve step-by-step session playbooks. Captures MCP tool sequence, environment versions, gotchas with fixes, and results. Other agents follow a recipe to reproduce a successful session.
 
-**Tier 10 — Plugin Registry (unified plugin system):**
-`optimizer_list_available`, `optimizer_add`, `optimizer_get_config_schema` — Optimizer plugins (adam, adamw, muon, sgd, rmsprop + custom).
-`scheduler_list_available`, `scheduler_add`, `scheduler_get_config_schema` — LR scheduler plugins (cosine, constant, linear, cosine_restarts + custom).
-`provider_list_available`, `provider_add` — Fleet provider plugins (runpod, ssh + custom).
-`logger_list_available`, `logger_add` — Logging backend plugins (wandb, console, jsonl + custom).
-`callback_list_available`, `callback_add` — Training callback plugins (grad_clip, nan_detector, early_stopping + custom).
-`composer_add_block_type`, `composer_add_stack_pattern`, `composer_add_augmentation` — Composer extension plugins.
+**Tier 10 — Plugin Registry (3 consolidated tools):**
+`plugin_list(type)` — List registered plugins. Types: optimizers, schedulers, providers, loggers, callbacks, block_types, stack_patterns, augmentations.
+`plugin_add(type, name, code)` — Register a new plugin from Python code at runtime.
+`plugin_get_schema(type, name)` — Get config parameter schema (optimizers, schedulers only).
 
 All plugin types use a unified `PluginRegistry` with 3-tier precedence (builtin < global < local). Plugins are auto-discovered from `.crucible/plugins/{type}/*.py` (local) and `~/.crucible-hub/plugins/{type}/*.py` (global).
 

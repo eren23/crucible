@@ -220,7 +220,7 @@ class TestMCPToolDispatch:
 
     def test_plugin_tools_registered(self):
         from crucible.mcp.tools import TOOL_DISPATCH
-        for t in ["optimizer_list_available", "scheduler_list_available", "callback_list_available"]:
+        for t in ["plugin_list", "plugin_add", "plugin_get_schema"]:
             assert t in TOOL_DISPATCH
 
     def test_families_returns_builtins(self):

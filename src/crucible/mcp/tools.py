@@ -274,9 +274,15 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.fleet.manager import FleetManager
 
         fleet = FleetManager(config)
+        kwargs: dict[str, Any] = {}
+        if args.get("network_volume_id"):
+            kwargs["network_volume_id"] = args["network_volume_id"]
+        if args.get("template_id"):
+            kwargs["template_id"] = args["template_id"]
         new_nodes = fleet.provision(
             count=args.get("count", 2),
             name_prefix=args.get("name_prefix", "crucible"),
+            **kwargs,
         )
         return {
             "created": len(new_nodes),
@@ -347,6 +353,140 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
         if orphan_destroyed:
             result["orphan_pods_destroyed"] = orphan_destroyed
         return result
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def stop_nodes(args: dict[str, Any]) -> dict[str, Any]:
+    """Stop running pods to save cost.  Disk and bootstrap state are preserved."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fleet = FleetManager(config)
+        node_names = args.get("node_names") or None
+        selected = set(node_names) if node_names else None
+        updated = fleet.stop(selected_names=selected)
+        stopped = [n["name"] for n in updated if n.get("state") == "stopped"]
+        return {"stopped": stopped, "status": "ok"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def start_nodes(args: dict[str, Any]) -> dict[str, Any]:
+    """Start stopped pods and wait for SSH readiness."""
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fleet = FleetManager(config)
+        node_names = args.get("node_names") or None
+        selected = set(node_names) if node_names else None
+        updated = fleet.start(selected_names=selected)
+        started = [n["name"] for n in updated if n.get("state") in {"ready", "new", "running"}]
+        return {"started": started, "status": "ok"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_list_volumes(args: dict[str, Any]) -> dict[str, Any]:
+    """List RunPod network volumes."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_list_network_volumes
+
+        volumes = runpod_list_network_volumes()
+        return {"volumes": volumes, "count": len(volumes)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_create_volume(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a persistent RunPod network volume."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_create_network_volume
+
+        volume = runpod_create_network_volume(
+            name=args["name"],
+            size_gb=args.get("size_gb", 100),
+            datacenter_id=args.get("datacenter_id", "US-GA-1"),
+        )
+        return {"volume": volume, "status": "ok"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_delete_volume(args: dict[str, Any]) -> dict[str, Any]:
+    """Delete a RunPod network volume."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_delete_network_volume
+
+        runpod_delete_network_volume(args["volume_id"])
+        return {"deleted": args["volume_id"], "status": "ok"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_gpu_availability(args: dict[str, Any]) -> dict[str, Any]:
+    """List available GPU types with pricing."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_list_gpu_types
+
+        gpu_types = runpod_list_gpu_types(
+            gpu_count=args.get("gpu_count", 1),
+            secure_cloud=args.get("secure_cloud"),
+        )
+        return {"gpu_types": gpu_types, "count": len(gpu_types)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_list_templates_tool(args: dict[str, Any]) -> dict[str, Any]:
+    """List user's RunPod pod templates."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_list_templates
+
+        templates = runpod_list_templates()
+        return {"templates": templates, "count": len(templates)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def runpod_create_template_tool(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a RunPod pod template."""
+    _get_config()  # ensure .env files are loaded (RUNPOD_API_KEY)
+    try:
+        from crucible.fleet.providers.runpod import runpod_create_template
+
+        template = runpod_create_template(
+            name=args["name"],
+            image=args["image"],
+            container_disk_gb=args.get("container_disk_gb", 20),
+            volume_gb=args.get("volume_gb", 40),
+            ports=args.get("ports", "22/tcp,8888/http"),
+            env=args.get("env"),
+        )
+        return {"template": template, "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
@@ -3921,148 +4061,77 @@ def _plugin_add_common(args: dict[str, Any], plugin_type: str) -> dict[str, Any]
         return {"error": f"[unexpected] {exc}"}
 
 
-def optimizer_list_available(args: dict[str, Any]) -> dict[str, Any]:
-    """List all registered optimizer plugins.
+# ---------------------------------------------------------------------------
+# Generic plugin tools (consolidated from 15 type-specific tools)
+# ---------------------------------------------------------------------------
 
-    REQUIRES: nothing
-    RETURNS: {optimizers: [{name, source}, ...]}
-    """
-    from crucible.training.optimizers import list_optimizers_detailed
-    return {"optimizers": list_optimizers_detailed()}
+_PLUGIN_LIST_DISPATCH: dict[str, tuple[str, str, str]] = {
+    # type -> (module_path, function_or_registry_name, response_key)
+    # For modules with list_*_detailed functions:
+    "optimizers": ("crucible.training.optimizers", "list_optimizers_detailed", "optimizers"),
+    "schedulers": ("crucible.training.schedulers", "list_schedulers_detailed", "schedulers"),
+    "providers": ("crucible.fleet.provider_registry", "list_providers_detailed", "providers"),
+    "loggers": ("crucible.runner.loggers", "list_loggers_detailed", "loggers"),
+    "callbacks": ("crucible.training.callbacks", "list_callbacks_detailed", "callbacks"),
+    # For composer registries (use PluginRegistry.list_plugins_detailed directly):
+    "block_types": ("crucible.models.composer", "BLOCK_TYPE_REGISTRY", "block_types"),
+    "stack_patterns": ("crucible.models.composer", "STACK_PATTERN_REGISTRY", "stack_patterns"),
+    "augmentations": ("crucible.models.composer", "AUGMENTATION_REGISTRY", "augmentations"),
+}
+
+_PLUGIN_SCHEMA_DISPATCH: dict[str, tuple[str, str]] = {
+    # type -> (module_path, registry_name)
+    "optimizers": ("crucible.training.optimizers", "OPTIMIZER_REGISTRY"),
+    "schedulers": ("crucible.training.schedulers", "SCHEDULER_REGISTRY"),
+}
+
+_VALID_PLUGIN_TYPES = sorted(_PLUGIN_LIST_DISPATCH.keys())
 
 
-def optimizer_add(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new optimizer plugin from code at runtime.
+def plugin_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List registered plugins of a given type."""
+    import importlib
+    plugin_type = args.get("type", "")
+    if plugin_type not in _PLUGIN_LIST_DISPATCH:
+        return {"error": f"Unknown plugin type {plugin_type!r}. Valid: {_VALID_PLUGIN_TYPES}"}
+    module_path, attr_name, key = _PLUGIN_LIST_DISPATCH[plugin_type]
+    try:
+        mod = importlib.import_module(module_path)
+        attr = getattr(mod, attr_name)
+        # attr is either a function (list_*_detailed) or a PluginRegistry instance
+        items = attr() if callable(attr) else attr.list_plugins_detailed()
+        return {key: items}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
 
-    REQUIRES: name (str), code (str — Python source that calls register_optimizer)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "optimizers")
+
+def plugin_add(args: dict[str, Any]) -> dict[str, Any]:
+    """Register a new plugin from Python code."""
+    plugin_type = args.get("type", "")
+    if plugin_type not in _PLUGIN_LIST_DISPATCH:
+        return {"error": f"Unknown plugin type {plugin_type!r}. Valid: {_VALID_PLUGIN_TYPES}"}
+    return _plugin_add_common(args, plugin_type)
 
 
-def optimizer_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
-    """Get the config schema for a named optimizer.
-
-    REQUIRES: name (str)
-    RETURNS: {name, schema}
-    """
-    from crucible.training.optimizers import OPTIMIZER_REGISTRY
+def plugin_get_schema(args: dict[str, Any]) -> dict[str, Any]:
+    """Get the config schema for a named plugin (optimizers, schedulers only)."""
+    import importlib
+    plugin_type = args.get("type", "")
+    if plugin_type not in _PLUGIN_SCHEMA_DISPATCH:
+        supported = sorted(_PLUGIN_SCHEMA_DISPATCH.keys())
+        return {"error": f"Schema not available for {plugin_type!r}. Supported: {supported}"}
+    module_path, registry_name = _PLUGIN_SCHEMA_DISPATCH[plugin_type]
     name = args.get("name", "")
-    return {"name": name, "schema": OPTIMIZER_REGISTRY.get_schema(name)}
-
-
-def scheduler_list_available(args: dict[str, Any]) -> dict[str, Any]:
-    """List all registered scheduler plugins.
-
-    REQUIRES: nothing
-    RETURNS: {schedulers: [{name, source}, ...]}
-    """
-    from crucible.training.schedulers import list_schedulers_detailed
-    return {"schedulers": list_schedulers_detailed()}
-
-
-def scheduler_add(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new scheduler plugin from code at runtime.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "schedulers")
-
-
-def scheduler_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
-    """Get the config schema for a named scheduler.
-
-    REQUIRES: name (str)
-    RETURNS: {name, schema}
-    """
-    from crucible.training.schedulers import SCHEDULER_REGISTRY
-    name = args.get("name", "")
-    return {"name": name, "schema": SCHEDULER_REGISTRY.get_schema(name)}
-
-
-def provider_list_available(args: dict[str, Any]) -> dict[str, Any]:
-    """List all registered fleet provider plugins.
-
-    REQUIRES: nothing
-    RETURNS: {providers: [{name, source}, ...]}
-    """
-    from crucible.fleet.provider_registry import list_providers_detailed
-    return {"providers": list_providers_detailed()}
-
-
-def provider_add(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new fleet provider plugin from code at runtime.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "providers")
-
-
-def logger_list_available(args: dict[str, Any]) -> dict[str, Any]:
-    """List all registered logging backend plugins.
-
-    REQUIRES: nothing
-    RETURNS: {loggers: [{name, source}, ...]}
-    """
-    from crucible.runner.loggers import list_loggers_detailed
-    return {"loggers": list_loggers_detailed()}
-
-
-def logger_add(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new logging backend plugin from code at runtime.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "loggers")
-
-
-def callback_list_available(args: dict[str, Any]) -> dict[str, Any]:
-    """List all registered training callback plugins.
-
-    REQUIRES: nothing
-    RETURNS: {callbacks: [{name, source}, ...]}
-    """
-    from crucible.training.callbacks import list_callbacks_detailed
-    return {"callbacks": list_callbacks_detailed()}
-
-
-def callback_add(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new training callback plugin from code at runtime.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "callbacks")
-
-
-def composer_add_block_type(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new composer block type from code.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "block_types")
-
-
-def composer_add_stack_pattern(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new composer stack pattern from code.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "stack_patterns")
-
-
-def composer_add_augmentation(args: dict[str, Any]) -> dict[str, Any]:
-    """Register a new composer augmentation from code.
-
-    REQUIRES: name (str), code (str)
-    RETURNS: {status, name, path}
-    """
-    return _plugin_add_common(args, "augmentations")
+    try:
+        mod = importlib.import_module(module_path)
+        registry = getattr(mod, registry_name)
+        return {"type": plugin_type, "name": name, "schema": registry.get_schema(name)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4469,6 +4538,15 @@ TOOL_DISPATCH: dict[str, Any] = {
     "get_experiment_result": get_experiment_result,
     "provision_nodes": provision_nodes,
     "destroy_nodes": destroy_nodes,
+    "stop_nodes": stop_nodes,
+    "start_nodes": start_nodes,
+    # RunPod enhanced operations (GraphQL)
+    "runpod_list_volumes": runpod_list_volumes,
+    "runpod_create_volume": runpod_create_volume,
+    "runpod_delete_volume": runpod_delete_volume,
+    "runpod_gpu_availability": runpod_gpu_availability,
+    "runpod_list_templates": runpod_list_templates_tool,
+    "runpod_create_template": runpod_create_template_tool,
     "sync_code": sync_code,
     "fleet_refresh": fleet_refresh,
     "bootstrap_nodes": bootstrap_nodes,
@@ -4565,22 +4643,10 @@ TOOL_DISPATCH: dict[str, Any] = {
     "recipe_save": recipe_save,
     "recipe_list": recipe_list,
     "recipe_get": recipe_get,
-    # Plugin registry tools
-    "optimizer_list_available": optimizer_list_available,
-    "optimizer_add": optimizer_add,
-    "optimizer_get_config_schema": optimizer_get_config_schema,
-    "scheduler_list_available": scheduler_list_available,
-    "scheduler_add": scheduler_add,
-    "scheduler_get_config_schema": scheduler_get_config_schema,
-    "provider_list_available": provider_list_available,
-    "provider_add": provider_add,
-    "logger_list_available": logger_list_available,
-    "logger_add": logger_add,
-    "callback_list_available": callback_list_available,
-    "callback_add": callback_add,
-    "composer_add_block_type": composer_add_block_type,
-    "composer_add_stack_pattern": composer_add_stack_pattern,
-    "composer_add_augmentation": composer_add_augmentation,
+    # Plugin registry tools (consolidated)
+    "plugin_list": plugin_list,
+    "plugin_add": plugin_add,
+    "plugin_get_schema": plugin_get_schema,
     # Community tap tools
     "hub_tap_add": hub_tap_add,
     "hub_tap_remove": hub_tap_remove,

@@ -58,3 +58,23 @@ class FleetProvider(abc.ABC):
         Returns the updated node list.
         Raises ``TimeoutError`` if *timeout_seconds* elapses.
         """
+
+    # -- Optional lifecycle methods (providers override if supported) ------
+
+    def stop(
+        self,
+        nodes: list[dict[str, Any]],
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Stop running nodes to save cost.  Default: no-op (returns nodes unchanged)."""
+        return nodes
+
+    def start(
+        self,
+        nodes: list[dict[str, Any]],
+        *,
+        selected_names: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Start stopped nodes.  Default: no-op (returns nodes unchanged)."""
+        return nodes
