@@ -279,6 +279,8 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
             kwargs["network_volume_id"] = args["network_volume_id"]
         if args.get("template_id"):
             kwargs["template_id"] = args["template_id"]
+        if args.get("gpu_count"):
+            kwargs["gpu_count"] = args["gpu_count"]
         new_nodes = fleet.provision(
             count=args.get("count", 2),
             name_prefix=args.get("name_prefix", "crucible"),
