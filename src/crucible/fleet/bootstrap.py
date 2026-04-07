@@ -29,6 +29,7 @@ from crucible.fleet.sync import (
     _run,
     sync_env_file,
     sync_repo,
+    sync_taps,
 )
 
 BOOTSTRAP_ATTEMPTS = 3
@@ -90,8 +91,8 @@ def _materialize_global_architectures(project_root: Path) -> None:
                 if src_file.name.startswith("_"):
                     continue
                 shutil.copy2(src_file, target_dir / src_file.name)
-    except Exception:
-        pass  # Best-effort: don't fail bootstrap if hub is unavailable
+    except Exception as exc:
+        log_warn(f"Hub architecture materialization failed (non-fatal): {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +192,7 @@ def bootstrap_node(
     _materialize_global_architectures(project_root)
     sync_repo(node, project_root=project_root, sync_excludes=sync_excludes)
     sync_env_file(node, project_root=project_root)
+    sync_taps(node)
 
     ws_path = node.get("workspace_path", "/workspace/project")
     workspace = shlex.quote(ws_path)

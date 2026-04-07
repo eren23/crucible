@@ -74,7 +74,10 @@ def runpod_request(
         if encoded:
             url += "?" + encoded
     body = None
-    headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+    headers: dict[str, str] = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "Crucible/1.0",
+    }
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -113,6 +116,7 @@ def runpod_graphql(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "User-Agent": "Crucible/1.0",
     }
     req = urlrequest.Request(RUNPOD_GRAPHQL_URL, data=body, headers=headers, method="POST")
     try:
@@ -472,9 +476,7 @@ def build_pod_payload(
         "containerDiskInGb": container_disk_gb,
         "env": {
             "JUPYTER_PASSWORD": uuid.uuid4().hex[:16],
-            # SSH key is set via top-level "publicKey" field (not env vars).
-            # Env-var approach (PUBLIC_KEY / SSH_PUBLIC_KEY) is unreliable on
-            # community pods — depends on image entrypoint parsing them.
+            "PUBLIC_KEY": public_key,
         },
         "gpuCount": gpu_count,
         "gpuTypeIds": gpu_type_ids,
@@ -485,8 +487,6 @@ def build_pod_payload(
         "minVCPUPerGPU": 2,
         "name": name,
         "ports": ports,
-        # RunPod API-level SSH key injection — reliable across all pod types.
-        "publicKey": public_key,
         "supportPublicIp": True,
         "volumeInGb": volume_gb,
         "volumeMountPath": volume_mount_path,
@@ -514,19 +514,71 @@ def create_api_pod(
     network_volume_id: str | None = None,
     template_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a RunPod pod and return the raw API response."""
-    payload = build_pod_payload(
-        name=name, gpu_type_ids=gpu_type_ids, image_name=image_name,
-        cloud_type=cloud_type, interruptible=interruptible,
-        container_disk_gb=container_disk_gb, volume_gb=volume_gb,
-        volume_mount_path=volume_mount_path, public_key=public_key,
-        ports=ports, gpu_count=gpu_count,
-        network_volume_id=network_volume_id, template_id=template_id,
-    )
-    created = runpod_request("POST", "/pods", payload=payload)
-    if not isinstance(created, dict):
-        raise FleetError("Unexpected RunPod pod creation response: expected a dict.")
-    return created
+    """Create a RunPod pod via GraphQL mutation.
+
+    Uses podFindAndDeployOnDemand for reliable SSH key injection.
+    Falls back to REST API if GraphQL fails.
+    """
+    # Build env array for GraphQL (array of {key, value} objects)
+    env_list = [
+        {"key": "JUPYTER_PASSWORD", "value": uuid.uuid4().hex[:16]},
+        {"key": "PUBLIC_KEY", "value": public_key},
+    ]
+
+    # GraphQL mutation input
+    gql_input: dict[str, Any] = {
+        "name": name,
+        "gpuTypeId": gpu_type_ids[0] if gpu_type_ids else "NVIDIA GeForce RTX 4090",
+        "imageName": image_name,
+        "cloudType": cloud_type,
+        "gpuCount": gpu_count,
+        "containerDiskInGb": container_disk_gb,
+        "volumeInGb": volume_gb,
+        "volumeMountPath": volume_mount_path,
+        "supportPublicIp": True,
+        "ports": ",".join(ports) if ports else "22/tcp,8888/http",
+        "env": env_list,
+    }
+    if network_volume_id:
+        gql_input["networkVolumeId"] = network_volume_id
+    if template_id:
+        gql_input["templateId"] = template_id
+    if not interruptible:
+        gql_input["minMemoryInGb"] = 8
+        gql_input["minVcpuCount"] = 2
+
+    # Try on-demand first for non-interruptible, spot for interruptible
+    mutation_name = "podFindAndDeployOnDemand"
+    query = f"""
+    mutation($input: PodFindAndDeployOnDemandInput!) {{
+        {mutation_name}(input: $input) {{
+            id name desiredStatus imageName
+            machine {{ podHostId }}
+        }}
+    }}
+    """
+
+    try:
+        result = runpod_graphql(query, {"input": gql_input})
+        pod = result.get(mutation_name)
+        if not pod or not pod.get("id"):
+            raise FleetError(f"GraphQL pod creation returned empty result: {result}")
+        return pod
+    except FleetError as gql_err:
+        # Fall back to REST if GraphQL fails
+        log_warn(f"GraphQL pod creation failed ({gql_err}), trying REST fallback...")
+        payload = build_pod_payload(
+            name=name, gpu_type_ids=gpu_type_ids, image_name=image_name,
+            cloud_type=cloud_type, interruptible=interruptible,
+            container_disk_gb=container_disk_gb, volume_gb=volume_gb,
+            volume_mount_path=volume_mount_path, public_key=public_key,
+            ports=ports, gpu_count=gpu_count,
+            network_volume_id=network_volume_id, template_id=template_id,
+        )
+        created = runpod_request("POST", "/pods", payload=payload)
+        if not isinstance(created, dict):
+            raise FleetError("Unexpected RunPod pod creation response: expected a dict.")
+        return created
 
 
 # ---------------------------------------------------------------------------

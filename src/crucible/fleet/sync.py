@@ -165,6 +165,42 @@ def sync_repo(
     _run(cmd, check=True)
 
 
+def sync_taps(node: dict[str, Any]) -> None:
+    """Rsync crucible-hub taps to a remote node.
+
+    Syncs each tap directory under ``~/.crucible-hub/taps/`` to
+    ``/workspace/<tap_name>/`` on the remote node, making tap architectures,
+    launchers, and data available for external project training.
+
+    Best-effort: logs a warning on failure instead of aborting bootstrap.
+    """
+    taps_dir = Path.home() / ".crucible-hub" / "taps"
+    if not taps_dir.exists():
+        return
+    user = node.get("user", "root")
+    host = node.get("ssh_host")
+    if not host:
+        return
+    for tap in sorted(taps_dir.iterdir()):
+        if not tap.is_dir() or tap.name.startswith("."):
+            continue
+        remote_path = f"/workspace/{tap.name}"
+        destination = f"{user}@{host}:{remote_path}/"
+        cmd = rsync_base(node)
+        cmd.extend([
+            "--exclude", ".git",
+            "--exclude", "__pycache__",
+            "--exclude", "*.pyc",
+            "--exclude", "wandb",
+        ])
+        cmd.extend([str(tap) + "/", destination])
+        try:
+            _run(cmd, check=True)
+        except Exception as exc:
+            from crucible.core.log import log_warn
+            log_warn(f"Tap sync failed for {tap.name} on {node['name']}: {exc}")
+
+
 def sync_env_file(
     node: dict[str, Any],
     *,
