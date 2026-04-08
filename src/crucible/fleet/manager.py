@@ -170,28 +170,49 @@ class FleetManager:
         data_source_name: str | None = None,
         data_source_config: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Bootstrap one or more nodes (sync, install, data download)."""
+        """Bootstrap one or more nodes (sync, install, data download).
+
+        Nodes are bootstrapped **in parallel** across a thread pool, since
+        the per-node work is almost entirely SSH I/O which is trivially
+        parallelizable.  Excluded nodes pass through unchanged.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
         if nodes is None:
             nodes = load_nodes(self.nodes_file)
-        updated: list[dict[str, Any]] = []
-        for node in nodes:
+
+        # Split into work and pass-through lists while preserving order.
+        to_bootstrap: list[tuple[int, dict[str, Any]]] = []
+        results: list[dict[str, Any]] = list(nodes)  # seed with originals
+        for idx, node in enumerate(nodes):
             if selected_names and node["name"] not in selected_names:
-                updated.append(node)
                 continue
-            updated.append(
-                bootstrap_node(
-                    node,
-                    project_root=self.project_root,
-                    sync_excludes=self.sync_excludes,
-                    train_shards=train_shards,
-                    skip_install=skip_install,
-                    skip_data=skip_data,
-                    data_source_name=data_source_name,
-                    data_source_config=data_source_config,
-                )
+            to_bootstrap.append((idx, node))
+
+        if not to_bootstrap:
+            save_nodes(self.nodes_file, results)
+            return results
+
+        def _run(entry: tuple[int, dict[str, Any]]) -> tuple[int, dict[str, Any]]:
+            idx, node = entry
+            return idx, bootstrap_node(
+                node,
+                project_root=self.project_root,
+                sync_excludes=self.sync_excludes,
+                train_shards=train_shards,
+                skip_install=skip_install,
+                skip_data=skip_data,
+                data_source_name=data_source_name,
+                data_source_config=data_source_config,
             )
-        save_nodes(self.nodes_file, updated)
-        return updated
+
+        max_workers = max(1, len(to_bootstrap))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for idx, updated_node in pool.map(_run, to_bootstrap):
+                results[idx] = updated_node
+
+        save_nodes(self.nodes_file, results)
+        return results
 
     # ------------------------------------------------------------------
     # Queue

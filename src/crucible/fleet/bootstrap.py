@@ -279,6 +279,12 @@ def bootstrap_node(
     node["env_ready"] = True
     node["state"] = "ready"
 
+    if skip_data:
+        # Projects that download data at training time (e.g. from HF Hub)
+        # don't need the fleet-level dataset. Mark as ready so dispatch
+        # doesn't filter the node out with "dataset_missing".
+        node["dataset_ready"] = True
+
     if not skip_data:
         data_missing = data_probe is not None and data_probe.stdout.strip().endswith("0")
         if data_missing:

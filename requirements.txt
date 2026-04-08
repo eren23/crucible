@@ -1,6 +1,7 @@
 numpy
 tqdm
 huggingface-hub
+h5py
 kernels
 setuptools
 typing-extensions==4.15.0

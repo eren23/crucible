@@ -96,3 +96,5 @@ videos
 # gsd / local agent tooling
 .gsd/
 .bg-shell/
+
+CLAUDE.md.*.bak

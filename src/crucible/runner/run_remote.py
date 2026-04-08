@@ -71,6 +71,28 @@ def main() -> None:
 
     config = _parse_overrides(args.overrides)
 
+    # --- LAUNCH_SCRIPT delegation ---
+    # If a config override sets LAUNCH_SCRIPT, delegate to that external
+    # script instead of the Crucible-native training loop.  All config
+    # overrides are applied as env vars, and the script is called with
+    # the same --set/--name/--backend args for compatibility.
+    launch_script = config.pop("LAUNCH_SCRIPT", os.environ.get("LAUNCH_SCRIPT", ""))
+    if launch_script:
+        import subprocess
+        for key, value in config.items():
+            os.environ[key] = value
+        cmd = [sys.executable, launch_script]
+        # Forward args so the external script can parse them if it wants
+        for key, value in config.items():
+            cmd += ["--set", f"{key}={value}"]
+        cmd += ["--name", args.name, "--experiment-id", args.experiment_id]
+        cmd += ["--backend", args.backend, "--preset", args.preset]
+        for tag in args.tag:
+            cmd += ["--tag", tag]
+        print(f"Delegating to external launcher: {launch_script}")
+        proc = subprocess.run(cmd, check=False)
+        sys.exit(proc.returncode)
+
     result = run_experiment(
         config=config,
         name=args.name,
