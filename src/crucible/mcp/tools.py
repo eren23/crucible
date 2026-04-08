@@ -496,7 +496,7 @@ def runpod_create_template_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def sync_code(args: dict[str, Any]) -> dict[str, Any]:
-    """Push local code to nodes via rsync."""
+    """Push local code to nodes via rsync (Crucible repo + taps)."""
     config = _get_config()
     try:
         from crucible.fleet.bootstrap import _materialize_global_architectures
@@ -506,7 +506,7 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
         fleet = FleetManager(config)
         # Simple sync implementation
         from crucible.fleet.inventory import load_nodes
-        from crucible.fleet.sync import sync_repo
+        from crucible.fleet.sync import sync_repo, sync_taps
 
         nodes = load_nodes(config.project_root / config.nodes_file)
         node_names = args.get("node_names")
@@ -518,6 +518,10 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
                 continue
             try:
                 sync_repo(node, project_root=config.project_root, sync_excludes=config.sync_excludes)
+                # Also rsync ~/.crucible-hub/taps/ so tap architectures, launchers,
+                # and data files are pushed in the same operation. Idempotent,
+                # no-op if the user has no taps installed.
+                sync_taps(node)
                 synced.append(node["name"])
             except Exception as exc:
                 errors.append({"node": node["name"], "error": str(exc)})
@@ -3446,6 +3450,9 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
             node["workspace_path"] = spec.workspace
             try:
                 updated = _bootstrap_project(node, spec, project_root=config.project_root)
+                # Clear any stale error from a previous failed bootstrap — the
+                # node is now ready and should not display old error strings.
+                updated.pop("error", None)
                 upsert_node_record(nodes_file, updated)
                 results.append(updated)
             except Exception as exc:

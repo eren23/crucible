@@ -359,7 +359,10 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         install_torch=raw.get("install_torch", ""),
         launcher=raw.get("launcher", ""),
         launcher_entry=raw.get("launcher_entry", ""),
-        local_files=raw.get("local_files", []),
+        # Accept `data_files` as an alias for `local_files` so tap specs that
+        # use either naming ship files correctly. `local_files` wins if both
+        # are set (backward compatible).
+        local_files=raw.get("local_files") or raw.get("data_files", []),
         system_packages=raw.get("system_packages", []),
         setup=raw.get("setup", []),
         setup_timeout=raw.get("setup_timeout", 3600),
