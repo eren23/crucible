@@ -166,7 +166,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 - `medium` — 1h, 15K steps. Thorough comparison.
 - `promotion` — 2h, 100K steps. Competition-grade.
 
-**W&B Best Practice**: Related experiments (e.g., lewm architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`LEWM_VARIANT` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
+**W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
 ### MCP Tools (130 total)
 
