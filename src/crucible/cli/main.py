@@ -183,6 +183,16 @@ def _main() -> None:
     tpr.add_argument("tap")
     tpr.add_argument("--title", default="")
     tpr.add_argument("--body", default="")
+    tval = tap_sub.add_parser(
+        "validate",
+        help="Validate every plugin.yaml in a tap directory against the schema",
+    )
+    tval.add_argument("path", help="Path to the tap repo root")
+    tval.add_argument(
+        "--warnings-as-errors",
+        action="store_true",
+        help="Exit non-zero even if only warnings are found (CI-friendly)",
+    )
 
     # ── track ──
     track_parser = subparsers.add_parser("track", help="Research track management")

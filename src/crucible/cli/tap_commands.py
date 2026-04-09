@@ -32,7 +32,7 @@ def handle_tap(args: argparse.Namespace) -> None:
     """Dispatch tap subcommands."""
     cmd = getattr(args, "tap_command", None)
     if cmd is None:
-        print("Usage: crucible tap {add|remove|list|sync|search|install|uninstall|installed|publish|info}", file=sys.stderr)
+        print("Usage: crucible tap {add|remove|list|sync|search|install|uninstall|installed|publish|info|validate}", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -60,11 +60,59 @@ def handle_tap(args: argparse.Namespace) -> None:
             _cmd_push(args)
         elif cmd == "submit-pr":
             _cmd_submit_pr(args)
+        elif cmd == "validate":
+            _cmd_validate(args)
         else:
             print(f"Unknown tap command: {cmd}", file=sys.stderr)
             sys.exit(1)
     except CrucibleError as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_validate(args: argparse.Namespace) -> None:
+    """Validate every plugin.yaml in a tap directory.
+
+    Usage:
+        crucible tap validate <path-to-tap>
+        crucible tap validate --warnings-as-errors <path>
+
+    Exits 0 if no errors, 1 otherwise. Warnings are reported to stderr
+    but don't fail the run unless --warnings-as-errors is passed.
+    """
+    from pathlib import Path
+
+    from crucible.core.plugin_schema import validate_tap_directory
+
+    tap_path = Path(args.path).expanduser().resolve()
+    results = validate_tap_directory(tap_path)
+
+    total = len(results)
+    errors = sum(1 for r in results if r.errors)
+    warnings = sum(1 for r in results if r.warnings)
+    clean = sum(1 for r in results if not r.issues)
+
+    print(f"Validated {total} plugin manifest(s) in {tap_path}")
+    print(f"  clean:    {clean}")
+    print(f"  warnings: {warnings}")
+    print(f"  errors:   {errors}")
+    print()
+
+    strict = bool(getattr(args, "warnings_as_errors", False))
+
+    for result in results:
+        if not result.issues:
+            continue
+        rel = result.path.relative_to(tap_path)
+        print(f"── {rel} ──")
+        for issue in result.issues:
+            marker = "ERROR" if issue.severity == "error" else "WARN "
+            print(f"  [{marker}] {issue.field}: {issue.message}")
+        print()
+
+    if errors > 0 or (strict and warnings > 0):
+        fail_reason = "errors" if errors > 0 else "warnings (--warnings-as-errors)"
+        print(f"Validation failed: {fail_reason}", file=sys.stderr)
         sys.exit(1)
 
 
