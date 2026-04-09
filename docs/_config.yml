@@ -1,6 +1,7 @@
 title: Crucible
 description: ML research platform for autonomous experimentation on rental GPUs
 theme: jekyll-theme-cayman
-url: https://eren23.github.io
+# `url` is intentionally unset so Jekyll uses the deployment host's value.
+# Set it in your GitHub Pages / deployment config when publishing docs.
 baseurl: /crucible
 markdown: kramdown

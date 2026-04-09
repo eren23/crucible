@@ -18,6 +18,11 @@ from crucible.core.plugin_registry import PluginRegistry
 if TYPE_CHECKING:
     from pathlib import Path
 
+# Default HuggingFace repo for the Parameter Golf dataset, used as a fallback
+# when `data.repo_id` is not set in the project spec. This exists because
+# Crucible was born from the Parameter Golf competition; it is NOT a general
+# default and should be overridden via `data.repo_id` in crucible.yaml for any
+# non-Parameter-Golf project (see docs/getting-started.md).
 DEFAULT_PARAMETER_GOLF_HF_REPO = "willdepueoai/parameter-golf"
 
 

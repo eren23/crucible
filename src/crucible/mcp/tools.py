@@ -3506,7 +3506,6 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         launch_id = _make_launch_id(project_name)
         variant_name = str(
             overrides.get("CRUCIBLE_VARIANT_NAME")
-            or overrides.get("LEWM_VARIANT")
             or overrides.get("WANDB_RUN_NAME")
             or launch_id
         )

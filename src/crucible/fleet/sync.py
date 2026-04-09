@@ -256,7 +256,7 @@ def write_remote_env(
         # Build source from os.environ + local .env files
         source = dict(os.environ)
         # Also read .env files from project root (they may not be in os.environ)
-        for env_file in [".env", ".env.local", ".env.runpod.local", ".env.lewm"]:
+        for env_file in [".env", ".env.local", ".env.runpod.local"]:
             env_path = Path.cwd() / env_file
             if env_path.exists():
                 for line in env_path.read_text().splitlines():

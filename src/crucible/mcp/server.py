@@ -155,7 +155,6 @@ def _extract_trace_identifiers(name: str, arguments: dict[str, Any], raw: Any) -
         raw_dict.get("variant_name")
         or raw_dict.get("name")
         or overrides.get("CRUCIBLE_VARIANT_NAME")
-        or overrides.get("LEWM_VARIANT")
     )
     if name == "run_project" and variant_name:
         identifiers["variant_names"] = [str(variant_name)]
@@ -1862,7 +1861,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="run_project",
-        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nNOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. The variant name (LEWM_VARIANT / WANDB_RUN_NAME) distinguishes individual runs.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
+        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nNOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. The variant name (CRUCIBLE_VARIANT_NAME / WANDB_RUN_NAME) distinguishes individual runs.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
         inputSchema={
             "type": "object",
             "properties": {
