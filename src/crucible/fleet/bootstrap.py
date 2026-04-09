@@ -99,16 +99,49 @@ def _materialize_global_architectures(project_root: Path) -> None:
 # Single-node bootstrap
 # ---------------------------------------------------------------------------
 
+def _resolve_step_timeout(label: str, explicit: int | None) -> int | None:
+    """Pick a timeout for a bootstrap step.
+
+    Precedence:
+      1. explicit caller override (passed via ``timeout=...``)
+      2. per-step entry from ``fleet.ssh.step_timeouts`` in crucible.yaml
+      3. ``default`` entry from the same config map
+      4. None (use checked_remote_exec's own default of 600s)
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        from crucible.core.config import load_config
+        cfg = load_config()
+        timeouts = cfg.fleet.ssh.step_timeouts
+    except Exception:
+        # Config missing or unreadable — fall back to the hard-coded default
+        return None
+    if label in timeouts:
+        return int(timeouts[label])
+    if "default" in timeouts:
+        return int(timeouts["default"])
+    return None
+
+
 def bootstrap_step(
     node: dict[str, Any],
     label: str,
     command: str,
     *,
-    timeout: int | None = 600,
+    timeout: int | None = None,
 ) -> Any:
-    """Run one labelled bootstrap command on a node."""
+    """Run one labelled bootstrap command on a node.
+
+    ``timeout`` defaults to the per-step value from
+    ``fleet.ssh.step_timeouts`` (see FleetSSHConfig). Pass an explicit
+    integer to override for a single call.
+    """
+    effective_timeout = _resolve_step_timeout(label, timeout)
     log_step(f"bootstrap {node['name']}: {label}")
-    return checked_remote_exec(node, f"bootstrap:{label}", command, timeout=timeout)
+    return checked_remote_exec(
+        node, f"bootstrap:{label}", command, timeout=effective_timeout
+    )
 
 
 def _record_step(

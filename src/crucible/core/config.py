@@ -76,6 +76,50 @@ class WandbConfig:
 
 
 @dataclass
+class FleetSSHInitialConnectConfig:
+    """Exponential-backoff params for the first SSH connect attempt.
+
+    Used by ``wait_for_ssh_ready`` before bootstrap. Typical RunPod pod
+    boot time is 30-90s; these defaults give a 5-10-20-40-80s backoff
+    schedule and a 180s total budget. Bumping ``max_wait`` helps on
+    slow cloud types; reducing it fails faster when a pod is truly dead.
+    """
+    max_attempts: int = 6
+    backoff_base: int = 5       # seconds; doubles each attempt
+    max_wait: int = 180         # total budget in seconds for initial connect
+
+
+@dataclass
+class FleetSSHConfig:
+    """SSH-level reliability knobs for the fleet layer.
+
+    - ``initial_connect``: how to wait for a freshly-provisioned pod to
+      accept SSH traffic. Exponential backoff, not one giant timeout.
+    - ``step_timeouts``: per-step timeout map for bootstrap operations.
+      Keys are step names (e.g. ``pip_install``, ``data_download``);
+      lookups fall back to the ``default`` key if a step isn't listed.
+    """
+    initial_connect: FleetSSHInitialConnectConfig = field(
+        default_factory=FleetSSHInitialConnectConfig
+    )
+    step_timeouts: dict[str, int] = field(default_factory=lambda: {
+        "default": 300,          # most bootstrap steps
+        "sync_repo": 600,        # rsync of the whole repo can be slow
+        "pip_install": 900,      # long on fresh images
+        "data_download": 1800,   # very long
+        "data_probe": 30,        # quick
+        "python_version": 30,    # quick
+        "torch_import": 60,      # quick
+    })
+
+
+@dataclass
+class FleetConfig:
+    """Top-level fleet configuration (SSH, retries, etc.)."""
+    ssh: FleetSSHConfig = field(default_factory=FleetSSHConfig)
+
+
+@dataclass
 class ExecutionPolicyConfig:
     require_remote: bool = True
     required_provider: str = "runpod"
@@ -102,6 +146,7 @@ class ProjectConfig:
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     execution_policy: ExecutionPolicyConfig = field(default_factory=ExecutionPolicyConfig)
+    fleet: FleetConfig = field(default_factory=FleetConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
     store_dir: str = ".crucible"
     compose_builtin_specs: bool = False
@@ -217,6 +262,30 @@ def _build_execution_policy(raw: dict[str, Any]) -> ExecutionPolicyConfig:
     )
 
 
+def _build_fleet(raw: dict[str, Any]) -> FleetConfig:
+    """Parse the optional ``fleet:`` section of crucible.yaml."""
+    if not raw:
+        return FleetConfig()
+    ssh_raw = raw.get("ssh", {}) or {}
+    initial_raw = ssh_raw.get("initial_connect", {}) or {}
+    initial = FleetSSHInitialConnectConfig(
+        max_attempts=int(initial_raw.get("max_attempts", 6)),
+        backoff_base=int(initial_raw.get("backoff_base", 5)),
+        max_wait=int(initial_raw.get("max_wait", 180)),
+    )
+    # Start from defaults, then merge user overrides. User keys win.
+    default_timeouts = FleetSSHConfig().step_timeouts
+    step_timeouts = dict(default_timeouts)
+    for k, v in (ssh_raw.get("step_timeouts", {}) or {}).items():
+        step_timeouts[str(k)] = int(v)
+    return FleetConfig(
+        ssh=FleetSSHConfig(
+            initial_connect=initial,
+            step_timeouts=step_timeouts,
+        ),
+    )
+
+
 def load_config(path: Path | None = None) -> ProjectConfig:
     """Load a crucible.yaml file and return a ProjectConfig."""
     if path is None:
@@ -241,6 +310,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         researcher=_build_researcher(raw.get("researcher", {})),
         wandb=_build_wandb(raw.get("wandb", {})),
         execution_policy=_build_execution_policy(raw.get("execution_policy", {})),
+        fleet=_build_fleet(raw.get("fleet", {})),
         plugins=_build_plugins(raw.get("plugins", {})),
         store_dir=raw.get("store_dir", ".crucible"),
         compose_builtin_specs=raw.get("compose_builtin_specs", False),

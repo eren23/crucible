@@ -27,6 +27,32 @@ class PartialProvisionError(FleetError):
         self.created = created or []
         self.failed = failed or []
 
+
+class SshNotReadyError(FleetError):
+    """SSH connection failed but the target is probably still starting up.
+
+    Transient — caller should back off and retry. Raised by
+    ``wait_for_ssh_ready`` when the pod is booting and refusing
+    connections (typical during the first ~30-90s of a new RunPod pod).
+    """
+
+
+class SshTimeoutError(FleetError):
+    """SSH connection timed out after exhausting the retry budget.
+
+    Caller should treat the target as permanently unreachable for this
+    attempt and either replace the node or surface the error to the user.
+    """
+
+
+class SshAuthError(FleetError):
+    """SSH authentication failed — wrong key or pod-side auth misconfig.
+
+    Fatal: do not retry. The key needs to be fixed before the node can be
+    used. Distinct from SshNotReadyError / SshTimeoutError because no
+    amount of waiting will fix it.
+    """
+
 class RunnerError(CrucibleError):
     """Experiment execution failures."""
 

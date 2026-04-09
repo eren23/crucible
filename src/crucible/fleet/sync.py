@@ -145,6 +145,133 @@ def ssh_ok(node: dict[str, Any]) -> bool:
     return proc.returncode == 0
 
 
+def _classify_ssh_failure(
+    proc: subprocess.CompletedProcess[str] | None,
+    thrown: BaseException | None = None,
+) -> str:
+    """Classify an SSH failure into one of: not_ready, auth, timeout, other.
+
+    - ``not_ready``: transient connection refused / host unknown during boot.
+      Safe to retry with backoff.
+    - ``auth``: permission denied; fatal. Fix keys and retry manually.
+    - ``timeout``: command exceeded the wall-clock budget. Might be
+      retryable for slow steps; caller decides.
+    - ``other``: unknown failure; conservative default.
+    """
+    if isinstance(thrown, subprocess.TimeoutExpired):
+        return "timeout"
+    if proc is None:
+        return "other"
+    stderr = (proc.stderr or "").lower()
+    # OpenSSH returns 255 for connection errors; the stderr message
+    # distinguishes boot-time transients from hard auth failures.
+    if proc.returncode == 255:
+        if "permission denied" in stderr or "publickey" in stderr:
+            return "auth"
+        if (
+            "connection refused" in stderr
+            or "no route to host" in stderr
+            or "name or service not known" in stderr
+            or "connection reset" in stderr
+            or "host is unreachable" in stderr
+        ):
+            return "not_ready"
+        if "connection timed out" in stderr or "connect timeout" in stderr:
+            return "timeout"
+        return "other"
+    return "other"
+
+
+def wait_for_ssh_ready(
+    node: dict[str, Any],
+    *,
+    max_attempts: int = 6,
+    backoff_base: int = 5,
+    max_wait: int = 180,
+) -> None:
+    """Wait for a freshly-provisioned node to accept SSH connections.
+
+    Exponential backoff with a hard total-wait budget. Raises:
+      - ``SshAuthError``: auth failed (fatal, do not retry)
+      - ``SshTimeoutError``: budget exhausted without a successful connect
+      - ``SshNotReadyError``: generic transient error that survived all attempts
+
+    Typical call site is right after a provision step, before the first
+    bootstrap command. Replaces the pattern of just running a 600s SSH
+    command and hoping the pod came up in time.
+    """
+    import time
+
+    from crucible.core.errors import (
+        SshAuthError,
+        SshNotReadyError,
+        SshTimeoutError,
+    )
+    from crucible.core.log import log_info, log_warn
+
+    if not node.get("ssh_host"):
+        raise SshNotReadyError(
+            f"{node.get('name', '?')}: no ssh_host set — cannot wait for SSH readiness"
+        )
+
+    started = time.monotonic()
+    last_classification = "other"
+    last_error = ""
+    for attempt in range(1, max_attempts + 1):
+        elapsed = time.monotonic() - started
+        remaining = max_wait - elapsed
+        if remaining <= 0:
+            break
+        # Short per-attempt timeout so a wedged connection doesn't eat
+        # the whole budget.
+        attempt_timeout = min(10, int(remaining) + 1)
+        proc = None
+        try:
+            proc = _run(
+                ssh_base(node) + ["echo ready"],
+                check=False,
+                timeout=attempt_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            last_classification = "timeout"
+            last_error = f"ssh attempt {attempt} timed out after {attempt_timeout}s"
+            log_warn(f"{node['name']}: {last_error}")
+        else:
+            if proc.returncode == 0 and "ready" in (proc.stdout or ""):
+                if attempt > 1:
+                    log_info(
+                        f"{node['name']}: SSH ready after {attempt} attempt(s) "
+                        f"({elapsed:.1f}s)"
+                    )
+                return
+            last_classification = _classify_ssh_failure(proc)
+            last_error = (proc.stderr or "").strip() or f"rc={proc.returncode}"
+            if last_classification == "auth":
+                raise SshAuthError(
+                    f"{node['name']}: SSH auth failed — {last_error}"
+                )
+            log_warn(
+                f"{node['name']}: SSH attempt {attempt}/{max_attempts} "
+                f"({last_classification}): {last_error}"
+            )
+
+        # Exponential backoff, capped by remaining budget.
+        sleep_s = backoff_base * (2 ** (attempt - 1))
+        remaining = max_wait - (time.monotonic() - started)
+        if remaining <= 0:
+            break
+        time.sleep(min(sleep_s, max(1, int(remaining))))
+
+    total = time.monotonic() - started
+    msg = (
+        f"{node['name']}: SSH not ready after {total:.1f}s "
+        f"({max_attempts} attempts); last error: {last_error}"
+    )
+    if last_classification == "timeout":
+        raise SshTimeoutError(msg)
+    raise SshNotReadyError(msg)
+
+
 # ---------------------------------------------------------------------------
 # Repo / env sync
 # ---------------------------------------------------------------------------
