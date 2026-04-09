@@ -5,11 +5,42 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "crucible-ml"
 version = "0.2.1-alpha"
-description = "ML research platform: fleet orchestration, autonomous experimentation, and model zoo"
+description = "Plugin-based ML research platform: fleet orchestration, autonomous experimentation, modality-agnostic"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+authors = [
+    {name = "Eren Akbulut", email = "erenak1996@gmail.com"},
+]
+keywords = [
+    "machine-learning",
+    "research",
+    "fleet",
+    "runpod",
+    "orchestration",
+    "experiment-tracking",
+    "autonomous",
+    "mcp",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["pyyaml>=6.0"]
+
+[project.urls]
+Repository = "https://github.com/eren23/crucible"
+Documentation = "https://github.com/eren23/crucible#readme"
+Issues = "https://github.com/eren23/crucible/issues"
+Changelog = "https://github.com/eren23/crucible/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 torch = ["torch>=2.1", "numpy", "sentencepiece"]
@@ -19,8 +50,9 @@ wandb = ["wandb"]
 data = ["tqdm", "huggingface-hub", "datasets"]
 tui = ["textual>=0.50"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
+runpod = []  # GraphQL is handled via stdlib urllib; no extra deps beyond core
 all = ["crucible-ml[torch,anthropic,mcp,wandb,data,tui,api]"]
-dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.10"]
+dev = ["pytest>=8", "pytest-cov>=4", "pytest-mock>=3", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 crucible = "crucible.cli.main:main"

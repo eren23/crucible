@@ -36,7 +36,7 @@ The autonomous researcher currently uses LLM-driven hypothesis generation. We wa
 
 ### 3. Plugins (Optimizers, Schedulers, Callbacks, Loggers, etc.)
 
-Crucible has a unified plugin system with 12 pluggable types. Contributing a plugin is two files:
+Crucible has a unified plugin system with 13 pluggable types: optimizers, schedulers, providers, loggers, callbacks, data_adapters, data_sources, objectives, architectures, block_types, stack_patterns, augmentations, activations. Contributing a plugin is two files:
 
 ```
 .crucible/plugins/optimizers/my_optimizer.py   # the code
@@ -62,11 +62,19 @@ A tap is a git repo containing plugins. To create one:
 1. Create a repo with this structure:
    ```
    optimizers/my_opt/
-     plugin.yaml    # name, type, version, description, author, tags
+     plugin.yaml    # required: name, type, version, description
      my_opt.py      # the plugin code
    ```
 
-2. Others install with: `crucible tap add <your-repo-url> && crucible tap install my_opt`
+2. Validate locally before committing:
+   ```bash
+   crucible tap validate .
+   crucible tap validate . --warnings-as-errors  # strict mode for CI
+   ```
+
+3. Others install with: `crucible tap add <your-repo-url> && crucible tap install my_opt`
+
+The `plugin.yaml` schema is defined in `crucible.core.plugin_schema` and enforced by `crucible tap validate`. Required fields are `name`, `type`, `version`, `description`; `author`, `tags`, `crucible_compat`, and `dependencies` are recommended (warning, not error, if missing). See the tap's CONTRIBUTING.md for the full schema.
 
 To contribute to an existing tap: fork it, add your plugin, open a PR.
 
@@ -77,12 +85,14 @@ Show Crucible working with different ML frameworks. An example needs:
 - A `crucible.yaml` config
 - A brief README
 
-### 4. Bug Reports
+### 6. Bug Reports
 
 File issues at the GitHub repo. Include:
 - What you ran (command, config)
 - What happened (error, unexpected behavior)
 - What you expected
+
+Especially useful for fleet/bootstrap bugs: run `crucible fleet status` and attach the per-node `bootstrap_steps` output from the failing node.
 
 ## Development Setup
 
@@ -91,6 +101,22 @@ git clone <repo-url>
 cd crucible
 pip install -e ".[dev]"
 PYTHONPATH=src pytest tests/ -v
+```
+
+For fleet / config / template / schema work (the most active areas), you can run just the relevant slice:
+
+```bash
+PYTHONPATH=src pytest \
+    tests/test_config.py \
+    tests/test_project_template.py \
+    tests/test_fleet_manager.py \
+    tests/test_transactional_provision.py \
+    tests/test_bootstrap_state.py \
+    tests/test_ssh_timeouts.py \
+    tests/test_ssh_provider.py \
+    tests/test_data_probe.py \
+    tests/test_plugin_schema.py \
+    -q
 ```
 
 ## Code Conventions
