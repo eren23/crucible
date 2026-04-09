@@ -1,0 +1,35 @@
+[
+  {
+    "name": "ssh-smoke-baseline",
+    "preset": "smoke",
+    "backend": "torch",
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "4",
+      "MODEL_DIM": "128"
+    },
+    "tags": ["smoke", "ssh-local"]
+  },
+  {
+    "name": "ssh-smoke-deeper",
+    "preset": "smoke",
+    "backend": "torch",
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "6",
+      "MODEL_DIM": "128"
+    },
+    "tags": ["smoke", "ssh-local"]
+  },
+  {
+    "name": "ssh-smoke-wider",
+    "preset": "smoke",
+    "backend": "torch",
+    "config": {
+      "MODEL_FAMILY": "baseline",
+      "NUM_LAYERS": "4",
+      "MODEL_DIM": "192"
+    },
+    "tags": ["smoke", "ssh-local"]
+  }
+]

@@ -1,53 +1,23 @@
 # Crucible
 
-> **Alpha software.** Crucible works for the author's use case (autonomous ML research on RunPod). It may work for yours. APIs will change. Bug reports and PRs welcome.
+> **Alpha software.** APIs will change. Bug reports and PRs welcome.
 
-Autonomous ML research on rental GPUs. LLM-driven hypothesis generation + fleet orchestration on RunPod/SSH.
+**Crucible is a plugin-based ML research platform.** It provisions GPUs (RunPod, SSH, anything you can ssh into), runs training jobs across a fleet, collects and ranks results, and can drive the whole loop autonomously with a Claude-powered researcher.
 
-You bring a training script. Crucible decides what experiments to run, provisions the compute, executes them across tiers, and learns from the results.
+You bring a training script. Crucible owns the orchestration.
+
+**Works for any modality** — language models, diffusion, vision, world models, custom — via a generic training backend and pluggable components. The project was born from the OpenAI Parameter Golf language-modeling competition, but the platform is modality-agnostic by design.
 
 ## Why Crucible?
 
 No single existing tool combines fleet orchestration on rental GPUs with autonomous experiment design. The closest alternatives:
 
 - **SkyPilot** provisions GPUs across 20+ clouds but doesn't decide what experiments to run
-- **Optuna/Ax** optimize hyperparameters mathematically but don't provision compute or reason about architectures
+- **Optuna / Ax** optimize hyperparameters mathematically but don't provision compute or reason about architectures
 - **AI Scientist** generates hypotheses but runs single-machine with a 42% failure rate and no fleet management
-- **W&B/MLflow** track experiments but don't execute them autonomously
+- **W&B / MLflow** track experiments but don't execute them autonomously
 
 Crucible connects these concerns into one loop: **analyze → hypothesize → provision → execute → reflect → promote or kill**.
-
-## Origins
-
-Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (March–April 2026), a competition to train the best 16MB language model on 8xH100s in 10 minutes. The autonomous research infrastructure we built for the competition turned out to be general-purpose. Crucible extracts and generalizes it.
-
-## What Works Today
-
-- Fleet orchestration on RunPod (provision, bootstrap, dispatch, collect, destroy)
-- Generic SSH provider for any machine you can SSH into
-- Experiment execution with live output parsing, OOM retry, tier presets
-- Claude-driven autonomous research loop (hypothesis → batch → execute → reflect)
-- MCP server so Claude can control experiments via tool use
-- Model zoo with transformer components (RMSNorm, RoPE, GQA, SmearGate, etc.)
-- Analysis: leaderboard, sensitivity analysis, Pareto frontier
-- YAML project configuration (`crucible.yaml`)
-- Experiment notes (attach freeform observations to runs with YAML frontmatter)
-- Research tracks (group projects by research direction in the Crucible Hub)
-- Crucible Hub (`~/.crucible-hub/`) for cross-project knowledge sharing, git-synced
-- Research briefing (LLM session orientation with project context and findings)
-- REST API server (`crucible serve`) — 10 FastAPI endpoints wrapping MCP tools
-- W&B bridge with image logging and run annotation support
-- 112 MCP tools for AI agent integration (fleet, design, context, notes, hub, tracks, briefing, architecture composition, tree search, training generalization, plugin system, community taps)
-- Unified plugin system — 12 pluggable component types (optimizers, schedulers, callbacks, loggers, providers, architectures, data adapters, objectives, and more) with 3-tier precedence and auto-discovery
-- Community taps — Homebrew-style git-based plugin sharing (`crucible tap add`, `search`, `install`, `publish`)
-- Interactive TUI for browsing experiment designs grouped by status
-
-## What's Coming
-
-- SkyPilot provider (20+ cloud support)
-- Optuna/Ax integration (mathematical HPO alongside LLM-driven search)
-- Code-level search (LLM modifies training scripts, not just configs)
-- PyPI release
 
 ## Quick Start
 
@@ -55,75 +25,114 @@ Born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (Mar
 # Install from source
 pip install -e ".[all]"
 
-# Initialize a project
+# Initialize a project from a template (lm, vision, diffusion, world_model, generic)
 crucible init
+crucible project new my-first-project --template diffusion \
+    --set REPO_URL=https://github.com/me/my-first-project
 
-# Edit crucible.yaml — point at your training script
-
-# Run a smoke test
+# Review the generated spec, then run a smoke test locally
 crucible run experiment --preset smoke
 
-# Or go autonomous
-crucible research start --budget-hours 10 --tier proxy
+# Or go distributed: provision pods, run a batch, collect results
+crucible fleet provision --count 2
+crucible fleet bootstrap
+crucible run enqueue --spec experiments.json
+crucible run dispatch
+crucible run collect
+crucible analyze rank --top 10
 ```
 
-## Core Concepts
+See [`docs/getting-started.md`](docs/getting-started.md) for the full walkthrough and [`examples/`](examples/) for working projects in several modalities.
 
-### crucible.yaml
+## Modalities supported out of the box
 
-Like docker-compose for ML experiments:
+Crucible ships reference examples for every major modality:
 
-```yaml
-name: my-project
-provider:
-  type: runpod
-  gpu_types: ["NVIDIA GeForce RTX 4090"]
-training:
-  - backend: torch
-    script: train.py
-presets:
-  smoke: { MAX_WALLCLOCK_SECONDS: "60", ITERATIONS: "400" }
-  proxy: { MAX_WALLCLOCK_SECONDS: "1800", ITERATIONS: "6000" }
-researcher:
-  model: claude-sonnet-4-6-20250514
-  budget_hours: 10.0
-```
+| Modality | Example | Highlights |
+|---|---|---|
+| Language modeling | `examples/parameter_golf/` | Tied-embedding LM with SmearGate / BigramHash / RoPE |
+| Diffusion | `examples/diffusion/` | DDPM UNet on MNIST, custom data adapter |
+| World models | `examples/world_model/` | JEPA-style latent world model on bouncing balls |
+| Vision / classification | `crucible project new vision-test --template vision` | torchvision + CIFAR-10 starting point |
+| Bring-your-own-trainer | `examples/huggingface_finetune/` | HuggingFace Trainer wrapper (any 🤗 model) |
 
-### Training Contract
+For anything else, start from `--template generic` and override.
+
+## What works today
+
+- **Fleet orchestration** — RunPod and generic SSH provider, transactional provisioning with orphan recovery
+- **Project templates** — `crucible project new --template <modality>` generates a spec, no copy-paste editing
+- **Reliable bootstrap** — per-step state tracking, SSH timeout with exponential backoff, config-driven data probe
+- **Experiment execution** — live output parsing, OOM retry, tier presets, per-backend timeout maps
+- **Claude-driven autonomous researcher** — hypothesis → batch → execute → reflect, via MCP tool use
+- **Model zoo** — RMSNorm, RoPE, GQA, SmearGate, BigramHash, MoE, declarative composition
+- **Analysis** — leaderboard, sensitivity analysis, Pareto frontier
+- **Experiment notes** and **research tracks** persisted under `.crucible/`
+- **Crucible Hub** (`~/.crucible-hub/`) — cross-project knowledge sharing, git-synced
+- **REST API** (`crucible serve`) and **MCP server** (`crucible mcp serve`) exposing 130+ tools
+- **Community taps** — Homebrew-style git-based plugin sharing
+- **Unified plugin system** — 13 pluggable types (optimizers, schedulers, callbacks, loggers, providers, architectures, data adapters, objectives, block types, stack patterns, augmentations, activations, data sources) with 3-tier precedence and auto-discovery
+- **Interactive TUI** for browsing experiment designs grouped by status
+
+## What's coming
+
+- SkyPilot provider (20+ cloud support)
+- Optuna / Ax integration (mathematical HPO alongside LLM-driven search)
+- Code-level search (LLM modifies training scripts, not just configs)
+- PyPI release
+
+## Core concepts
+
+### Two kinds of config
+
+Crucible has two config levels, and it's worth knowing the difference:
+
+- **`crucible.yaml`** at your repo root — project-wide settings: provider, presets, researcher budget, metrics, sync excludes. Generated by `crucible init`.
+- **`.crucible/projects/<name>.yaml`** — a *project spec* for running external code on fleet pods. Each spec points at a git repo, declares a training command, and sets env vars. Generated by `crucible project new`.
+
+For local-only development you just need `crucible.yaml`. For fleet runs you also need a project spec.
+
+### Training contract
 
 Crucible doesn't own your training code. Any script that reads env vars and prints parseable output works:
 
 **Input** (env vars):
 - `ITERATIONS`, `MAX_WALLCLOCK_SECONDS`, `TRAIN_BATCH_TOKENS`
-- `MODEL_FAMILY`, `NUM_LAYERS`, `MODEL_DIM`, etc.
-- `RUN_ID`, `RUN_BACKEND`, `RUN_PRESET`
+- `MODEL_FAMILY`, `NUM_LAYERS`, `MODEL_DIM`, etc. (depends on your architecture)
+- `RUN_ID`, `RUN_BACKEND`, `RUN_PRESET`, `CRUCIBLE_VARIANT_NAME`
 
 **Output** (stdout patterns):
 - `step:{step}/{total} train_loss:{loss}`
 - `step:{step}/{total} val_loss:{loss} val_bpb:{bpb}`
 - `Serialized model ... {N} bytes`
 
-### Experiment Tiers
+### Experiment tiers
 
 Experiments earn their way to expensive compute:
 
-| Tier | Duration | Use Case |
-|------|----------|----------|
-| smoke | ~1 min | Quick validation |
-| proxy | ~30 min | Main exploration |
-| medium | ~1 hr | Extended runs |
-| promotion | ~2 hrs | Best candidates |
+| Tier | Duration | Use case |
+|---|---|---|
+| `smoke` | ~1 min | Quick validation |
+| `screen` | ~1 hr | Directional signal, architecture screening |
+| `proxy` | ~30 min | Medium-confidence comparison |
+| `medium` | ~1 hr | Thorough comparison |
+| `promotion` | ~2 hrs | Best candidates |
 
-### Fleet Management
+### Fleet lifecycle
 
 ```bash
-crucible fleet provision --count 4
-crucible fleet bootstrap
-crucible fleet status
-crucible fleet destroy
+crucible fleet provision --count 4      # create pods (transactional: partial failures don't orphan)
+crucible fleet bootstrap                # sync code + verify env, with per-step state tracking
+crucible fleet status                   # show nodes, step-by-step bootstrap progress
+crucible run enqueue --spec batch.json  # queue experiments
+crucible run dispatch                   # assign queue → idle nodes
+crucible run collect                    # rsync results and merge
+crucible fleet destroy                  # tear down when done
 ```
 
-### Autonomous Researcher
+When things go wrong, `crucible fleet status` shows per-node, per-step bootstrap results; the MCP `cleanup_orphans` tool finds and destroys pods that aren't in local inventory.
+
+### Autonomous researcher
 
 Claude-powered: analyze results, generate hypotheses, design batches, execute, reflect, promote or kill.
 
@@ -131,88 +140,64 @@ Claude-powered: analyze results, generate hypotheses, design batches, execute, r
 crucible research start --budget-hours 10 --tier proxy --dry-run
 ```
 
-### MCP Integration
+### MCP + REST
 
 ```bash
-crucible mcp serve  # starts stdio MCP server for Claude (112 tools)
-crucible serve      # starts REST API server (FastAPI, 10 endpoints)
-```
-
-## CLI Reference
-
-```
-crucible init
-crucible fleet {status|provision|destroy|bootstrap|sync|monitor}
-crucible run {experiment|queue|enqueue|dispatch|collect|day|night}
-crucible analyze {rank|sensitivity|pareto|export|summary}
-crucible research {start|status}
-crucible data {download|sync|status}
-crucible mcp serve
-crucible models list
-crucible hub {status|sync|findings}
-crucible track {create|list|switch}
-crucible note {add|get|search}
-crucible serve [--port PORT]
-crucible tui
-crucible store {list|diff|get}
+crucible mcp serve     # stdio MCP server for Claude (130+ tools)
+crucible serve         # REST API server (FastAPI)
 ```
 
 ## Installation
 
 ```bash
-pip install crucible-ml[all]        # everything
-pip install crucible-ml             # minimal (orchestration only)
-pip install crucible-ml[torch]      # model zoo
-pip install crucible-ml[anthropic]  # autonomous researcher
-pip install crucible-ml[mcp]        # MCP server
+pip install crucible-ml[all]         # everything
+pip install crucible-ml              # minimal (orchestration only)
+pip install crucible-ml[torch]       # + model zoo
+pip install crucible-ml[anthropic]   # + autonomous researcher
+pip install crucible-ml[mcp]         # + MCP server
+pip install crucible-ml[wandb]       # + W&B integration
+pip install crucible-ml[tui]         # + Interactive TUI
 ```
 
-## Validated Workflow (Tested 2026-03-21)
+## Project structure
 
-This exact sequence was run and confirmed working on 2 RunPod pods:
-
-```bash
-cd /path/to/your-ml-project
-crucible fleet provision --count 2 --name-prefix crucible-test
-crucible fleet bootstrap --train-shards 1
-crucible run enqueue --spec experiments.json --limit 3
-crucible run dispatch
-crucible fleet monitor --watch 60
-crucible run collect
-crucible analyze rank --top 10
-crucible fleet destroy
+```
+src/crucible/
+├── core/          # Config, env, I/O, types, logging, errors, plugin registry — no cross-module deps
+├── fleet/         # Provider-abstracted fleet management (RunPod, SSH)
+│   └── providers/ # Compute backends
+├── runner/        # Experiment execution, output parsing, presets, tracking, notes
+├── training/      # Training backends (torch, generic) — modality-agnostic
+├── models/        # Model zoo — components, architectures, declarative composer
+│   ├── components/     # Reusable blocks (Attention, MLP, MoE, RMSNorm, etc.)
+│   ├── architectures/  # Built-in reference architectures
+│   ├── specs/          # YAML architecture specs (declarative)
+│   └── composer.py     # Declarative architecture composition engine
+├── researcher/    # LLM-driven autonomous research loop
+├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
+├── data/          # Manifest-driven data pipeline
+├── mcp/           # MCP server exposing fleet ops as Claude tools
+├── api/           # Lightweight REST API server (FastAPI)
+├── tui/           # Interactive experiment design browser (Textual)
+├── templates/     # Built-in project-spec templates shipped with the package
+└── cli/           # CLI entry points
 ```
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Highest-impact areas:
-- **Compute providers**: Modal, Lambda, SkyPilot backends
-- **Search strategies**: Optuna, Ax integration
-- **Training script examples**: Show Crucible working with your framework
-- **Bug reports**: File issues, we'll fix them
+- **Compute providers** — Modal, Lambda, SkyPilot backends
+- **Search strategies** — Optuna, Ax integration
+- **Training examples** — show Crucible working with your framework
+- **Bug reports** — file issues, we'll fix them
 
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full plan — what works, what's next, what we won't build, and honest competitive assessment.
 
-## Project Structure
+## Origin
 
-```
-src/crucible/
-├── core/          # Config, env, I/O, types, logging, finding, hub
-├── fleet/         # Provider-abstracted fleet management
-│   └── providers/ # RunPod, SSH backends
-├── runner/        # Experiment execution, output parsing, presets, tracking, notes
-├── models/        # Model zoo (components + architectures)
-├── researcher/    # LLM-driven autonomous research loop, briefing
-├── analysis/      # Leaderboard, sensitivity, Pareto frontier
-├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server for Claude agent integration (112 tools)
-├── training/      # Training backends (torch) — factored from train_gpt.py
-├── api/           # Lightweight REST API server (FastAPI)
-├── tui/           # Interactive experiment design browser (Textual)
-└── cli/           # CLI entry points
-```
+Crucible was born from [OpenAI Parameter Golf](https://github.com/openai/parameter-golf) (March–April 2026), a competition to train the best 16MB language model on 8×H100s in 10 minutes. The autonomous research infrastructure we built for the competition turned out to be general-purpose, so we extracted and generalized it. The Parameter Golf project config lives at the repo root (`crucible.yaml`) as a working reference; `crucible.yaml.example` is the modality-agnostic template for new projects.
 
 ## License
 

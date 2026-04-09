@@ -1,0 +1,79 @@
+# Crucible project configuration — SSH Local Example
+#
+# Run Crucible against a single SSH-reachable machine. No RunPod account
+# needed. Works against localhost, a home server, or any VM.
+
+name: ssh-local-example
+version: "0.1.0"
+
+# Compute provider: SSH. No provisioning — you manage nodes.json manually
+# and the fleet layer treats it as immutable inventory.
+provider:
+  type: ssh
+  ssh_key: ~/.ssh/id_ed25519
+  defaults:
+    workspace_path: /home/user/crucible-workspace
+    python_bin: python3
+
+# Your training data — empty probe means "don't check anything on the
+# remote", so bootstrap treats dataset_ready as true unconditionally.
+# Set probe.paths if you want fleet to verify specific files exist.
+data:
+  source: local_files
+  probe:
+    paths: []
+
+# Training backends. This example uses the torch backend; swap to
+# `generic` for bring-your-own-trainer setups (see examples/huggingface_finetune).
+training:
+  - backend: torch
+    script: src/crucible/training/torch_backend.py
+
+# Metrics configuration
+metrics:
+  primary: val_loss
+  direction: minimize
+  size: model_bytes
+
+# Experiment presets. These are intentionally small — a home GPU is
+# probably not as fast as an RTX 4090.
+presets:
+  smoke:
+    MAX_WALLCLOCK_SECONDS: "60"
+    ITERATIONS: "100"
+    TRAIN_BATCH_TOKENS: "4096"
+
+  screen:
+    MAX_WALLCLOCK_SECONDS: "1800"
+    ITERATIONS: "1000"
+    TRAIN_BATCH_TOKENS: "16384"
+
+# Fleet reliability — tuned for a single, always-on machine. Shorter
+# initial connect budget because there's no cold-boot phase.
+fleet:
+  ssh:
+    initial_connect:
+      max_attempts: 3
+      backoff_base: 2
+      max_wait: 30
+    step_timeouts:
+      default: 300
+      sync_repo: 300
+      pip_install: 1200
+      data_probe: 15
+
+execution_policy:
+  require_remote: false          # allow running locally too
+  allow_local_dev: true
+
+sync_excludes:
+  - .git
+  - .venv
+  - __pycache__
+  - .crucible/designs
+  - .crucible/context
+  - .crucible/notes
+  - .crucible/store.jsonl
+  - .crucible/notes.jsonl
+  - logs
+  - data/datasets

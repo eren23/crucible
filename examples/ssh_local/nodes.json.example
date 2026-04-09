@@ -1,0 +1,16 @@
+[
+  {
+    "name": "local-gpu-01",
+    "node_id": "local-gpu-01",
+    "ssh_host": "host.example.com",
+    "ssh_port": 22,
+    "user": "user",
+    "ssh_key": "~/.ssh/id_ed25519",
+    "workspace_path": "/home/user/crucible-workspace",
+    "python_bin": "python3",
+    "gpu": "unknown",
+    "state": "new",
+    "env_ready": false,
+    "dataset_ready": false
+  }
+]

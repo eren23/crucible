@@ -1,0 +1,72 @@
+# Crucible project configuration — HuggingFace fine-tune example
+#
+# This example runs a DistilBERT fine-tune on GLUE SST-2 via HuggingFace's
+# Trainer. It deliberately uses zero Crucible Python imports — the training
+# script just reads env vars and prints the Crucible output contract. This
+# shows how to wrap ANY external training framework.
+
+project:
+  name: huggingface-finetune
+  description: DistilBERT fine-tune on SST-2 — bring-your-own-trainer demo
+
+# Presets map Crucible tiers to env var sets. The `generic` backend
+# exports these before invoking `train.py`, so the script sees them
+# as os.environ[...] values.
+presets:
+  smoke:
+    MODEL_NAME: distilbert-base-uncased
+    DATASET_NAME: sst2
+    ITERATIONS: "50"
+    BATCH_SIZE: "16"
+    EVAL_BATCH_SIZE: "32"
+    LR: "5e-5"
+    WARMUP_STEPS: "5"
+    LOG_INTERVAL: "10"
+    MAX_LENGTH: "64"
+    MAX_WALLCLOCK_SECONDS: "300"
+
+  screen:
+    MODEL_NAME: distilbert-base-uncased
+    DATASET_NAME: sst2
+    ITERATIONS: "500"
+    BATCH_SIZE: "32"
+    EVAL_BATCH_SIZE: "64"
+    LR: "2e-5"
+    WARMUP_STEPS: "50"
+    LOG_INTERVAL: "20"
+    MAX_LENGTH: "128"
+    MAX_WALLCLOCK_SECONDS: "1800"
+
+  proxy:
+    MODEL_NAME: distilbert-base-uncased
+    DATASET_NAME: sst2
+    ITERATIONS: "2000"
+    BATCH_SIZE: "32"
+    EVAL_BATCH_SIZE: "64"
+    LR: "2e-5"
+    WARMUP_STEPS: "100"
+    LOG_INTERVAL: "50"
+    MAX_LENGTH: "128"
+    MAX_WALLCLOCK_SECONDS: "3600"
+
+# Rank experiments by validation accuracy (higher is better).
+metrics:
+  primary: val_acc
+  direction: maximize
+  secondary: val_loss
+  size: model_bytes
+
+# Use the generic external-process backend. It launches a subprocess
+# with the preset env vars set, captures stdout, and parses the
+# training contract lines.
+training:
+  - backend: generic
+    script: train.py
+    modality: text_classification
+
+# No fleet data probe needed — the dataset is downloaded by the
+# HuggingFace datasets library at training time.
+data:
+  source: huggingface
+  probe:
+    paths: []
