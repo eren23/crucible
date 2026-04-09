@@ -1,4 +1,18 @@
-# Crucible project configuration — Parameter Golf
+# ─────────────────────────────────────────────────────────────────────────────
+#  This is the Parameter Golf reference project config — the one Crucible
+#  was originally built for. It is checked in as a working, end-to-end
+#  example of an LM training setup on RunPod.
+#
+#  If you are starting a new project and want a clean, modality-agnostic
+#  starting point instead, use:
+#
+#      cp crucible.yaml.example crucible.yaml
+#      crucible project new my-project --template <lm|vision|diffusion|world_model|generic>
+#
+#  The `willdepueoai/parameter-golf` dataset reference below is a specific
+#  HuggingFace dataset for the OpenAI Parameter Golf competition, NOT a
+#  general default. Override `data.repo_id` for any other project.
+# ─────────────────────────────────────────────────────────────────────────────
 name: parameter-golf
 version: "0.1.0"
 

@@ -1,0 +1,118 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Crucible project configuration — example template
+#
+#  Copy this file to `crucible.yaml` and edit it for your project, or run
+#  `crucible init` to generate one automatically. This template is
+#  modality-agnostic — works for LM, vision, diffusion, world models, etc.
+#
+#  To create a project spec for fleet runs, use:
+#      crucible project new my-project --template <lm|vision|diffusion|world_model|generic>
+#
+#  For local-only development you don't need a project spec; this
+#  `crucible.yaml` file is enough.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: my-project
+version: "0.1.0"
+
+# ─── Compute provider ───────────────────────────────────────────────────────
+provider:
+  type: runpod                           # "runpod" | "ssh"
+  ssh_key: ~/.ssh/id_ed25519_runpod
+  # image: runpod/pytorch:2.6.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+  # gpu_types: ["NVIDIA GeForce RTX 4090"]
+  # gpu_count: 1
+  # interruptible: true                  # false = secure/on-demand pods
+  defaults:
+    container_disk: 30
+    volume_disk: 0
+    workspace_path: /workspace/project
+    python_bin: python3
+    env_source: .env.runpod.local        # env file synced to pods
+
+# ─── Data pipeline ──────────────────────────────────────────────────────────
+# Configure for your dataset. Leave `repo_id` empty if you ship data via
+# local_files on project specs instead.
+data:
+  source: huggingface                    # "huggingface" | "local_files" | "wandb_artifact"
+  repo_id: ""                            # e.g. "HuggingFaceFW/fineweb-edu"
+  local_root: ./data
+  manifest: manifest.json
+
+# ─── Training backends ──────────────────────────────────────────────────────
+# Use `torch` for LM-style training, `generic` for diffusion / world models /
+# custom trainers. Multiple backends can coexist.
+training:
+  - backend: torch
+    script: train.py
+
+# ─── Metrics ────────────────────────────────────────────────────────────────
+metrics:
+  primary: val_loss                      # metric the leaderboard ranks by
+  direction: minimize                    # "minimize" | "maximize"
+  # secondary: val_acc                   # optional display metric
+  # size: model_bytes                    # for Pareto frontier analysis
+
+# ─── Experiment presets ─────────────────────────────────────────────────────
+# Presets are keyed by env var name — Crucible exports them before launching
+# your training script. Add / rename to suit your workflow.
+presets:
+  smoke:                                 # 60s sanity check
+    MAX_WALLCLOCK_SECONDS: "60"
+    ITERATIONS: "400"
+  screen:                                # 1h directional signal
+    MAX_WALLCLOCK_SECONDS: "3600"
+    ITERATIONS: "2000"
+  proxy:                                 # 30min medium confidence
+    MAX_WALLCLOCK_SECONDS: "1800"
+    ITERATIONS: "6000"
+
+# ─── Autonomous researcher ──────────────────────────────────────────────────
+researcher:
+  model: claude-sonnet-4-6-20250514
+  budget_hours: 10.0
+  max_iterations: 20
+  program_file: program.md
+
+# ─── Weights & Biases ───────────────────────────────────────────────────────
+wandb:
+  required: false                        # set true if every run must log to W&B
+  project: ""                            # or set WANDB_PROJECT in env
+  entity: ""                             # optional team/entity
+  mode: online                           # "online" | "offline" | "disabled"
+
+# ─── Execution policy ───────────────────────────────────────────────────────
+execution_policy:
+  require_remote: false                  # true = refuse to run on local machine
+  required_provider: ""                  # e.g. "runpod"
+  allow_local_dev: true
+
+# ─── Version store ──────────────────────────────────────────────────────────
+store_dir: .crucible
+
+# ─── Hub integration ────────────────────────────────────────────────────────
+# hub_dir: ~/.crucible-hub                # cross-project knowledge store
+# active_track: ""                        # current research track
+
+# ─── Sync exclusions ────────────────────────────────────────────────────────
+# Paths excluded when rsyncing code to fleet pods. Keep this list tight —
+# anything not listed here gets shipped with every sync.
+sync_excludes:
+  - .git
+  - .venv
+  - __pycache__
+  - .crucible/designs
+  - .crucible/context
+  - .crucible/notes
+  - .crucible/store.jsonl
+  - .crucible/notes.jsonl
+  - logs
+  - data/datasets
+  - fleet_runs
+  - .DS_Store
+
+# ─── Output paths ───────────────────────────────────────────────────────────
+results_file: experiments.jsonl
+fleet_results_file: experiments_fleet.jsonl
+logs_dir: logs
+nodes_file: nodes.json
