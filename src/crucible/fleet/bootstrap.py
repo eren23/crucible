@@ -111,6 +111,115 @@ def bootstrap_step(
     return checked_remote_exec(node, f"bootstrap:{label}", command, timeout=timeout)
 
 
+def _record_step(
+    node: dict[str, Any],
+    step_name: str,
+    fn: Any,
+    *,
+    required: bool = True,
+) -> Any:
+    """Run *fn* and record its outcome in ``node["bootstrap_steps"]``.
+
+    Every bootstrap step goes through this helper so we can surface
+    per-step status in get_fleet_status and avoid the "ready-but-broken"
+    failure mode where a partially-bootstrapped node gets flagged ready
+    because only the final state assignment was reached.
+
+    :param node: the node record to mutate
+    :param step_name: machine-readable step identifier (e.g. "sync_repo")
+    :param fn: a thunk (no-arg callable) that runs the actual work
+    :param required: if True, re-raises on failure so the caller / retry
+        loop can see it; if False, logs at WARN and swallows, keeping the
+        overall bootstrap progressing. Optional steps are things like
+        auxiliary data probes and hub-plugin materialization — useful
+        when they work, non-fatal when they don't.
+    """
+    import traceback
+    steps = node.setdefault("bootstrap_steps", {})
+    steps[step_name] = {
+        "status": "running",
+        "started_at": utc_now_iso(),
+        "error": None,
+        "required": required,
+    }
+    try:
+        result = fn()
+    except BaseException as thrown:
+        steps[step_name] = {
+            "status": "failed",
+            "started_at": steps[step_name]["started_at"],
+            "finished_at": utc_now_iso(),
+            "error": str(thrown),
+            "required": required,
+        }
+        if required:
+            raise
+        # Optional step — log the full traceback (previously swallowed)
+        # so operators can see WHY the probe/mirror failed without
+        # losing forward progress on the bootstrap.
+        log_warn(
+            f"{node['name']}: optional bootstrap step {step_name!r} "
+            f"failed (non-fatal): {thrown}"
+        )
+        log_warn(
+            f"{node['name']}: {step_name!r} traceback:\n{traceback.format_exc()}"
+        )
+        return None
+    steps[step_name] = {
+        "status": "ok",
+        "started_at": steps[step_name]["started_at"],
+        "finished_at": utc_now_iso(),
+        "error": None,
+        "required": required,
+    }
+    return result
+
+
+def bootstrap_state_summary(node: dict[str, Any]) -> dict[str, Any]:
+    """Summarize bootstrap progress for display in get_fleet_status.
+
+    Returns a compact dict with:
+    - total: number of tracked steps
+    - ok: count of successful steps
+    - failed: list of {step, error} for failures (required + optional)
+    - required_failed: count of REQUIRED steps that failed
+    - all_required_ok: bool — True iff no required step failed
+
+    Returns an empty summary if the node has no bootstrap_steps yet.
+    """
+    steps = node.get("bootstrap_steps") or {}
+    if not steps:
+        return {
+            "total": 0,
+            "ok": 0,
+            "failed": [],
+            "required_failed": 0,
+            "all_required_ok": True,
+        }
+    ok_count = 0
+    failed: list[dict[str, Any]] = []
+    required_failed = 0
+    for name, info in steps.items():
+        status = info.get("status")
+        if status == "ok":
+            ok_count += 1
+        elif status == "failed":
+            failed.append({
+                "step": name,
+                "error": info.get("error", ""),
+                "required": bool(info.get("required", True)),
+            })
+            if info.get("required", True):
+                required_failed += 1
+    return {
+        "total": len(steps),
+        "ok": ok_count,
+        "failed": failed,
+        "required_failed": required_failed,
+        "all_required_ok": required_failed == 0,
+    }
+
+
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -189,43 +298,69 @@ def bootstrap_node(
     *data_source_name* is ``None``. It runs on the **remote** workspace so paths match
     the node. Optional *data_source_config* is shallow-merged onto the mapped config.
     """
-    _materialize_global_architectures(project_root)
-    sync_repo(node, project_root=project_root, sync_excludes=sync_excludes)
-    sync_env_file(node, project_root=project_root)
-    sync_taps(node)
+    # Reset per-run step tracking so retries produce a clean record.
+    node["bootstrap_steps"] = {}
+
+    _record_step(
+        node, "materialize_plugins",
+        lambda: _materialize_global_architectures(project_root),
+        required=False,
+    )
+    _record_step(
+        node, "sync_repo",
+        lambda: sync_repo(node, project_root=project_root, sync_excludes=sync_excludes),
+    )
+    _record_step(
+        node, "sync_env_file",
+        lambda: sync_env_file(node, project_root=project_root),
+    )
+    _record_step(node, "sync_taps", lambda: sync_taps(node), required=False)
 
     ws_path = node.get("workspace_path", "/workspace/project")
     workspace = shlex.quote(ws_path)
     py = shlex.quote(node.get("python_bin", "python3"))
     py_src = shlex.quote(str(Path(ws_path) / "src"))
 
-    bootstrap_step(node, "python_version", f"cd {workspace} && {py} --version")
-    bootstrap_step(
-        node,
-        "torch_import",
-        f"cd {workspace} && {py} - <<'PY'\n"
-        "import torch\n"
-        "print(torch.__version__)\n"
-        "print(torch.version.cuda)\n"
-        "ok = torch.cuda.is_available()\n"
-        "print(ok)\n"
-        "if not ok:\n"
-        "    raise SystemExit('cuda_unavailable')\n"
-        "print(torch.cuda.device_count())\n"
-        "PY",
+    _record_step(
+        node, "python_version",
+        lambda: bootstrap_step(node, "python_version", f"cd {workspace} && {py} --version"),
+    )
+    _record_step(
+        node, "torch_import",
+        lambda: bootstrap_step(
+            node,
+            "torch_import",
+            f"cd {workspace} && {py} - <<'PY'\n"
+            "import torch\n"
+            "print(torch.__version__)\n"
+            "print(torch.version.cuda)\n"
+            "ok = torch.cuda.is_available()\n"
+            "print(ok)\n"
+            "if not ok:\n"
+            "    raise SystemExit('cuda_unavailable')\n"
+            "print(torch.cuda.device_count())\n"
+            "PY",
+        ),
     )
 
     if not skip_install:
-        bootstrap_step(
-            node,
-            "pip_install",
-            f"cd {workspace} && "
-            "grep -viE '^(torch|torchvision|torchaudio)([<>=].*)?$' requirements.txt "
-            "> /tmp/crucible.requirements.txt && "
-            f"{py} -m pip install --break-system-packages -r /tmp/crucible.requirements.txt",
+        _record_step(
+            node, "pip_install",
+            lambda: bootstrap_step(
+                node,
+                "pip_install",
+                f"cd {workspace} && "
+                "grep -viE '^(torch|torchvision|torchaudio)([<>=].*)?$' requirements.txt "
+                "> /tmp/crucible.requirements.txt && "
+                f"{py} -m pip install --break-system-packages -r /tmp/crucible.requirements.txt",
+            ),
         )
 
-    # Pre-download check: PARTIAL status on the remote node skips auto-download
+    # Pre-download check: PARTIAL status on the remote node skips auto-download.
+    # The probe is best-effort — it's informational, not required — so wrapping
+    # it in _record_step(required=False) logs any failure at WARN without
+    # killing the bootstrap. Previously this used a bare `except: pass` which
+    # silently swallowed all errors.
     _skip_auto_download = False
     if not skip_data:
         from crucible.core.config import ProjectConfig, load_config
@@ -242,7 +377,9 @@ def bootstrap_node(
         )
         if spec is not None:
             plugin_name, ds_cfg = spec
-            try:
+
+            def _probe_data_source() -> None:
+                nonlocal _skip_auto_download
                 probe_body = _remote_data_source_partial_probe_script(plugin_name, ds_cfg)
                 status_step = bootstrap_step(
                     node,
@@ -257,27 +394,32 @@ def bootstrap_node(
                         f"(incomplete vs manifest); skipping auto-download. "
                         f"Verify shard layout on the node."
                     )
-            except Exception:
-                pass
 
-    data_probe = None
+            _record_step(
+                node, "data_source_partial_probe",
+                _probe_data_source,
+                required=False,
+            )
+
+    data_probe: Any = None
     if not skip_data:
-        data_probe = bootstrap_step(
-            node,
-            "data_probe",
-            f"cd {workspace} && {py} - <<'PY'\n"
-            "from pathlib import Path\n"
-            "root = Path('data/datasets/fineweb10B_sp1024')\n"
-            "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
-            "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
-            "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
-            "print(int(tok.exists() and bool(train) and bool(val)))\n"
-            "PY",
-        )
+        def _run_data_probe() -> Any:
+            return bootstrap_step(
+                node,
+                "data_probe",
+                f"cd {workspace} && {py} - <<'PY'\n"
+                "from pathlib import Path\n"
+                "root = Path('data/datasets/fineweb10B_sp1024')\n"
+                "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
+                "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
+                "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
+                "print(int(tok.exists() and bool(train) and bool(val)))\n"
+                "PY",
+            )
 
-    node["last_seen_at"] = utc_now_iso()
-    node["env_ready"] = True
-    node["state"] = "ready"
+        # The data probe is required: if we can't tell whether the dataset
+        # is present, we can't safely mark the node ready for dispatch.
+        data_probe = _record_step(node, "data_probe", _run_data_probe)
 
     if skip_data:
         # Projects that download data at training time (e.g. from HF Hub)
@@ -298,7 +440,10 @@ def bootstrap_node(
                     f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
                     f"--variant sp1024 --train-shards {train_shards}"
                 )
-                bootstrap_step(node, "data_download", download_cmd)
+                _record_step(
+                    node, "data_download",
+                    lambda: bootstrap_step(node, "data_download", download_cmd),
+                )
                 node["dataset_ready"] = True
         else:
             # Data exists on remote, mark as ready
@@ -307,6 +452,22 @@ def bootstrap_node(
     node["git_sha"] = local_git_sha(project_root)
     if node["git_sha"] is None:
         log_warn(f"{node['name']}: local git SHA unavailable; recording null git_sha")
+
+    # Final state flip — only reached if every REQUIRED step in
+    # _record_step succeeded (required failures re-raise and unwind us
+    # before we get here). Optional step failures are visible via
+    # node["bootstrap_steps"] and bootstrap_state_summary() so the user
+    # can inspect them via get_fleet_status.
+    summary = bootstrap_state_summary(node)
+    node["last_seen_at"] = utc_now_iso()
+    node["env_ready"] = summary["all_required_ok"]
+    node["state"] = "ready" if summary["all_required_ok"] else "bootstrap_failed"
+    if not summary["all_required_ok"]:
+        log_warn(
+            f"{node['name']}: bootstrap completed with "
+            f"{summary['required_failed']} required step failure(s); "
+            f"state set to bootstrap_failed"
+        )
     return node
 
 
