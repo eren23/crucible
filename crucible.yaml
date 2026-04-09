@@ -38,6 +38,15 @@ data:
   variant: fineweb10B_sp1024
   local_root: ./data
   manifest: manifest.json
+  # Remote data readiness probe. Fleet bootstrap generates a probe
+  # script from these fields; if any of the listed paths is missing,
+  # `download_command` is run on the pod.
+  probe:
+    paths:
+      - "data/tokenizers/fineweb_1024_bpe.model"
+      - "data/datasets/fineweb10B_sp1024/fineweb_train_*.bin"
+      - "data/datasets/fineweb10B_sp1024/fineweb_val_*.bin"
+    download_command: "python3 data/cached_challenge_fineweb.py --variant sp1024"
 
 # Training backends
 training:

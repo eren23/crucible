@@ -306,6 +306,118 @@ def ensure_project_system_tools(
     bootstrap_step(node, "system_tools", install_cmd, timeout=timeout)
 
 
+def _build_data_probe_command(
+    proj_cfg: Any,
+    workspace: str,
+    py: str,
+) -> str | None:
+    """Generate a remote probe command from the project's data config.
+
+    Returns ``None`` if no probe is configured, in which case data
+    bootstrap is a no-op. Priority order:
+
+    1. ``data.probe.script``: run a custom Python file on the remote.
+       The file is expected to print ``1`` if data is ready, ``0``
+       otherwise.
+    2. ``data.probe.paths``: generate a Python one-liner that checks
+       every listed path exists (files must exist, directories must
+       be non-empty).
+    3. Legacy fineweb paths: only when ``data.source == "huggingface"``
+       and ``data.variant`` starts with ``fineweb`` (preserves the
+       Parameter Golf reference config's behavior without hardcoding).
+    4. Otherwise: ``None``.
+    """
+    data_cfg = getattr(proj_cfg, "data", None)
+    if data_cfg is None:
+        return None
+    probe = getattr(data_cfg, "probe", None)
+    if probe is not None:
+        script = (getattr(probe, "script", "") or "").strip()
+        if script:
+            return (
+                f"cd {workspace} && {py} {shlex.quote(script)}"
+            )
+        paths = list(getattr(probe, "paths", []) or [])
+        if paths:
+            return _generate_paths_probe(workspace, py, paths)
+    # Legacy fineweb fallback — fires only when this is clearly a
+    # Parameter Golf-style LM setup. Every other project needs an
+    # explicit ``data.probe.paths`` or ``data.probe.script``.
+    source = str(getattr(data_cfg, "source", "") or "").lower()
+    variant = str(getattr(data_cfg, "variant", "") or "").lower()
+    if source == "huggingface" and variant.startswith("fineweb"):
+        return (
+            f"cd {workspace} && {py} - <<'PY'\n"
+            "from pathlib import Path\n"
+            "root = Path('data/datasets/fineweb10B_sp1024')\n"
+            "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
+            "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
+            "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
+            "print(int(tok.exists() and bool(train) and bool(val)))\n"
+            "PY"
+        )
+    return None
+
+
+def _generate_paths_probe(workspace: str, py: str, paths: list[str]) -> str:
+    """Render a Python probe that verifies all *paths* exist on the remote.
+
+    Files must exist; directory paths (ending with ``/``) must exist
+    AND be non-empty. Glob patterns (containing ``*``) must match at
+    least one path. Prints ``1`` if every path check succeeds, ``0``
+    otherwise.
+    """
+    import json
+    paths_literal = json.dumps(list(paths))
+    body = (
+        "from pathlib import Path\n"
+        f"paths = {paths_literal}\n"
+        "ok = True\n"
+        "for p in paths:\n"
+        "    if '*' in p:\n"
+        "        matches = list(Path('.').glob(p))\n"
+        "        if not matches:\n"
+        "            ok = False; break\n"
+        "        continue\n"
+        "    pth = Path(p)\n"
+        "    if p.endswith('/'):\n"
+        "        if not pth.is_dir() or not any(pth.iterdir()):\n"
+        "            ok = False; break\n"
+        "    else:\n"
+        "        if not pth.exists():\n"
+        "            ok = False; break\n"
+        "print(1 if ok else 0)\n"
+    )
+    return f"cd {workspace} && {py} - <<'PY'\n{body}PY"
+
+
+def _legacy_fineweb_download_command(
+    proj_cfg: Any,
+    workspace: str,
+    py: str,
+    train_shards: int,
+) -> str:
+    """Return the legacy fineweb auto-download command for PG-style configs.
+
+    Only fires when the project config looks like a Parameter Golf LM
+    setup (source=huggingface, variant starts with 'fineweb'). For
+    every other project the caller should supply an explicit
+    ``data.probe.download_command``. Returns an empty string when no
+    fallback is warranted.
+    """
+    data_cfg = getattr(proj_cfg, "data", None)
+    if data_cfg is None:
+        return ""
+    source = str(getattr(data_cfg, "source", "") or "").lower()
+    variant = str(getattr(data_cfg, "variant", "") or "").lower()
+    if source == "huggingface" and variant.startswith("fineweb"):
+        return (
+            f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
+            f"--variant sp1024 --train-shards {train_shards}"
+        )
+    return ""
+
+
 def bootstrap_node(
     node: dict[str, Any],
     *,
@@ -333,6 +445,17 @@ def bootstrap_node(
     """
     # Reset per-run step tracking so retries produce a clean record.
     node["bootstrap_steps"] = {}
+
+    # Load the project config once up front — the data probe/download
+    # step needs it, and loading it multiple times inside step closures
+    # adds latency and confuses test mocks.
+    from crucible.core.config import ProjectConfig, load_config
+    cfg_path = project_root / "crucible.yaml"
+    proj_cfg = (
+        load_config(cfg_path)
+        if cfg_path.is_file()
+        else ProjectConfig(project_root=project_root.resolve())
+    )
 
     _record_step(
         node, "materialize_plugins",
@@ -396,13 +519,8 @@ def bootstrap_node(
     # silently swallowed all errors.
     _skip_auto_download = False
     if not skip_data:
-        from crucible.core.config import ProjectConfig, load_config
         from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
 
-        cfg_path = project_root / "crucible.yaml"
-        proj_cfg = load_config(cfg_path) if cfg_path.is_file() else ProjectConfig(
-            project_root=project_root.resolve(),
-        )
         spec = bootstrap_data_source_spec_from_data_config(
             proj_cfg.data,
             plugin_name_override=data_source_name,
@@ -434,34 +552,30 @@ def bootstrap_node(
                 required=False,
             )
 
+    # Build a probe command from project config. Returns None if no
+    # probe is configured (in which case data bootstrap is a no-op —
+    # previously this used hardcoded fineweb paths that silently
+    # failed for non-LM projects).
+    probe_command = _build_data_probe_command(proj_cfg, workspace, py)
+
     data_probe: Any = None
-    if not skip_data:
+    if not skip_data and probe_command is not None:
         def _run_data_probe() -> Any:
-            return bootstrap_step(
-                node,
-                "data_probe",
-                f"cd {workspace} && {py} - <<'PY'\n"
-                "from pathlib import Path\n"
-                "root = Path('data/datasets/fineweb10B_sp1024')\n"
-                "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
-                "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
-                "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
-                "print(int(tok.exists() and bool(train) and bool(val)))\n"
-                "PY",
-            )
+            return bootstrap_step(node, "data_probe", probe_command)
 
         # The data probe is required: if we can't tell whether the dataset
         # is present, we can't safely mark the node ready for dispatch.
         data_probe = _record_step(node, "data_probe", _run_data_probe)
 
-    if skip_data:
-        # Projects that download data at training time (e.g. from HF Hub)
-        # don't need the fleet-level dataset. Mark as ready so dispatch
-        # doesn't filter the node out with "dataset_missing".
+    if skip_data or probe_command is None:
+        # Projects that download data at training time, or have no data
+        # probe configured, don't need a fleet-level dataset. Mark as
+        # ready so dispatch doesn't filter the node out with
+        # "dataset_missing".
         node["dataset_ready"] = True
 
-    if not skip_data:
-        data_missing = data_probe is not None and data_probe.stdout.strip().endswith("0")
+    if not skip_data and data_probe is not None:
+        data_missing = data_probe.stdout.strip().endswith("0")
         if data_missing:
             if _skip_auto_download:
                 log_warn(
@@ -469,15 +583,30 @@ def bootstrap_node(
                     f"data source status"
                 )
             else:
-                download_cmd = data_download_cmd or (
-                    f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
-                    f"--variant sp1024 --train-shards {train_shards}"
+                # Resolve download command: runtime override > config > legacy
+                # fineweb default (only when ``data.source=='huggingface'`` and
+                # ``data.variant`` looks like a fineweb variant, i.e. when this
+                # is actually the Parameter Golf workflow).
+                download_cmd = (
+                    data_download_cmd
+                    or (proj_cfg.data.probe.download_command or "").strip()
+                    or _legacy_fineweb_download_command(
+                        proj_cfg, workspace, py, train_shards
+                    )
                 )
-                _record_step(
-                    node, "data_download",
-                    lambda: bootstrap_step(node, "data_download", download_cmd),
-                )
-                node["dataset_ready"] = True
+                if download_cmd:
+                    cmd_for_step = download_cmd
+                    _record_step(
+                        node, "data_download",
+                        lambda: bootstrap_step(node, "data_download", cmd_for_step),
+                    )
+                    node["dataset_ready"] = True
+                else:
+                    log_warn(
+                        f"{node['name']}: data probe reports missing data but "
+                        f"no download_command is configured — leaving "
+                        f"dataset_ready=False so dispatch skips this node"
+                    )
         else:
             # Data exists on remote, mark as ready
             node["dataset_ready"] = True

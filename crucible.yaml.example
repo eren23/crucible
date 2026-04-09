@@ -38,6 +38,31 @@ data:
   repo_id: ""                            # e.g. "HuggingFaceFW/fineweb-edu"
   local_root: ./data
   manifest: manifest.json
+  # Remote data readiness probe. If `probe.paths` is empty (default),
+  # fleet bootstrap skips the data step entirely. Populate it for
+  # projects that ship their own dataset.
+  probe:
+    paths: []                            # e.g. ["data/train.h5", "data/val.h5"]
+    # script: ""                         # custom readiness script (optional)
+    download_command: ""                 # run when probe reports missing data
+
+# ─── Fleet / SSH reliability ────────────────────────────────────────────────
+# Per-step timeouts and initial-connect backoff. Defaults work for
+# typical RunPod pods; tune step_timeouts["pip_install"] up if you
+# have a big requirements.txt, or initial_connect.max_wait up for
+# slow cloud types.
+fleet:
+  ssh:
+    initial_connect:
+      max_attempts: 6
+      backoff_base: 5                    # seconds; doubles per attempt
+      max_wait: 180                      # total budget
+    step_timeouts:
+      default: 300
+      sync_repo: 600
+      pip_install: 900
+      data_download: 1800
+      data_probe: 30
 
 # ─── Training backends ──────────────────────────────────────────────────────
 # Use `torch` for LM-style training, `generic` for diffusion / world models /

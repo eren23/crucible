@@ -24,6 +24,33 @@ class ProviderConfig:
 
 
 @dataclass
+class DataProbeConfig:
+    """Config-driven remote data-readiness probe.
+
+    When any of these fields are set, fleet bootstrap generates a Python
+    probe script that checks the remote node for the listed paths. If
+    the probe reports missing data, the optional ``download_command`` is
+    run. If all fields are empty (default), data bootstrap is a no-op
+    rather than silently running a hardcoded fineweb check.
+
+    - ``paths``: list of remote paths that must all exist for data to be
+      considered ready. Resolved relative to the node's workspace_path.
+      Paths ending with ``/`` are treated as directories (must be
+      non-empty); other paths must exist as files. Globs are supported
+      via Path.glob for the first segment containing ``*``.
+    - ``script``: optional remote Python file that prints ``1`` if data
+      is ready, ``0`` otherwise. Overrides ``paths`` when set. Useful
+      for bespoke readiness logic (e.g., checksum verification).
+    - ``download_command``: shell command run on the remote when the
+      probe reports missing data. Runs in the workspace dir. Empty
+      string means "don't attempt to download; just warn".
+    """
+    paths: list[str] = field(default_factory=list)
+    script: str = ""
+    download_command: str = ""
+
+
+@dataclass
 class DataConfig:
     source: str = "huggingface"
     repo_id: str = ""
@@ -36,6 +63,7 @@ class DataConfig:
     wandb_project: str = ""
     wandb_artifact: str = ""
     wandb_artifact_type: str = "dataset"
+    probe: DataProbeConfig = field(default_factory=DataProbeConfig)
 
 
 @dataclass
@@ -186,6 +214,16 @@ def _build_provider(raw: dict[str, Any]) -> ProviderConfig:
     )
 
 
+def _build_data_probe(raw: dict[str, Any]) -> DataProbeConfig:
+    if not raw:
+        return DataProbeConfig()
+    return DataProbeConfig(
+        paths=list(raw.get("paths", []) or []),
+        script=str(raw.get("script", "") or ""),
+        download_command=str(raw.get("download_command", "") or ""),
+    )
+
+
 def _build_data(raw: dict[str, Any]) -> DataConfig:
     return DataConfig(
         source=raw.get("source", "huggingface"),
@@ -199,6 +237,7 @@ def _build_data(raw: dict[str, Any]) -> DataConfig:
         wandb_project=raw.get("wandb_project", ""),
         wandb_artifact=raw.get("wandb_artifact", ""),
         wandb_artifact_type=raw.get("wandb_artifact_type", "dataset"),
+        probe=_build_data_probe(raw.get("probe", {}) or {}),
     )
 
 
