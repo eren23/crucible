@@ -1,0 +1,51 @@
+# description: Image classification (torchvision ImageFolder or CIFAR-10). Good starting point for vision fine-tuning or from-scratch training.
+#
+# Required variables:
+#   PROJECT_NAME — the name of your vision project
+#   REPO_URL     — URL of the git repo containing your training code
+#
+# Optional variables (with defaults):
+#   BRANCH           — git branch (default: main)
+#   GPU_TYPE         — RunPod GPU (default: NVIDIA GeForce RTX 4090)
+#   CONTAINER_DISK   — container disk GB (default: 30)
+#   DATASET          — dataset name (default: cifar10)
+#   MODEL_ARCH       — torchvision arch name (default: resnet18)
+#   IMAGE_SIZE       — input image size (default: 32)
+#   NUM_CLASSES      — classifier output dim (default: 10)
+#   WANDB_PROJECT    — W&B project name (default: same as PROJECT_NAME)
+
+extends: generic
+
+name: ${PROJECT_NAME}
+workspace: /workspace/${PROJECT_NAME}
+
+pod:
+  gpu_type: "${GPU_TYPE:NVIDIA GeForce RTX 4090}"
+  gpu_count: 1
+  container_disk: ${CONTAINER_DISK:30}
+
+install_torch: "torch==2.6.0 torchvision==0.21.0"
+install_flags: "--index-url https://download.pytorch.org/whl/cu124"
+
+install:
+  - "."
+  - "wandb"
+  - "pillow"
+
+train: >-
+  python train.py
+  --dataset ${DATASET:cifar10}
+  --arch ${MODEL_ARCH:resnet18}
+  --image-size ${IMAGE_SIZE:32}
+  --num-classes ${NUM_CLASSES:10}
+  --epochs ${EPOCHS:50}
+
+timeout: 10800
+
+env_set:
+  WANDB_PROJECT: "${WANDB_PROJECT:${PROJECT_NAME}}"
+
+metrics:
+  source: wandb
+  primary: val_acc
+  direction: maximize

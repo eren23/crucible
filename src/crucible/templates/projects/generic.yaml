@@ -1,0 +1,53 @@
+# description: Minimal project-spec skeleton — bring your own everything. Start here if no other template fits your modality.
+#
+# Required variables:
+#   PROJECT_NAME — the name of your project (also used as the file stem)
+#   REPO_URL     — URL of the git repo Crucible will clone onto fleet pods
+#
+# Optional variables (with defaults):
+#   BRANCH         — git branch to sync (default: main)
+#   GPU_TYPE       — RunPod GPU name (default: NVIDIA GeForce RTX 4090)
+#   CONTAINER_DISK — container disk size in GB (default: 30)
+#   WANDB_PROJECT  — W&B project name (default: same as PROJECT_NAME)
+#
+# After rendering, edit:
+#   - install / install_torch to match your dependencies
+#   - train to point at your training entrypoint
+#   - env_set and env_forward for any secrets or project-specific config
+#   - metrics.primary / metrics.direction for leaderboard ranking
+
+name: ${PROJECT_NAME}
+repo: ${REPO_URL}
+branch: ${BRANCH:main}
+shallow: true
+workspace: /workspace/${PROJECT_NAME}
+
+pod:
+  gpu_type: "${GPU_TYPE:NVIDIA GeForce RTX 4090}"
+  gpu_count: 1
+  container_disk: ${CONTAINER_DISK:30}
+  volume_disk: 0
+
+python: "3.11"
+
+install:
+  - "."
+
+setup: []
+
+train: "python train.py"
+
+timeout: 7200
+
+env_forward:
+  - WANDB_API_KEY
+  - WANDB_ENTITY
+
+env_set:
+  WANDB_PROJECT: "${WANDB_PROJECT:${PROJECT_NAME}}"
+  WANDB_MODE: online
+
+metrics:
+  source: wandb
+  primary: val_loss
+  direction: minimize

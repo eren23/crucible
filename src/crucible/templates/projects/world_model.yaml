@@ -1,0 +1,62 @@
+# description: JEPA-style world model for video / trajectory prediction. Modeled on the examples/world_model/ bouncing-balls walkthrough.
+#
+# Required variables:
+#   PROJECT_NAME — the name of your world model project
+#   REPO_URL     — URL of the git repo containing your training code
+#
+# Optional variables (with defaults):
+#   BRANCH           — git branch (default: main)
+#   GPU_TYPE         — RunPod GPU (default: NVIDIA GeForce RTX 4090)
+#   CONTAINER_DISK   — container disk GB (default: 40)
+#   IMAGE_SIZE       — frame resolution (default: 32)
+#   IMAGE_CHANNELS   — input channels (default: 3)
+#   NUM_FRAMES       — sequence length per example (default: 8)
+#   MODEL_DIM        — latent dim (default: 128)
+#   ACTION_DIM       — action/condition dim (default: 2)
+#   WANDB_PROJECT    — W&B project name (default: same as PROJECT_NAME)
+
+extends: generic
+
+name: ${PROJECT_NAME}
+workspace: /workspace/${PROJECT_NAME}
+
+pod:
+  gpu_type: "${GPU_TYPE:NVIDIA GeForce RTX 4090}"
+  gpu_count: 1
+  container_disk: ${CONTAINER_DISK:40}
+
+install_torch: "torch==2.6.0 torchvision==0.21.0"
+install_flags: "--index-url https://download.pytorch.org/whl/cu124"
+
+install:
+  - "."
+  - "wandb"
+  - "einops"
+  - "h5py"
+
+train: >-
+  python train_generic.py
+  --preset ${PRESET:screen}
+
+timeout: 14400
+
+env_forward:
+  - WANDB_API_KEY
+  - WANDB_ENTITY
+  - CRUCIBLE_VARIANT_NAME
+
+env_set:
+  WANDB_PROJECT: "${WANDB_PROJECT:${PROJECT_NAME}}"
+  MODEL_FAMILY: jepa_wm
+  DATA_ADAPTER: "${DATA_ADAPTER:synthetic_video}"
+  TRAINING_OBJECTIVE: jepa
+  IMAGE_SIZE: "${IMAGE_SIZE:32}"
+  IMAGE_CHANNELS: "${IMAGE_CHANNELS:3}"
+  NUM_FRAMES: "${NUM_FRAMES:8}"
+  MODEL_DIM: "${MODEL_DIM:128}"
+  ACTION_DIM: "${ACTION_DIM:2}"
+
+metrics:
+  source: wandb
+  primary: pred_loss
+  direction: minimize

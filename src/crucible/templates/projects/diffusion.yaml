@@ -1,0 +1,55 @@
+# description: Denoising diffusion (DDPM-style) on image data. Modeled on the examples/diffusion/ MNIST walkthrough.
+#
+# Required variables:
+#   PROJECT_NAME — the name of your diffusion project
+#   REPO_URL     — URL of the git repo containing your training code
+#
+# Optional variables (with defaults):
+#   BRANCH          — git branch (default: main)
+#   GPU_TYPE        — RunPod GPU (default: NVIDIA GeForce RTX 4090)
+#   CONTAINER_DISK  — container disk GB (default: 40 — diffusion checkpoints + samples)
+#   IMAGE_SIZE      — image resolution (default: 32)
+#   IMAGE_CHANNELS  — input channels (default: 3)
+#   DIFFUSION_STEPS — number of denoising steps (default: 1000)
+#   MODEL_DIM       — base UNet channels (default: 64)
+#   WANDB_PROJECT   — W&B project name (default: same as PROJECT_NAME)
+
+extends: generic
+
+name: ${PROJECT_NAME}
+workspace: /workspace/${PROJECT_NAME}
+
+pod:
+  gpu_type: "${GPU_TYPE:NVIDIA GeForce RTX 4090}"
+  gpu_count: 1
+  container_disk: ${CONTAINER_DISK:40}
+
+install_torch: "torch==2.6.0 torchvision==0.21.0"
+install_flags: "--index-url https://download.pytorch.org/whl/cu124"
+
+install:
+  - "."
+  - "wandb"
+  - "pillow"
+  - "einops"
+
+train: >-
+  python train_generic.py
+  --preset ${PRESET:screen}
+
+timeout: 10800
+
+env_set:
+  WANDB_PROJECT: "${WANDB_PROJECT:${PROJECT_NAME}}"
+  MODEL_FAMILY: ddpm_unet
+  DATA_ADAPTER: "${DATA_ADAPTER:synthetic_images}"
+  TRAINING_OBJECTIVE: diffusion
+  IMAGE_SIZE: "${IMAGE_SIZE:32}"
+  IMAGE_CHANNELS: "${IMAGE_CHANNELS:3}"
+  DIFFUSION_STEPS: "${DIFFUSION_STEPS:1000}"
+  MODEL_DIM: "${MODEL_DIM:64}"
+
+metrics:
+  source: wandb
+  primary: noise_mse
+  direction: minimize

@@ -39,3 +39,6 @@ class PluginError(CrucibleError):
 
 class TapError(CrucibleError):
     """Tap clone, sync, install, search, or publish failures."""
+
+class ProjectTemplateError(ConfigError):
+    """Project template loading, variable substitution, or inheritance failures."""

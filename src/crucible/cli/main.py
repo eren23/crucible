@@ -197,6 +197,49 @@ def _main() -> None:
     tshow = track_sub.add_parser("show", help="Show track details")
     tshow.add_argument("name", nargs="?", default="")
 
+    # ── project ──
+    project_parser = subparsers.add_parser(
+        "project",
+        help="Project spec management (create from template, validate, list)",
+    )
+    project_sub = project_parser.add_subparsers(dest="project_command")
+    pnew = project_sub.add_parser(
+        "new", help="Create a new project spec from a template"
+    )
+    pnew.add_argument("name", help="Project name (becomes .crucible/projects/<name>.yaml)")
+    pnew.add_argument(
+        "--template",
+        "-t",
+        default="generic",
+        help="Template to use (default: generic). Run 'crucible project templates' to list options.",
+    )
+    pnew.add_argument(
+        "--set",
+        action="append",
+        dest="set_vars",
+        metavar="KEY=VALUE",
+        help="Set a template variable (repeatable). Example: --set REPO_URL=https://...",
+    )
+    pnew.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Overwrite an existing spec with the same name",
+    )
+    pnew.add_argument(
+        "--no-prompt",
+        action="store_true",
+        help="Fail instead of prompting for missing required variables (CI-friendly)",
+    )
+    project_sub.add_parser("list", help="List existing project specs")
+    project_sub.add_parser(
+        "templates", help="List available built-in project templates"
+    )
+    pvalidate = project_sub.add_parser(
+        "validate", help="Load and validate an existing project spec"
+    )
+    pvalidate.add_argument("name", help="Project name to validate")
+
     # ── note ──
     note_parser = subparsers.add_parser("note", help="Experiment notes")
     note_sub = note_parser.add_subparsers(dest="note_command")
@@ -296,6 +339,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.note_commands import handle_note
 
         handle_note(args)
+    elif args.command == "project":
+        from crucible.cli.project_commands import handle_project
+
+        handle_project(args)
     elif args.command == "serve":
         from crucible.api.server import main as api_main
 
