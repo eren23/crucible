@@ -127,15 +127,40 @@ class FleetManager:
         replacement: bool = False,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        """Provision *count* nodes via the configured provider and persist."""
+        """Provision *count* nodes via the configured provider and persist.
+
+        Transactional w.r.t. inventory: whatever the provider returns is
+        written to ``nodes.json`` before this function returns, even on a
+        partial failure. If the provider raises ``PartialProvisionError``,
+        the already-created nodes are committed to inventory first so they
+        are not orphaned on the provider side, then the error is re-raised
+        with the partial state intact for callers who want to surface it.
+        """
+        from crucible.core.errors import PartialProvisionError
+
         existing_nodes = load_nodes_if_exists(self.nodes_file)
-        nodes = self.provider.provision(
-            count=count,
-            name_prefix=name_prefix,
-            start_index=start_index,
-            replacement=replacement,
-            **kwargs,
-        )
+        try:
+            nodes = self.provider.provision(
+                count=count,
+                name_prefix=name_prefix,
+                start_index=start_index,
+                replacement=replacement,
+                **kwargs,
+            )
+        except PartialProvisionError as exc:
+            # Persist whatever WAS created before re-raising so the pods
+            # aren't orphaned on the provider side. This is the root-fix
+            # for the provision_project orphan bug.
+            if exc.created:
+                merged = merge_node_snapshots(existing_nodes, exc.created)
+                save_nodes_threadsafe(self.nodes_file, merged)
+                log_warn(
+                    f"Provision partially succeeded: committed "
+                    f"{len(exc.created)} node(s) to inventory before "
+                    f"re-raising. {len(exc.failed)} pod(s) failed."
+                )
+            raise
+
         merged = merge_node_snapshots(existing_nodes, nodes)
         save_nodes_threadsafe(self.nodes_file, merged)
         # Return only the newly created nodes, not the full merged inventory.
@@ -303,6 +328,71 @@ class FleetManager:
         remaining = self.provider.destroy(nodes, selected_names=selected_names)
         save_nodes(self.nodes_file, remaining)
         return remaining
+
+    # ------------------------------------------------------------------
+    # Orphan cleanup
+    # ------------------------------------------------------------------
+
+    def cleanup_orphans(self, *, destroy: bool = False) -> dict[str, Any]:
+        """Find pods on the provider that aren't in local inventory.
+
+        An "orphan" is any pod that exists on the provider side but has no
+        corresponding entry in ``nodes.json``. This happens when a
+        provisioning batch fails partway through, when a pod is created by
+        another client, or when inventory is manually edited.
+
+        :param destroy: if True, destroy the orphans via the provider. If
+            False (default), just return the list without touching them.
+        :returns: ``{"orphans": [{"name", "pod_id"}], "destroyed": [pod_id, ...]}``.
+            ``destroyed`` is empty when ``destroy=False``.
+        :raises FleetError: if the provider does not support pod listing.
+        """
+        # The provider must expose a ``list_all_pods`` method for this to
+        # work. RunPod does; SSH does not (no central API). We feature-check
+        # rather than importing provider-specific classes to keep the
+        # manager provider-agnostic.
+        list_all = getattr(self.provider, "list_all_pods", None)
+        if not callable(list_all):
+            from crucible.core.errors import FleetError
+            raise FleetError(
+                f"Provider {type(self.provider).__name__} does not support "
+                f"orphan cleanup (no list_all_pods method)."
+            )
+
+        inventory = load_nodes_if_exists(self.nodes_file)
+        tracked_ids: set[str] = set()
+        for node in inventory:
+            nid = node.get("pod_id") or node.get("node_id")
+            if nid:
+                tracked_ids.add(str(nid))
+
+        orphans: list[dict[str, str]] = []
+        for pod in list_all():
+            pod_id = str(pod.get("id") or "")
+            if not pod_id or pod_id in tracked_ids:
+                continue
+            orphans.append({
+                "name": str(pod.get("name") or ""),
+                "pod_id": pod_id,
+            })
+
+        destroyed: list[str] = []
+        if destroy and orphans:
+            destroy_by_id = getattr(self.provider, "destroy_pods_by_id", None)
+            if callable(destroy_by_id):
+                destroyed = destroy_by_id([o["pod_id"] for o in orphans])
+            else:
+                from crucible.core.errors import FleetError
+                raise FleetError(
+                    f"Provider {type(self.provider).__name__} cannot destroy "
+                    f"orphans by id (no destroy_pods_by_id method)."
+                )
+
+        log_info(
+            f"cleanup_orphans: found {len(orphans)} orphan(s)"
+            + (f", destroyed {len(destroyed)}" if destroy else "")
+        )
+        return {"orphans": orphans, "destroyed": destroyed}
 
     # ------------------------------------------------------------------
     # Stop / Start (pod lifecycle)

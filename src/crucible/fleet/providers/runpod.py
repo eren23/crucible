@@ -731,12 +731,18 @@ class RunPodProvider(FleetProvider):
         if not eff_interruptible:
             eff_cloud_types = [ct for ct in eff_cloud_types if str(ct).upper() != "COMMUNITY"] or ["SECURE"]
 
+        # Collect successes + failures across the whole batch. If any pods
+        # fail after exhausting cloud-type fallbacks, we still return with
+        # the successful pods via PartialProvisionError so the manager layer
+        # can commit them to inventory (no orphans on RunPod).
         created: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
         for index in range(start_index, start_index + count):
             ordinal = index - start_index + 1
             name = f"{name_prefix}-{index:02d}"
             last_error: str | None = None
             log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB, gpus={eff_gpu_count})")
+            success = False
             for cloud_type in eff_cloud_types:
                 try:
                     raw = create_api_pod(
@@ -762,14 +768,28 @@ class RunPodProvider(FleetProvider):
                         node["network_volume_id"] = eff_network_volume_id
                     created.append(node)
                     log_success(f"Created {name} ({cloud_type}, {eff_gpu_count} GPU(s))")
+                    success = True
                     break
                 except FleetError as exc:
                     last_error = str(exc)
                     log_warn(
                         f"{name} create attempt failed on {cloud_type}: {last_error}",
                     )
-            else:
-                raise FleetError(last_error or f"Failed to create pod {name}")
+            if not success:
+                failed.append({
+                    "name": name,
+                    "error": last_error or f"Failed to create pod {name}",
+                })
+
+        if failed:
+            from crucible.core.errors import PartialProvisionError
+            summary = (
+                f"Provisioned {len(created)}/{count} pods; "
+                f"{len(failed)} failed: "
+                + ", ".join(f"{f['name']} ({f['error']})" for f in failed)
+            )
+            raise PartialProvisionError(summary, created=created, failed=failed)
+
         return created
 
     def destroy(
@@ -816,18 +836,25 @@ class RunPodProvider(FleetProvider):
                 failed["state"] = "lost"
                 refreshed.append(failed)
 
-        # Reconcile: add any pods from the API that aren't in inventory (orphan recovery)
+        # Reconcile: add any pods from the API that aren't in inventory
+        # (orphan recovery). We tag these with state="reconciled_orphan" so
+        # they're immediately visible to the user via get_fleet_status — the
+        # user can then decide whether to adopt them or call cleanup_orphans.
         try:
             all_pods = self.list_all_pods()
             for pod in all_pods:
                 pod_id = str(pod.get("id") or "")
                 if pod_id and pod_id not in seen_ids:
-                    log_info(f"Reconciled orphan pod: {pod.get('name', '?')} ({pod_id})")
-                    refreshed.append(
-                        inventory_record_from_api(pod, previous=None, defaults=self.defaults),
+                    log_warn(
+                        f"Reconciled orphan pod: {pod.get('name', '?')} ({pod_id}) — "
+                        f"exists on provider but was not in local inventory. "
+                        f"Use cleanup_orphans to destroy or adopt it via inventory."
                     )
-        except Exception:
-            pass  # Best-effort reconciliation
+                    record = inventory_record_from_api(pod, previous=None, defaults=self.defaults)
+                    record["state"] = "reconciled_orphan"
+                    refreshed.append(record)
+        except Exception as exc:
+            log_warn(f"Orphan reconciliation failed (non-fatal): {exc}")
 
         return refreshed
 

@@ -361,6 +361,32 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+def cleanup_orphans(args: dict[str, Any]) -> dict[str, Any]:
+    """List and optionally destroy pods on the provider that aren't in local inventory.
+
+    REQUIRES: Provider supports pod listing (RunPod does; SSH does not).
+    RETURNS: {orphans: [{name, pod_id}], destroyed: [pod_id, ...], total_orphans: int}
+    NEXT: If destroy=False, review the list and re-run with destroy=True, or
+          use destroy_nodes with pod_ids to destroy specific ones.
+    """
+    config = _get_config()
+    try:
+        from crucible.fleet.manager import FleetManager
+
+        fleet = FleetManager(config)
+        result = fleet.cleanup_orphans(destroy=bool(args.get("destroy", False)))
+        return {
+            "orphans": result["orphans"],
+            "destroyed": result["destroyed"],
+            "total_orphans": len(result["orphans"]),
+            "status": "ok",
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 def stop_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Stop running pods to save cost.  Disk and bootstrap state are preserved."""
     config = _get_config()
@@ -4546,6 +4572,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "get_experiment_result": get_experiment_result,
     "provision_nodes": provision_nodes,
     "destroy_nodes": destroy_nodes,
+    "cleanup_orphans": cleanup_orphans,
     "stop_nodes": stop_nodes,
     "start_nodes": start_nodes,
     # RunPod enhanced operations (GraphQL)

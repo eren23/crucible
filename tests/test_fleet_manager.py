@@ -76,7 +76,11 @@ class TestProvision:
 
         result = fm.provision(count=1, name_prefix="new")
 
-        assert {node["name"] for node in result} == {"existing-1", "new-1"}
+        # provision() returns only the newly-created nodes (MCP layer uses the
+        # length as the "created" count). The merge is persisted to disk.
+        assert {node["name"] for node in result} == {"new-1"}
+        saved = json.loads(fm.nodes_file.read_text())
+        assert {n["name"] for n in saved} == {"existing-1", "new-1"}
 
 
 class TestDestroy:

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 class CrucibleError(Exception):
     """Base error for all Crucible operations."""
 
@@ -6,6 +9,23 @@ class ConfigError(CrucibleError):
 
 class FleetError(CrucibleError):
     """Provider, SSH, provisioning, bootstrap failures."""
+
+class PartialProvisionError(FleetError):
+    """Provision loop completed with some successes AND some failures.
+
+    Carries the partial state so the caller can persist whatever was created
+    before re-raising. Attributes:
+
+    - ``created``: list of successfully-created node records (already on the
+      provider side; need to be committed to inventory by the caller)
+    - ``failed``: list of ``{"name": str, "error": str}`` entries for pods
+      that could not be created after exhausting cloud-type fallbacks
+    """
+
+    def __init__(self, message: str, created: list | None = None, failed: list | None = None):
+        super().__init__(message)
+        self.created = created or []
+        self.failed = failed or []
 
 class RunnerError(CrucibleError):
     """Experiment execution failures."""

@@ -419,6 +419,31 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="cleanup_orphans",
+        description=(
+            "List and optionally destroy pods on the provider that aren't in local inventory.\n\n"
+            "An 'orphan' is any pod that exists on the provider side (e.g. RunPod) but has no\n"
+            "entry in nodes.json — typically caused by a partially-failed provision batch, a\n"
+            "crash during fleet operations, or pods created by another client.\n\n"
+            "REQUIRES: Provider supports pod listing (RunPod ✓, SSH ✗). RUNPOD_API_KEY set.\n"
+            "RETURNS: {orphans: [{name, pod_id}], destroyed: [pod_id, ...], total_orphans, status}\n"
+            "NEXT: Review orphans with destroy=false first, then re-run with destroy=true if\n"
+            "you want them gone. Alternatively, call fleet_refresh to 'adopt' them into\n"
+            "inventory as reconciled_orphan nodes."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "destroy": {
+                    "type": "boolean",
+                    "description": "If true, destroy the orphans via the provider API. Default: false (list only).",
+                    "default": False,
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="stop_nodes",
         description=(
             "Stop running pods to save cost. Disk and bootstrap state are preserved.\n\n"
