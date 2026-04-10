@@ -58,7 +58,8 @@ KNOWN_PLUGIN_TYPES: frozenset[str] = frozenset({
     "stack_patterns",
     "augmentations",
     "activations",
-    "launchers",  # tap-specific category, not in core registry
+    "launchers",     # tap-specific category, not in core registry
+    "evaluations",   # tap-specific: per-project eval script bundles
 })
 
 _NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
