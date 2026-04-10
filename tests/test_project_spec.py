@@ -77,7 +77,10 @@ class TestLoadProjectSpec:
         assert spec.metrics.direction == "minimize"
 
     def test_load_missing_spec(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="Project spec not found"):
+        # After the C11 fix, the error message includes the searched paths
+        # (local, hub, and any configured taps). Match the new format that
+        # lists the missing spec name + "not found".
+        with pytest.raises(FileNotFoundError, match=r"Project spec .* not found"):
             load_project_spec("nonexistent", tmp_path)
 
     def test_defaults_name_from_filename(self, tmp_path):

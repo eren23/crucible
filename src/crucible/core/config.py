@@ -450,11 +450,50 @@ def _build_project_metrics(raw: dict[str, Any]) -> ProjectMetrics:
 
 
 def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpec:
-    """Load a project spec from ``.crucible/projects/<name>.yaml``."""
+    """Load a project spec from ``.crucible/projects/<name>.yaml``.
+
+    Resolution order mirrors ``resolve_launcher_bundle``:
+
+    1. Project-local: ``<project_root>/.crucible/projects/<name>.yaml``
+    2. Hub: ``~/.crucible-hub/projects/<name>.yaml`` (future-proofing; not yet
+       written to by any CLI)
+    3. Any configured tap: ``~/.crucible-hub/taps/*/projects/<name>.yaml``
+
+    This lets ``crucible run_project``, ``provision_project`` etc. consume
+    specs that ship directly from community taps without a manual ``cp`` step.
+    """
     root = project_root or Path.cwd()
-    spec_path = root / ".crucible" / "projects" / f"{name}.yaml"
-    if not spec_path.exists():
-        raise FileNotFoundError(f"Project spec not found: {spec_path}")
+    local_spec_path = root / ".crucible" / "projects" / f"{name}.yaml"
+
+    candidates: list[Path] = [local_spec_path]
+
+    # Hub + tap resolution (only walked if the local candidate doesn't exist).
+    if not local_spec_path.exists():
+        try:
+            from crucible.core.hub import HubStore
+            hub_dir = HubStore.resolve_hub_dir()
+        except Exception:
+            hub_dir = None
+        if hub_dir is not None:
+            candidates.append(hub_dir / "projects" / f"{name}.yaml")
+            taps_root = hub_dir / "taps"
+            if taps_root.is_dir():
+                for tap_dir in sorted(taps_root.iterdir()):
+                    if tap_dir.is_dir():
+                        candidates.append(tap_dir / "projects" / f"{name}.yaml")
+
+    spec_path: Path | None = None
+    for candidate in candidates:
+        if candidate.exists():
+            spec_path = candidate
+            break
+
+    if spec_path is None:
+        searched = "\n  ".join(str(c) for c in candidates)
+        raise FileNotFoundError(
+            f"Project spec {name!r} not found. Searched:\n  {searched}"
+        )
+
     raw = yaml.safe_load(spec_path.read_text(encoding="utf-8")) or {}
     return ProjectSpec(
         name=raw.get("name", name),
