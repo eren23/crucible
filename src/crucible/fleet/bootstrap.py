@@ -470,7 +470,17 @@ def bootstrap_node(
         node, "sync_env_file",
         lambda: sync_env_file(node, project_root=project_root),
     )
-    _record_step(node, "sync_taps", lambda: sync_taps(node), required=False)
+    # Promote sync_taps to required when the user has at least one tap
+    # configured in ~/.crucible-hub/taps/. Silent rsync failures otherwise
+    # cause late ImportError on pods (the tap's architecture / callback /
+    # data-adapter plugins never land on disk and the training script dies
+    # at module-load time). Users with zero taps are unaffected — sync_taps
+    # becomes a no-op anyway.
+    _taps_dir = Path.home() / ".crucible-hub" / "taps"
+    _has_taps = _taps_dir.is_dir() and any(
+        p.is_dir() for p in _taps_dir.iterdir() if not p.name.startswith(".")
+    )
+    _record_step(node, "sync_taps", lambda: sync_taps(node), required=_has_taps)
 
     ws_path = node.get("workspace_path", "/workspace/project")
     workspace = shlex.quote(ws_path)
