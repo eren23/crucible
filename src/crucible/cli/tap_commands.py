@@ -165,14 +165,18 @@ def _cmd_search(args: argparse.Namespace) -> None:
 
 def _cmd_install(args: argparse.Namespace) -> None:
     tm = _get_tap_manager(args)
-    result = tm.install(args.name, tap=getattr(args, "tap", "") or "")
+    result = tm.install(
+        args.name,
+        tap=getattr(args, "tap", "") or "",
+        plugin_type=getattr(args, "type", "") or "",
+    )
     print(f"Installed: {result['name']} ({result['type']}) v{result.get('version', '?')} from [{result['tap']}]")
     print(f"  -> {result['path']}")
 
 
 def _cmd_uninstall(args: argparse.Namespace) -> None:
     tm = _get_tap_manager(args)
-    tm.uninstall(args.name)
+    tm.uninstall(args.name, plugin_type=getattr(args, "type", "") or "")
     print(f"Uninstalled: {args.name}")
 
 

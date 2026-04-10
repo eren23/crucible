@@ -33,8 +33,13 @@ VALID_PLUGIN_TYPES = frozenset({
     "optimizers", "schedulers", "callbacks", "loggers",
     "providers", "architectures", "data_adapters", "data_sources",
     "objectives", "block_types", "stack_patterns", "augmentations",
-    "activations", "launchers",
+    "activations", "launchers", "evaluations",
 })
+
+# Plugin types that ship as multi-file directory bundles (copied whole)
+# rather than single `.py` files. Keep in sync with the install/uninstall
+# branches below.
+BUNDLE_PLUGIN_TYPES = frozenset({"launchers", "evaluations"})
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -331,22 +336,43 @@ class TapManager:
     # Install / Uninstall
     # ------------------------------------------------------------------
 
-    def install(self, name: str, *, tap: str = "") -> dict[str, Any]:
+    def install(
+        self,
+        name: str,
+        *,
+        tap: str = "",
+        plugin_type: str = "",
+    ) -> dict[str, Any]:
         """Install a plugin from a tap into the hub's plugins directory.
 
         Copies the plugin's ``.py`` file to ``~/.crucible-hub/plugins/{type}/{name}.py``
         where ``discover_all_plugins`` already scans.
 
-        Raises :class:`TapError` if the package is not found or already installed.
+        When the same ``name`` exists in multiple plugin types within the same
+        tap (e.g. ``code_wm`` as both ``architectures`` and ``evaluations``),
+        pass ``plugin_type`` to disambiguate.
+
+        Raises :class:`TapError` if the package is not found, is ambiguous,
+        or is already installed.
         """
         _validate_name(name, "package")
 
-        # Check if already installed
+        # Check if already installed (name + type combination — allows
+        # installing the same name across different types without collision).
         installed = self._load_installed_yaml()
-        if any(p.get("name") == name for p in installed):
-            raise TapError(f"Package {name!r} is already installed. Use uninstall first.")
+        already_installed = [
+            p for p in installed
+            if p.get("name") == name
+            and (not plugin_type or p.get("type") == plugin_type)
+        ]
+        if already_installed:
+            existing = already_installed[0]
+            raise TapError(
+                f"Package {name!r} (type={existing.get('type', '?')!r}) "
+                f"is already installed. Use uninstall first."
+            )
 
-        # Find the package — detect collisions across taps
+        # Find the package — detect collisions across taps AND types
         taps = self._load_taps_yaml()
         if tap:
             taps = [t for t in taps if t.get("name") == tap]
@@ -354,18 +380,34 @@ class TapManager:
         candidates: list[dict[str, Any]] = []
         for t in taps:
             for m in self._scan_tap(t["name"]):
-                if m.get("name") == name:
-                    candidates.append(m)
+                if m.get("name") != name:
+                    continue
+                if plugin_type and m.get("type") != plugin_type:
+                    continue
+                candidates.append(m)
 
         if not candidates:
+            if plugin_type:
+                raise TapError(
+                    f"Package {name!r} of type {plugin_type!r} not found in any tap"
+                )
             raise TapError(f"Package {name!r} not found in any tap")
 
-        if len(candidates) > 1 and not tap:
-            tap_names = [c.get("_tap", "?") for c in candidates]
-            raise TapError(
-                f"Package {name!r} found in multiple taps: {tap_names}. "
-                f"Specify tap= to disambiguate."
-            )
+        if len(candidates) > 1:
+            # Check if disambiguation-by-type is sufficient (all in one tap but
+            # different types) or if we need tap-level disambiguation too.
+            types_seen = {c.get("type", "?") for c in candidates}
+            taps_seen = {c.get("_tap", "?") for c in candidates}
+            if len(types_seen) > 1 and not plugin_type:
+                raise TapError(
+                    f"Package {name!r} found with multiple plugin types: "
+                    f"{sorted(types_seen)}. Specify plugin_type= to disambiguate."
+                )
+            if len(taps_seen) > 1 and not tap:
+                raise TapError(
+                    f"Package {name!r} found in multiple taps: {sorted(taps_seen)}. "
+                    f"Specify tap= to disambiguate."
+                )
 
         manifest = candidates[0]
         plugin_type = manifest.get("type", "")
@@ -379,10 +421,15 @@ class TapManager:
         dest_root = self._plugins_dir / plugin_type
         dest_root.mkdir(parents=True, exist_ok=True)
 
-        if plugin_type == "launchers":
+        if plugin_type in BUNDLE_PLUGIN_TYPES:
+            # launchers/, evaluations/: multi-file directory bundles —
+            # copy the whole package directory.
             dest_path = dest_root / name
             if dest_path.exists():
-                raise TapError(f"Launcher package {name!r} is already installed at {dest_path}")
+                raise TapError(
+                    f"{plugin_type[:-1].capitalize()} package {name!r} is already "
+                    f"installed at {dest_path}"
+                )
             shutil.copytree(pkg_dir, dest_path)
         else:
             py_files = list(pkg_dir.glob("*.py"))
@@ -424,33 +471,54 @@ class TapManager:
             "path": str(dest_path),
         }
 
-    def uninstall(self, name: str) -> None:
-        """Remove an installed tap plugin."""
+    def uninstall(self, name: str, *, plugin_type: str = "") -> None:
+        """Remove an installed tap plugin.
+
+        When multiple plugins share a name across types (e.g. architectures/code_wm
+        and evaluations/code_wm), pass ``plugin_type`` to disambiguate.
+        """
         _validate_name(name, "package")
 
         installed = self._load_installed_yaml()
-        record = None
-        for pkg in installed:
-            if pkg.get("name") == name:
-                record = pkg
-                break
+        matches = [
+            p for p in installed
+            if p.get("name") == name
+            and (not plugin_type or p.get("type") == plugin_type)
+        ]
 
-        if record is None:
+        if not matches:
+            if plugin_type:
+                raise TapError(
+                    f"Package {name!r} of type {plugin_type!r} is not installed"
+                )
             raise TapError(f"Package {name!r} is not installed")
 
+        if len(matches) > 1 and not plugin_type:
+            types_seen = sorted({m.get("type", "?") for m in matches})
+            raise TapError(
+                f"Package {name!r} is installed with multiple types: {types_seen}. "
+                f"Specify plugin_type= to disambiguate."
+            )
+
+        record = matches[0]
+        matched_type = record.get("type", "")
+
         # Remove the installed payload (name validated, no traversal)
-        plugin_type = record.get("type", "")
-        if plugin_type == "launchers":
-            plugin_path = self._plugins_dir / plugin_type / name
+        if matched_type in BUNDLE_PLUGIN_TYPES:
+            plugin_path = self._plugins_dir / matched_type / name
             if plugin_path.exists():
                 shutil.rmtree(plugin_path)
         else:
-            plugin_path = self._plugins_dir / plugin_type / f"{name}.py"
+            plugin_path = self._plugins_dir / matched_type / f"{name}.py"
             if plugin_path.exists():
                 plugin_path.unlink()
 
-        # Update ledger
-        installed = [p for p in installed if p.get("name") != name]
+        # Update ledger — remove ONLY the matched (name, type) record,
+        # not every record with this name.
+        installed = [
+            p for p in installed
+            if not (p.get("name") == name and p.get("type") == matched_type)
+        ]
         self._save_installed_yaml(installed)
 
     def list_installed(self, *, plugin_type: str = "") -> list[dict[str, Any]]:

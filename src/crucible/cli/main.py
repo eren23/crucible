@@ -167,8 +167,20 @@ def _main() -> None:
     ti = tap_sub.add_parser("install", help="Install a plugin")
     ti.add_argument("name")
     ti.add_argument("--tap", default="")
+    ti.add_argument(
+        "--type",
+        default="",
+        help="Plugin type (e.g. architectures, launchers, evaluations). "
+        "Required when the same name exists across multiple plugin types.",
+    )
     tu = tap_sub.add_parser("uninstall", help="Uninstall a plugin")
     tu.add_argument("name")
+    tu.add_argument(
+        "--type",
+        default="",
+        help="Plugin type. Required when the same name exists across multiple "
+        "installed plugin types.",
+    )
     tins = tap_sub.add_parser("installed", help="List installed plugins")
     tins.add_argument("--type", default="")
     tpub = tap_sub.add_parser("publish", help="Publish a local plugin")
