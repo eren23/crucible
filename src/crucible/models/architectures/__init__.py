@@ -25,7 +25,13 @@ except Exception:
     pass
 
 # --- Global hub architectures (source="global") ---
-# Loads both .py plugins and .yaml specs from the hub architectures directory.
+# Loads .py plugins and .yaml specs from hub architecture directories.
+# The legacy path (``~/.crucible-hub/architectures/{plugins,specs}/``) is the
+# one the mirror-fallback below is keyed off — only that path gates
+# ``_hub_loaded``.  The tap-install path (``~/.crucible-hub/plugins/architectures/``,
+# written by ``crucible tap install <name> --type architectures``) is loaded
+# independently so it additively exposes tap plugins without bypassing the
+# mirror loader that tests and fleet bootstrap depend on.
 _hub_loaded = False
 try:
     from crucible.core.config import load_config as _load_cfg_global
@@ -33,13 +39,25 @@ try:
     _cfg_global = _load_cfg_global()
     _hub_dir = HubStore.discover(config_hub_dir=getattr(_cfg_global, "hub_dir", ""))
     if _hub_dir is not None:
+        # Legacy hub paths — gate the mirror fallback on whether the loader
+        # actually loaded something, not just on directory existence.  Empty
+        # hub directories (created by ``crucible hub init``) would otherwise
+        # trip _hub_loaded=True without contributing any architectures, and
+        # then skip the mirror loader that fleet bootstrap and the integration
+        # tests depend on.
         for _source_dir in (
             _hub_dir / "architectures" / "plugins",
             _hub_dir / "architectures" / "specs",
         ):
             if _source_dir.is_dir():
-                _reg.load_global_architectures(_source_dir, source="global")
-                _hub_loaded = True
+                _loaded = _reg.load_global_architectures(_source_dir, source="global")
+                if _loaded:
+                    _hub_loaded = True
+        # Tap-install path — additive, does NOT affect _hub_loaded so the
+        # mirror fallback below still runs when the legacy paths are empty.
+        _tap_install_arch_dir = _hub_dir / "plugins" / "architectures"
+        if _tap_install_arch_dir.is_dir():
+            _reg.load_global_architectures(_tap_install_arch_dir, source="global")
 except Exception:
     pass
 

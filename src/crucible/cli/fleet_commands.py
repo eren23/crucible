@@ -25,10 +25,10 @@ def _handle_fleet(args: argparse.Namespace) -> None:
         from crucible.fleet.manager import FleetManager
 
         fleet = FleetManager(config)
-        status = fleet.status()
-        print(f"Nodes: {status.get('nodes_total', 0)} total, {status.get('nodes_ready', 0)} ready")
-        for node in status.get("nodes", []):
-            print(f"  {node.get('name', '?')}: state={node.get('state', '?')} gpu={node.get('gpu', '?')}")
+        # FleetManager.status() returns a pre-rendered human-readable table
+        # (via render_nodes). Print it directly — earlier versions of this
+        # handler incorrectly called .get() on it as if it were a dict.
+        print(fleet.status())
 
     elif cmd == "provision":
         from crucible.fleet.manager import FleetManager
