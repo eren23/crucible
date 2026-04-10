@@ -92,9 +92,24 @@ class TestTapAdd:
     def test_add_clones_repo(self, tap_manager: TapManager, local_tap: Path):
         result = tap_manager.add_tap(str(local_tap), name="my-tap")
         assert result["name"] == "my-tap"
-        assert result["url"] == str(local_tap)
+        # Bare local paths are normalized to file:// URLs so git clone
+        # can consume them. The recorded URL may be either the raw path
+        # (if the caller passed a pre-normalized URL) or the file://
+        # version. Accept either.
+        expected_raw = str(local_tap)
+        expected_file = f"file://{local_tap.resolve()}"
+        assert result["url"] in (expected_raw, expected_file), (
+            f"unexpected URL in result: {result['url']!r}"
+        )
         assert "added_at" in result
         assert (tap_manager._taps_dir / "my-tap").is_dir()
+
+    def test_add_accepts_file_url(self, tap_manager: TapManager, local_tap: Path):
+        """Explicit file:// URLs should also work (regression test)."""
+        file_url = f"file://{local_tap.resolve()}"
+        result = tap_manager.add_tap(file_url, name="file-tap")
+        assert result["url"] == file_url
+        assert (tap_manager._taps_dir / "file-tap").is_dir()
 
     def test_add_derives_name_from_url(self, tap_manager: TapManager, local_tap: Path):
         result = tap_manager.add_tap(str(local_tap))

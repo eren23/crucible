@@ -154,9 +154,23 @@ class TapManager:
     def add_tap(self, url: str, *, name: str = "") -> dict[str, Any]:
         """Clone a tap repository.
 
+        Accepts git URLs (https://, git@, file://) and bare local filesystem
+        paths — a local directory is automatically wrapped in ``file://`` so
+        ``git clone`` can consume it.
+
         Returns tap metadata dict.
         Raises :class:`TapError` if the tap already exists.
         """
+        # Normalize bare local paths to file:// URLs so `git clone` accepts
+        # them.  Without this, a user typing `crucible tap add /path/to/tap`
+        # gets `fatal: repository '/path/to/tap' does not exist` even when
+        # the path DOES exist — because git interprets a bare path as a
+        # remote name unless it's prefixed.
+        if not any(url.startswith(prefix) for prefix in ("http://", "https://", "git@", "ssh://", "file://")):
+            candidate = Path(url).expanduser()
+            if candidate.is_dir():
+                url = f"file://{candidate.resolve()}"
+
         name = name or self._name_from_url(url)
         _validate_name(name, "tap")
         tap_dir = self._taps_dir / name
@@ -421,9 +435,26 @@ class TapManager:
         dest_root = self._plugins_dir / plugin_type
         dest_root.mkdir(parents=True, exist_ok=True)
 
-        if plugin_type in BUNDLE_PLUGIN_TYPES:
-            # launchers/, evaluations/: multi-file directory bundles —
-            # copy the whole package directory.
+        # Decide single-file vs bundle install:
+        #
+        #  - launchers/, evaluations/ always install as directory bundles
+        #    (they're conceptually multi-file).
+        #  - architectures/ (and future plugin types) install as a single
+        #    {name}.py file IF the package directory contains only that one
+        #    .py file (plus the plugin.yaml manifest). Single-file plugins
+        #    like moe, partial_rope, etc. take this path.
+        #  - If the package directory contains OTHER .py files besides
+        #    {name}.py (e.g., code_wm/ has code_wm.py AND depends on a
+        #    sibling wm_base.py for imports), install the whole directory
+        #    so cross-file relative imports keep working.
+        py_files = [p for p in pkg_dir.glob("*.py") if p.name != "__init__.py"]
+        non_primary_py = [p for p in py_files if p.stem != name]
+        is_bundle = (
+            plugin_type in BUNDLE_PLUGIN_TYPES
+            or len(non_primary_py) > 0
+        )
+
+        if is_bundle:
             dest_path = dest_root / name
             if dest_path.exists():
                 raise TapError(
@@ -432,7 +463,6 @@ class TapManager:
                 )
             shutil.copytree(pkg_dir, dest_path)
         else:
-            py_files = list(pkg_dir.glob("*.py"))
             if not py_files:
                 raise TapError(f"No .py files found in {pkg_dir}")
 
@@ -445,6 +475,11 @@ class TapManager:
                 source_file = py_files[0]
 
             dest_path = dest_root / f"{name}.py"
+            if dest_path.exists():
+                raise TapError(
+                    f"{plugin_type[:-1].capitalize()} package {name!r} is already "
+                    f"installed at {dest_path}"
+                )
             shutil.copy2(source_file, dest_path)
 
         # Record installation
@@ -503,15 +538,31 @@ class TapManager:
         record = matches[0]
         matched_type = record.get("type", "")
 
-        # Remove the installed payload (name validated, no traversal)
-        if matched_type in BUNDLE_PLUGIN_TYPES:
-            plugin_path = self._plugins_dir / matched_type / name
-            if plugin_path.exists():
-                shutil.rmtree(plugin_path)
-        else:
-            plugin_path = self._plugins_dir / matched_type / f"{name}.py"
-            if plugin_path.exists():
-                plugin_path.unlink()
+        # Remove the installed payload (name validated, no traversal).
+        # Architectures can now be installed either as a single {name}.py
+        # file (legacy single-file plugins like moe, partial_rope) or as
+        # a directory bundle (multi-file plugins like code_wm that pull in
+        # sibling modules). Prefer the exact installed `path` recorded in
+        # the ledger when present; fall back to both layouts otherwise.
+        recorded_path = record.get("path", "")
+        removed = False
+        if recorded_path:
+            rp = Path(recorded_path)
+            if rp.is_dir():
+                shutil.rmtree(rp)
+                removed = True
+            elif rp.is_file():
+                rp.unlink()
+                removed = True
+        if not removed:
+            # Fallback — probe both layouts.
+            type_root = self._plugins_dir / matched_type
+            dir_path = type_root / name
+            file_path = type_root / f"{name}.py"
+            if dir_path.is_dir():
+                shutil.rmtree(dir_path)
+            elif file_path.is_file():
+                file_path.unlink()
 
         # Update ledger — remove ONLY the matched (name, type) record,
         # not every record with this name.

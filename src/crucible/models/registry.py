@@ -101,20 +101,32 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
     *source* controls the registry source tag (``"global"`` for hub,
     ``"local"`` for project ``.crucible/architectures/``).
 
+    Three discovery paths are scanned at ``hub_arch_dir``:
+
+    1. ``<hub_arch_dir>/*.py`` — top-level single-file plugins (legacy single
+       file install path used for moe, partial_rope, looped_aug, etc.).
+    2. ``<hub_arch_dir>/*.yaml`` — declarative architecture specs.
+    3. ``<hub_arch_dir>/<name>/<name>.py`` — directory bundle install path
+       (used by multi-file plugins like code_wm that depend on sibling
+       modules like wm_base). When loading a bundle, the package directory
+       is prepended to ``sys.path`` briefly so sibling modules resolve via
+       normal Python imports even if the primary file uses them.
+
     ``.py`` files are imported as Python modules (they call ``register_model``
     themselves).  ``.yaml`` files are loaded as declarative architecture specs
     via the composer engine.
 
-    Returns list of successfully loaded file stems.
+    Returns list of successfully loaded file stems (or bundle names).
     """
     import importlib.util
+    import sys
 
     loaded: list[str] = []
     global _CURRENT_REGISTER_SOURCE
     prev_source = _CURRENT_REGISTER_SOURCE
     _CURRENT_REGISTER_SOURCE = source
     try:
-        # --- Python plugins ---
+        # --- (1) Top-level single-file Python plugins ---
         for py_file in sorted(hub_arch_dir.glob("*.py")):
             if py_file.name.startswith("_"):
                 continue
@@ -130,7 +142,7 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
                 from crucible.core.log import log_warn
                 log_warn(f"Failed to load architecture plugin {py_file.name}: {exc}")
 
-        # --- YAML spec plugins ---
+        # --- (2) YAML spec plugins ---
         for yaml_file in sorted(hub_arch_dir.glob("*.yaml")):
             if yaml_file.name.startswith("_"):
                 continue
@@ -140,6 +152,47 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
             except Exception as exc:
                 from crucible.core.log import log_warn
                 log_warn(f"Failed to load architecture spec {yaml_file.name}: {exc}")
+
+        # --- (3) Directory-bundle Python plugins ---
+        # For each subdirectory <name>/, try to load <name>/<name>.py if
+        # present. Prepend the bundle's parent directory to sys.path briefly
+        # so `import wm_base` (sibling module inside the same bundle) works
+        # from within the primary file.
+        if hub_arch_dir.is_dir():
+            for sub in sorted(p for p in hub_arch_dir.iterdir() if p.is_dir()):
+                if sub.name.startswith("_") or sub.name.startswith("."):
+                    continue
+                primary = sub / f"{sub.name}.py"
+                if not primary.is_file():
+                    continue
+                module_name = f"_crucible_hub_arch_bundle_{sub.name}"
+                bundle_parent_added = False
+                try:
+                    # Make siblings of primary importable by adding the
+                    # BUNDLE dir (not the hub_arch_dir) to sys.path. This
+                    # lets `import wm_base` inside code_wm.py resolve to
+                    # the sibling wm_base.py.
+                    bundle_parent = str(sub.resolve())
+                    if bundle_parent not in sys.path:
+                        sys.path.insert(0, bundle_parent)
+                        bundle_parent_added = True
+                    spec = importlib.util.spec_from_file_location(module_name, primary)
+                    if spec is None or spec.loader is None:
+                        continue
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    loaded.append(sub.name)
+                except Exception as exc:
+                    from crucible.core.log import log_warn
+                    log_warn(
+                        f"Failed to load architecture bundle {sub.name}: {exc}"
+                    )
+                finally:
+                    if bundle_parent_added:
+                        try:
+                            sys.path.remove(bundle_parent)
+                        except ValueError:
+                            pass
     finally:
         _CURRENT_REGISTER_SOURCE = prev_source
     return loaded
