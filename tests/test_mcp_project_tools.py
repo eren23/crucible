@@ -12,6 +12,7 @@ from crucible.mcp.tools import (
     get_project_run_status,
     list_projects,
     provision_project,
+    run_project,
 )
 
 
@@ -251,3 +252,123 @@ class TestLaunchIds:
         assert first != second
         assert first.startswith("lewm_")
         assert second.startswith("lewm_")
+
+
+class TestRunProjectVariant:
+    """Coverage for the ``variant=<name>`` arg on run_project.
+
+    Before the 2026-04-11 fix, the ``variants:`` dict in a project yaml was
+    silently dropped. Now the caller passes ``variant=<name>`` and the
+    variant's env dict is merged into ``overrides`` before the caller's
+    explicit ``overrides`` (so the caller's values still win when the same
+    key appears in both).
+    """
+
+    def _setup_spec(self, tmp_path, **extra):
+        content = {
+            "name": "dummy",
+            "repo": "https://example.com/r.git",
+            "train": "python train.py",
+            "variants": {
+                "small": {
+                    "WM_STEPS": "1000",
+                    "WM_LR": "1e-3",
+                    "WANDB_RUN_NAME": "small-run",
+                },
+                "large": {
+                    "WM_STEPS": "15000",
+                    "WM_LR": "5e-4",
+                    "WANDB_RUN_NAME": "large-run",
+                },
+            },
+        }
+        content.update(extra)
+        _write_spec(tmp_path, "dummy", content)
+
+    def test_unknown_variant_is_loud_error(self, tmp_path):
+        from crucible.core.config import ProjectConfig
+        self._setup_spec(tmp_path)
+        cfg = ProjectConfig(project_root=tmp_path)
+
+        with patch("crucible.mcp.tools._get_config", return_value=cfg):
+            result = run_project({
+                "project_name": "dummy",
+                "variant": "nonexistent_variant",
+            })
+
+        assert "error" in result
+        assert "Variant 'nonexistent_variant' not found" in result["error"]
+        assert "Available variants: large, small" in result["error"]
+
+    def _fake_nodes(self):
+        return [{
+            "name": "dummy-01",
+            "project": "dummy",
+            "env_ready": True,
+            "ssh_host": "10.0.0.1",
+            "ssh_port": 22,
+            "workspace_path": "/workspace/project",
+        }]
+
+    def _run_and_capture(self, tmp_path, args, extra_env=None):
+        """Helper: mock inventory + launch_project, call run_project, return the
+        overrides dict that was passed to launch_project."""
+        from crucible.core.config import ProjectConfig
+        cfg = ProjectConfig(project_root=tmp_path)
+
+        captured: dict = {}
+
+        def fake_launch(node, spec, run_id, *, overrides=None):
+            captured["overrides"] = dict(overrides or {})
+            return {"pid": 1234, "status": "launched"}
+
+        # WANDB_PROJECT is required by the contract env check. Set a fake
+        # value unless the caller specified extra_env.
+        os_env_patch = {
+            "WANDB_PROJECT": "fake-project-for-test",
+            "WANDB_API_KEY": "fake-api-key-for-test",
+            **(extra_env or {}),
+        }
+
+        # load_nodes_if_exists is imported *inside* run_project's body, so
+        # patch it at the source module, not the MCP tools module.
+        with patch("crucible.mcp.tools._get_config", return_value=cfg), \
+             patch.dict("os.environ", os_env_patch, clear=False), \
+             patch("crucible.fleet.inventory.load_nodes_if_exists", return_value=self._fake_nodes()), \
+             patch("crucible.fleet.project_runner.launch_project", side_effect=fake_launch):
+            result = run_project(args)
+        return result, captured.get("overrides", {})
+
+    def test_variant_dict_merged_into_overrides_before_caller(self, tmp_path):
+        """Variant values apply, caller's explicit overrides win ties."""
+        self._setup_spec(tmp_path)
+        result, env = self._run_and_capture(tmp_path, {
+            "project_name": "dummy",
+            "variant": "large",
+            # Caller overrides WM_LR — should win over variant's "5e-4".
+            # Caller does NOT override WM_STEPS — should stay as variant's "15000".
+            "overrides": {"WM_LR": "1e-4"},
+        })
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        # Variant values that the caller didn't override: from variant.
+        assert env.get("WM_STEPS") == "15000"
+        # Caller's override wins over the variant's value for the same key.
+        assert env.get("WM_LR") == "1e-4"
+        # Variant-supplied WANDB_RUN_NAME also flows through (caller didn't override).
+        assert env.get("WANDB_RUN_NAME") == "large-run"
+        # CRUCIBLE_VARIANT_NAME reflects the chosen variant name.
+        assert env.get("CRUCIBLE_VARIANT_NAME") == "large"
+
+    def test_no_variant_arg_preserves_legacy_behavior(self, tmp_path):
+        """Passing no variant at all means the variants dict is not read:
+        only the caller's overrides apply."""
+        self._setup_spec(tmp_path)
+        result, env = self._run_and_capture(tmp_path, {
+            "project_name": "dummy",
+            "overrides": {"WM_LR": "3e-4"},
+        })
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert env.get("WM_LR") == "3e-4"
+        # No variant applied, so neither variant's WM_STEPS nor its WANDB_RUN_NAME leak in.
+        assert "WM_STEPS" not in env
+        assert env.get("WANDB_RUN_NAME") not in {"large-run", "small-run"}

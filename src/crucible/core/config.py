@@ -424,6 +424,12 @@ class ProjectSpec:
     env_set: dict[str, str] = field(default_factory=dict)
     pod: PodOverrides = field(default_factory=PodOverrides)
     metrics: ProjectMetrics = field(default_factory=ProjectMetrics)
+    # Named variant dicts. Each variant maps to {ENV_VAR: value} that
+    # `run_project(variant=...)` merges into the launch overrides before
+    # the caller's own `overrides` (which still win). Until the caller
+    # passes a variant name, the dict is inert — this preserves
+    # backward-compat with specs that list variants as templates.
+    variants: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def _build_pod_overrides(raw: dict[str, Any]) -> PodOverrides:
@@ -521,7 +527,27 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         env_set=raw.get("env_set", {}),
         pod=_build_pod_overrides(raw.get("pod", {})),
         metrics=_build_project_metrics(raw.get("metrics", {})),
+        variants=_build_variants(raw.get("variants", {})),
     )
+
+
+def _build_variants(raw: Any) -> dict[str, dict[str, str]]:
+    """Coerce the ``variants:`` yaml block into a ``{name: {ENV_VAR: str}}`` dict.
+
+    Each variant's values are stringified so they can be exported as environment
+    variables unchanged. Non-dict values (malformed yaml) are skipped with a
+    warning. An empty or missing block returns an empty dict.
+    """
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for name, body in raw.items():
+        if not isinstance(body, dict):
+            continue
+        out[str(name)] = {str(k): str(v) for k, v in body.items()}
+    return out
 
 
 def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]:

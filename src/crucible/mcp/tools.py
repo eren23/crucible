@@ -3525,13 +3525,38 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         project_name = args["project_name"]
         spec = load_project_spec(project_name, config.project_root)
         node_names = args.get("node_names")
-        overrides = dict(args.get("overrides", {}))
+
+        # Variant selection: if the caller passes ``variant=<name>``, look it
+        # up in ``spec.variants`` and merge its env dict into ``overrides``
+        # FIRST, so the caller's explicit ``overrides`` still win if the same
+        # key is in both. This is the fix for the "variants dict is inert"
+        # trap documented in docs/crucible-config-hierarchy.md §4. Passing an
+        # unknown variant name is a loud error (never silently ignored).
+        variant_arg = args.get("variant") or ""
+        caller_overrides = dict(args.get("overrides", {}))
+        if variant_arg:
+            if variant_arg not in spec.variants:
+                available = sorted(spec.variants.keys()) or ["(none)"]
+                return {
+                    "error": (
+                        f"Variant {variant_arg!r} not found in project spec "
+                        f"{project_name!r}. Available variants: {', '.join(available)}."
+                    ),
+                    "run_id": "",
+                    "nodes": [],
+                }
+            variant_env = dict(spec.variants[variant_arg])
+        else:
+            variant_env = {}
+
+        overrides = {**variant_env, **caller_overrides}
         contract_env = _project_contract_env(config, spec)
         overrides.update(contract_env)
         spec.env_set.update(contract_env)
         launch_id = _make_launch_id(project_name)
         variant_name = str(
-            overrides.get("CRUCIBLE_VARIANT_NAME")
+            variant_arg
+            or overrides.get("CRUCIBLE_VARIANT_NAME")
             or overrides.get("WANDB_RUN_NAME")
             or launch_id
         )

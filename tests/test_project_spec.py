@@ -89,6 +89,53 @@ class TestLoadProjectSpec:
         assert spec.name == "fromfile"
 
 
+class TestVariants:
+    """Coverage for the ``variants:`` block on a project spec.
+
+    Before the 2026-04-11 fix, ``variants`` was silently dropped by
+    ``load_project_spec`` and no downstream code read it. Now it is parsed
+    into ``spec.variants`` as a ``{name: {ENV_VAR: str}}`` dict, and
+    ``run_project(variant=...)`` is the canonical way to apply one.
+    """
+
+    def test_variants_parsed(self, tmp_path):
+        _write_spec(tmp_path, "withvariants", {
+            "name": "withvariants",
+            "repo": "https://example.com/r.git",
+            "variants": {
+                "small": {"WM_STEPS": "1000", "WM_LR": "1e-3"},
+                "large": {"WM_STEPS": "15000", "WM_LR": 0.0001},  # float coerced to str
+            },
+        })
+        spec = load_project_spec("withvariants", tmp_path)
+        assert set(spec.variants.keys()) == {"small", "large"}
+        assert spec.variants["small"] == {"WM_STEPS": "1000", "WM_LR": "1e-3"}
+        # Values are stringified so they can be exported verbatim as env vars.
+        assert spec.variants["large"]["WM_STEPS"] == "15000"
+        assert spec.variants["large"]["WM_LR"] == "0.0001"
+
+    def test_variants_missing_means_empty(self, tmp_path):
+        _write_spec(tmp_path, "novariants", {
+            "name": "novariants",
+            "repo": "https://example.com/r.git",
+        })
+        spec = load_project_spec("novariants", tmp_path)
+        assert spec.variants == {}
+
+    def test_variants_ignores_malformed_entries(self, tmp_path):
+        _write_spec(tmp_path, "mixed", {
+            "name": "mixed",
+            "repo": "https://example.com/r.git",
+            "variants": {
+                "good": {"A": "1"},
+                "bad": "not a dict",  # malformed — should be skipped
+                "alsogood": {"B": "2"},
+            },
+        })
+        spec = load_project_spec("mixed", tmp_path)
+        assert set(spec.variants.keys()) == {"good", "alsogood"}
+
+
 class TestListProjectSpecs:
     def test_empty_dir(self, tmp_path):
         assert list_project_specs(tmp_path) == []

@@ -1886,13 +1886,26 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="run_project",
-        description="Launch training for an external project as a detached process on bootstrapped nodes. Returns immediately with per-node run ids.\n\nNOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. The variant name (CRUCIBLE_VARIANT_NAME / WANDB_RUN_NAME) distinguishes individual runs.\n\nREQUIRES: Nodes bootstrapped via bootstrap_project.\nRETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\nNEXT: get_project_run_status to monitor lifecycle, collect_project_results when done.",
+        description=(
+            "Launch training for an external project as a detached process on bootstrapped nodes. "
+            "Returns immediately with per-node run ids.\n\n"
+            "VARIANTS: If the project spec has a `variants:` dict, pass `variant=<name>` to apply "
+            "that variant's env-var overrides. Caller's `overrides` dict still wins over variant values, "
+            "so you can tweak individual knobs (e.g. `variant='phase5_contrast_15k_high', overrides={'WM_SEED': '43'}`). "
+            "Passing an unknown variant name is a loud error.\n\n"
+            "NOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. "
+            "The variant name (CRUCIBLE_VARIANT_NAME / WANDB_RUN_NAME) distinguishes individual runs.\n\n"
+            "REQUIRES: Nodes bootstrapped via bootstrap_project.\n"
+            "RETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\n"
+            "NEXT: get_project_run_status to monitor lifecycle, collect_project_results when done."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "project_name": {"type": "string", "description": "Name of the project spec."},
                 "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes. Empty = all ready."},
-                "overrides": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Env var overrides for this run."},
+                "overrides": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Env var overrides for this run. Wins over variant values if the same key is in both."},
+                "variant": {"type": "string", "description": "Name of a variant in spec.variants. Applies the variant's env dict before the caller's overrides."},
             },
             "required": ["project_name"],
             "additionalProperties": False,
