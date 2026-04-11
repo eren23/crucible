@@ -119,6 +119,59 @@ class TestInventoryRecordStateTransitions:
         assert rec["network_volume_id"] == "vol_456"
 
 
+class TestInventoryRecordInterruptible:
+    """Verify the interruptible field is set correctly.
+
+    Regression coverage for the bug documented in docs/crucible-config-hierarchy.md §3:
+    RunPod's create-pod GraphQL response does not reliably echo back
+    the interruptible flag, so the record would fall back to
+    previous.get("interruptible", True) — making yaml edits to
+    pod.interruptible appear to not stick. The fix added
+    requested_interruptible=... to let the provisioner pass the
+    authoritative input value.
+    """
+
+    def test_requested_interruptible_wins_over_api_echo(self):
+        """requested_interruptible=False beats a missing-or-True raw value."""
+        raw = {"id": "pod_123"}  # raw has no 'interruptible' field
+        rec = inventory_record_from_api(raw, requested_interruptible=False)
+        assert rec["interruptible"] is False
+
+    def test_requested_interruptible_wins_over_stale_previous(self):
+        """requested_interruptible=False beats a stale previous=True record."""
+        raw = {"id": "pod_123"}
+        previous = {"interruptible": True}  # wrong previous value
+        rec = inventory_record_from_api(
+            raw, previous=previous, requested_interruptible=False
+        )
+        assert rec["interruptible"] is False
+
+    def test_requested_interruptible_true_wins(self):
+        """requested_interruptible=True beats a stale previous=False record."""
+        raw = {"id": "pod_123"}
+        previous = {"interruptible": False}
+        rec = inventory_record_from_api(
+            raw, previous=previous, requested_interruptible=True
+        )
+        assert rec["interruptible"] is True
+
+    def test_no_request_falls_back_to_api_then_previous_then_true(self):
+        """Without requested_interruptible, legacy fallback chain still works."""
+        # Raw has the value -> use raw
+        raw = {"id": "pod_123", "interruptible": False}
+        rec = inventory_record_from_api(raw)
+        assert rec["interruptible"] is False
+        # Raw missing, previous has value -> use previous
+        raw = {"id": "pod_123"}
+        previous = {"interruptible": False}
+        rec = inventory_record_from_api(raw, previous=previous)
+        assert rec["interruptible"] is False
+        # Both missing -> default True
+        raw = {"id": "pod_123"}
+        rec = inventory_record_from_api(raw)
+        assert rec["interruptible"] is True
+
+
 # ---------------------------------------------------------------------------
 # Helpers for stop/start tests
 # ---------------------------------------------------------------------------

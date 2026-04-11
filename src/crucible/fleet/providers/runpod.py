@@ -590,6 +590,7 @@ def inventory_record_from_api(
     *,
     previous: dict[str, Any] | None = None,
     defaults: dict[str, Any] | None = None,
+    requested_interruptible: bool | None = None,
 ) -> dict[str, Any]:
     """Convert a RunPod API response into a fleet node record dict.
 
@@ -599,6 +600,18 @@ def inventory_record_from_api(
         Provider defaults from ``crucible.yaml`` ``provider.defaults``.
         Used as fallbacks for ``workspace_path``, ``python_bin``,
         ``env_source`` when no previous record exists.
+    requested_interruptible : bool, optional
+        The interruptible flag that was passed to ``create_api_pod`` when
+        this pod was provisioned. Preferred as the source of truth for the
+        recorded value because the RunPod GraphQL create-pod response
+        does not reliably echo back the interruptible flag (it's inferred
+        from the presence/absence of ``minMemoryInGb``/``minVcpuCount``
+        in the payload, not a top-level field). Without this parameter,
+        the record falls back to ``raw.get("interruptible")`` → the
+        previous record's value → True, which makes yaml edits to
+        ``pod.interruptible`` appear to silently not stick when they
+        actually did at the API layer. See docs/crucible-config-hierarchy.md
+        §3 for the full bug writeup.
     """
     previous = previous or {}
     defaults = defaults or {}
@@ -616,15 +629,23 @@ def inventory_record_from_api(
     elif local_state == "starting" and api_state in {"running", "ready"}:
         # Pod resumed — transition to "new" (SSH wait will promote to "ready")
         state = "new"
+    # Interruptible: prefer the requested input over the RunPod API echo,
+    # because RunPod doesn't reliably include the field in the create-pod
+    # response (see docstring above). Fall back chain: caller's explicit
+    # requested value → raw API echo → previous record value → True.
+    if requested_interruptible is not None:
+        interruptible_val: bool = bool(requested_interruptible)
+    else:
+        interruptible_val = bool(
+            raw.get("interruptible", previous.get("interruptible", True)),
+        )
     return {
         "name": raw.get("name") or previous.get("name") or raw["id"],
         "node_id": raw["id"],
         "pod_id": raw["id"],  # backward compat
         "gpu": gpu.get("displayName") or previous.get("gpu") or "-",
         "gpu_count": raw.get("gpuCount") or previous.get("gpu_count") or 1,
-        "interruptible": bool(
-            raw.get("interruptible", previous.get("interruptible", True)),
-        ),
+        "interruptible": interruptible_val,
         "cost_per_hr": float(
             raw.get("adjustedCostPerHr")
             or raw.get("costPerHr")
@@ -760,7 +781,11 @@ class RunPodProvider(FleetProvider):
                         network_volume_id=eff_network_volume_id,
                         template_id=eff_template_id,
                     )
-                    node = inventory_record_from_api(raw, defaults=self.defaults)
+                    node = inventory_record_from_api(
+                        raw,
+                        defaults=self.defaults,
+                        requested_interruptible=eff_interruptible,
+                    )
                     node["state"] = "creating"
                     node["replacement"] = replacement
                     node["ssh_key"] = self.ssh_key
