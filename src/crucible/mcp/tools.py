@@ -3721,6 +3721,75 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+def run_project_chain(args: dict[str, Any]) -> dict[str, Any]:
+    """Run a sequence of project variants on the same node, auto-chaining.
+
+    REQUIRES: Node bootstrapped via bootstrap_project.
+    RETURNS: {chain_id, variants_total, results: [{variant, run_id, status, duration_s}]}
+    NEXT: collect_project_results for individual runs.
+    """
+    config = _get_config()
+    try:
+        from crucible.core.config import load_project_spec
+        from crucible.fleet.inventory import load_nodes_if_exists
+        from crucible.fleet.project_runner import chain_project_variants
+
+        project_name = args["project_name"]
+        variants = args["variants"]
+        node_name = args["node_name"]
+        overrides = dict(args.get("overrides", {}))
+        poll_interval = int(args.get("poll_interval", 30))
+
+        spec = load_project_spec(project_name, config.project_root)
+
+        # Validate all variants exist before starting
+        missing = [v for v in variants if v not in spec.variants]
+        if missing:
+            available = sorted(spec.variants.keys()) or ["(none)"]
+            return {
+                "error": f"Unknown variants: {missing}. Available: {', '.join(available)}",
+            }
+
+        # Find the target node
+        nodes_file = config.project_root / config.nodes_file
+        all_nodes = load_nodes_if_exists(nodes_file) or []
+        node = next((n for n in all_nodes if n["name"] == node_name), None)
+        if node is None:
+            return {"error": f"Node {node_name!r} not found in inventory."}
+        if not node.get("env_ready"):
+            return {"error": f"Node {node_name!r} not bootstrapped (env_ready=false)."}
+
+        node["workspace_path"] = spec.workspace
+
+        # Add contract env
+        contract_env = _project_contract_env(config, spec)
+        overrides.update(contract_env)
+
+        chain_id = _make_launch_id(f"{project_name}_chain")
+
+        results = chain_project_variants(
+            node=node,
+            spec=spec,
+            variants=variants,
+            overrides=overrides,
+            poll_interval=poll_interval,
+        )
+
+        return {
+            "chain_id": chain_id,
+            "project": project_name,
+            "node": node_name,
+            "variants_total": len(variants),
+            "variants_completed": sum(1 for r in results if r["status"] == "completed"),
+            "results": results,
+        }
+
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 def _observe_project_run(
     run_info: dict[str, Any],
     *,
@@ -4697,6 +4766,7 @@ TOOL_DISPATCH: dict[str, Any] = {
     "provision_project": provision_project,
     "bootstrap_project": bootstrap_project_tool,
     "run_project": run_project,
+    "run_project_chain": run_project_chain,
     "collect_project_results": collect_project_results,
     "get_project_run_status": get_project_run_status,
     # Recipe tools

@@ -196,6 +196,7 @@ _LONG_RUNNING_TOOLS: set[str] = {
     "provision_nodes",
     "provision_project",
     "run_project",
+    "run_project_chain",
     "start_nodes",
     "stop_nodes",
     "sync_code",
@@ -1908,6 +1909,41 @@ TOOLS: list[Tool] = [
                 "variant": {"type": "string", "description": "Name of a variant in spec.variants. Applies the variant's env dict before the caller's overrides."},
             },
             "required": ["project_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="run_project_chain",
+        description=(
+            "Run a sequence of project variants on the same node, auto-chaining. "
+            "Launches the first variant, polls until completion, then launches the next. "
+            "Long-running (minutes to hours). Runs in background thread.\n\n"
+            "REQUIRES: Node bootstrapped via bootstrap_project.\n"
+            "RETURNS: {chain_id, variants_total, results: [{variant, run_id, status, duration_s}]}\n"
+            "NEXT: get_project_run_status for individual runs, collect_project_results when chain completes."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "Name of the project spec."},
+                "variants": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Ordered list of variant names to run sequentially.",
+                },
+                "node_name": {"type": "string", "description": "Node to run on (single node for sequential chain)."},
+                "overrides": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                    "description": "Extra env overrides applied to ALL variants in the chain.",
+                },
+                "poll_interval": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Seconds between completion checks (default 30).",
+                },
+            },
+            "required": ["project_name", "variants", "node_name"],
             "additionalProperties": False,
         },
     ),

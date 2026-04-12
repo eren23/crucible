@@ -103,6 +103,106 @@ def launch_project(
     }
 
 
+def chain_project_variants(
+    node: dict[str, Any],
+    spec: Any,
+    variants: list[str],
+    *,
+    overrides: dict[str, str] | None = None,
+    poll_interval: int = 30,
+    on_variant_start: Any | None = None,
+    on_variant_complete: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Run a sequence of project variants on the same node, auto-chaining.
+
+    Launches the first variant, polls until completion, then launches the
+    next. Returns a list of results, one per variant.
+
+    Args:
+        node: Node dict with ssh_host, ssh_port, workspace_path, etc.
+        spec: ProjectSpec with variants dict and train command.
+        variants: Ordered list of variant names from spec.variants.
+        overrides: Extra env overrides applied to ALL variants (wins over variant env).
+        poll_interval: Seconds between completion checks (default 30).
+        on_variant_start: Optional callback(variant_name, run_id, node_name).
+        on_variant_complete: Optional callback(variant_name, result_dict).
+
+    Returns:
+        List of dicts, each with: variant, run_id, pid, status, duration_s.
+    """
+    results = []
+    caller_overrides = dict(overrides or {})
+
+    for i, variant_name in enumerate(variants):
+        if variant_name not in spec.variants:
+            available = sorted(spec.variants.keys()) or ["(none)"]
+            raise RunnerError(
+                f"Variant {variant_name!r} not in project {spec.name!r}. "
+                f"Available: {', '.join(available)}"
+            )
+
+        # Merge: variant env + caller overrides (caller wins)
+        variant_env = dict(spec.variants[variant_name])
+        merged = {**variant_env, **caller_overrides}
+        merged.setdefault("CRUCIBLE_VARIANT_NAME", variant_name)
+        merged.setdefault("WANDB_RUN_NAME", variant_name)
+
+        run_id = (
+            f"{spec.name}_{int(time.time_ns())}_{variant_name[:20]}"
+        )
+
+        log_step(
+            f"chain [{i + 1}/{len(variants)}] launching variant "
+            f"{variant_name!r} on {node['name']}"
+        )
+
+        if on_variant_start:
+            on_variant_start(variant_name, run_id, node["name"])
+
+        start_time = time.time()
+        try:
+            launch_result = launch_project(node, spec, run_id, overrides=merged)
+            pid = launch_result["pid"]
+        except Exception as exc:
+            log_warn(f"chain: variant {variant_name!r} failed to launch: {exc}")
+            results.append({
+                "variant": variant_name,
+                "run_id": run_id,
+                "pid": None,
+                "status": "launch_failed",
+                "error": str(exc),
+                "duration_s": 0,
+            })
+            continue
+
+        # Poll until process finishes
+        log_info(f"chain: polling {node['name']} PID {pid} every {poll_interval}s")
+        while True:
+            time.sleep(poll_interval)
+            if not check_project_running(node, pid):
+                break
+
+        duration_s = round(time.time() - start_time)
+        log_success(
+            f"chain [{i + 1}/{len(variants)}] variant {variant_name!r} "
+            f"completed in {duration_s}s"
+        )
+
+        result = {
+            "variant": variant_name,
+            "run_id": run_id,
+            "pid": pid,
+            "status": "completed",
+            "duration_s": duration_s,
+        }
+        results.append(result)
+
+        if on_variant_complete:
+            on_variant_complete(variant_name, result)
+
+    return results
+
+
 def check_project_running(node: dict[str, Any], pid: int) -> bool:
     """Check if a training process is still running on the pod."""
     probe = probe_project_process(node, pid)
