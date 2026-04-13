@@ -3398,7 +3398,7 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
         if spec.pod.image:
             provider_overrides["image_name"] = spec.pod.image
         if spec.pod.gpu_type:
-            provider_overrides["gpu_type_id"] = spec.pod.gpu_type
+            provider_overrides["gpu_type_ids"] = spec.pod.gpu_type
         if spec.pod.container_disk:
             provider_overrides["container_disk_gb"] = spec.pod.container_disk
         if spec.pod.volume_disk:
