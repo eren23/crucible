@@ -78,6 +78,27 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
 
 
+def atomic_write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    """Write JSONL atomically via temp file + rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for record in records:
+                f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
 def collect_public_attrs(obj: Any) -> dict[str, Any]:
     """Serialize an object's public, non-callable attributes to a dict."""
     config: dict[str, Any] = {}

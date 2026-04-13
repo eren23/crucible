@@ -2409,6 +2409,103 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ── Research DAG bridge tools ──────────────────────────────────
+    Tool(
+        name="research_dag_init",
+        description=(
+            "Initialize research DAG bridge for visual experiment tracking. "
+            "Spider Chat is OPTIONAL — works in local-only mode without it (DAG state tracked locally). "
+            "If Spider Chat is available, experiments sync to canvas as a visual DAG.\n\n"
+            "REQUIRES: Optional flow_id (Spider Chat flow ID, omit for local-only). Optional: spiderchat_url, project_name. Token via SPIDERCHAT_TOKEN env var.\n"
+            "RETURNS: {status, flow_id, project_name, total_mappings, mode: 'connected'|'local-only'}\n"
+            "NEXT: research_dag_push_node or research_dag_sync"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "string", "description": "Spider Chat flow ID. Omit for local-only mode.", "default": ""},
+                "project_name": {"type": "string", "description": "Human-readable project name.", "default": ""},
+                "spiderchat_url": {"type": "string", "description": "Spider Chat backend URL. Token read from SPIDERCHAT_TOKEN env var.", "default": ""},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_dag_sync",
+        description=(
+            "Bidirectional sync between Crucible search tree and Spider Chat canvas (if available). "
+            "Tracks DAG state locally always. If Spider Chat is connected, also pushes nodes to canvas and pulls manual nodes. "
+            "Works fully without Spider Chat.\n\n"
+            "REQUIRES: research_dag_init completed, optional tree_name.\n"
+            "RETURNS: {mode, pushed, updated, pulled, skipped_canvas, manual_hypotheses, total_mappings}\n"
+            "NEXT: dispatch_experiments (for pulled hypotheses) or continue research"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tree_name": {"type": "string", "description": "Crucible search tree to sync. Omit to sync without tree data."},
+                "flow_id": {"type": "string", "description": "Override flow ID (uses init default if omitted)."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_dag_push_node",
+        description=(
+            "Push a single experiment or hypothesis to Spider Chat canvas as an information node.\n\n"
+            "REQUIRES: research_dag_init completed, at least name or node_id.\n"
+            "RETURNS: {canvas_node_id}\n"
+            "NEXT: Create more nodes or research_dag_sync"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Experiment name."},
+                "node_id": {"type": "string", "description": "Crucible node ID (defaults to name)."},
+                "hypothesis": {"type": "string", "description": "Hypothesis text."},
+                "rationale": {"type": "string", "description": "Why this experiment."},
+                "config": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Experiment config (env vars)."},
+                "status": {"type": "string", "description": "Experiment status.", "default": "pending"},
+                "result": {"type": "object", "description": "Result dict if completed."},
+                "result_metric": {"type": "number", "description": "Primary metric value."},
+                "parent_canvas_ids": {"type": "array", "items": {"type": "string"}, "description": "Parent canvas node IDs for edges."},
+                "flow_id": {"type": "string", "description": "Override flow ID."},
+                "primary_metric": {"type": "string", "default": "val_bpb"},
+                "best_metric": {"type": "number", "description": "Current best metric for highlighting."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_dag_pull_manual",
+        description=(
+            "Import manually-created Spider Chat canvas nodes as Crucible hypotheses.\n\n"
+            "REQUIRES: research_dag_init completed.\n"
+            "RETURNS: {count, hypotheses: [{name, hypothesis, config, rationale, canvas_node_id}]}\n"
+            "NEXT: Enrich hypotheses with configs, then enqueue_experiment"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "flow_id": {"type": "string", "description": "Override flow ID."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_dag_status",
+        description=(
+            "Show current research DAG bridge status and mapping summary.\n\n"
+            "REQUIRES: research_dag_init completed.\n"
+            "RETURNS: {flow_id, project_name, total_mappings, status_breakdown, type_breakdown}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 

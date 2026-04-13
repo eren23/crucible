@@ -4657,6 +4657,175 @@ def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+# ------------------------------------------------------------------
+# Research DAG bridge tools
+# ------------------------------------------------------------------
+
+
+def _get_dag_bridge() -> Any:
+    """Return a ResearchDAGBridge for the current project.
+
+    Reads Spider Chat URL from persisted DAG state (set during init),
+    with SPIDERCHAT_URL env var as override.
+    """
+    from crucible.research_dag.bridge import ResearchDAGBridge
+    from crucible.research_dag.dag_state import DAGState
+    config = _get_config()
+
+    # Load persisted config to recover URL from init
+    state = DAGState(config.project_root / ".crucible" / "research_dag")
+    state.load()
+    persisted_url = state.spiderchat_url
+
+    # Env var overrides persisted URL
+    spiderchat_url = os.environ.get("SPIDERCHAT_URL", "") or persisted_url
+    spiderchat_token = os.environ.get("SPIDERCHAT_TOKEN", "")
+    bridge = ResearchDAGBridge(
+        project_dir=config.project_root,
+        spiderchat_url=spiderchat_url,
+        spiderchat_token=spiderchat_token,
+    )
+    bridge.load()
+    return bridge
+
+
+def research_dag_init(args: dict[str, Any]) -> dict[str, Any]:
+    """Initialize research DAG bridge. Spider Chat is optional — works in local-only mode without it.
+
+    RETURNS: Bridge status summary with mode ('connected' or 'local-only').
+    NEXT: research_dag_push_node or research_dag_sync.
+    """
+    try:
+        from crucible.research_dag.bridge import ResearchDAGBridge
+        config = _get_config()
+        # URL from args or env; token ONLY from env (never from args — prevents exfiltration)
+        spiderchat_url = args.get("spiderchat_url", os.environ.get("SPIDERCHAT_URL", ""))
+        spiderchat_token = os.environ.get("SPIDERCHAT_TOKEN", "")
+
+        bridge = ResearchDAGBridge(
+            project_dir=config.project_root,
+            spiderchat_url=spiderchat_url,
+            spiderchat_token=spiderchat_token,
+        )
+        result = bridge.init(
+            flow_id=args.get("flow_id", ""),
+            project_name=args.get("project_name", config.name),
+        )
+        return {"status": "initialized", **result}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def research_dag_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Bidirectional sync between Crucible search tree and Spider Chat canvas.
+
+    REQUIRES: research_dag_init completed, a search tree exists.
+    RETURNS: Sync summary (pushed, updated, pulled counts, manual_hypotheses).
+    NEXT: dispatch_experiments (for pulled manual hypotheses) or continue research.
+    """
+    try:
+        config = _get_config()
+        bridge = _get_dag_bridge()
+
+        # Load tree
+        tree_name = args.get("tree_name")
+        tree_nodes: list[dict[str, Any]] = []
+        best_metric: float | None = None
+        primary_metric = config.metrics.primary if hasattr(config, "metrics") else "val_bpb"
+
+        if tree_name:
+            from crucible.researcher.search_tree import SearchTree
+            tree_dir = _get_tree_dir(config, tree_name)
+            tree = SearchTree.load(tree_dir)
+            tree_nodes = list(tree.nodes.values())
+            best_metric = tree.meta.get("best_metric")
+            primary_metric = tree.meta.get("primary_metric", primary_metric)
+
+        result = bridge.sync(
+            tree_nodes=tree_nodes,
+            flow_id=args.get("flow_id", ""),
+            primary_metric=primary_metric,
+            best_metric=best_metric,
+        )
+        return {"status": "synced", **result}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def research_dag_push_node(args: dict[str, Any]) -> dict[str, Any]:
+    """Push a single Crucible experiment or hypothesis to Spider Chat canvas.
+
+    REQUIRES: research_dag_init completed.
+    RETURNS: canvas_node_id of the created/updated node.
+    NEXT: Create edges or continue pushing nodes.
+    """
+    try:
+        bridge = _get_dag_bridge()
+        experiment = {
+            "node_id": args.get("node_id", args.get("name", "")),
+            "experiment_name": args.get("name", ""),
+            "hypothesis": args.get("hypothesis", ""),
+            "rationale": args.get("rationale", ""),
+            "config": args.get("config", {}),
+            "status": args.get("status", "pending"),
+            "result": args.get("result"),
+            "result_metric": args.get("result_metric"),
+            "generation_method": args.get("generation_method", "manual"),
+        }
+        canvas_id = bridge.push_experiment_node(
+            experiment=experiment,
+            flow_id=args.get("flow_id", ""),
+            parent_canvas_ids=args.get("parent_canvas_ids"),
+            primary_metric=args.get("primary_metric", "val_bpb"),
+            best_metric=args.get("best_metric"),
+        )
+        return {"status": "pushed", "canvas_node_id": canvas_id}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def research_dag_pull_manual(args: dict[str, Any]) -> dict[str, Any]:
+    """Import manually-created Spider Chat canvas nodes as Crucible hypotheses.
+
+    REQUIRES: research_dag_init completed, manual info nodes exist in flow.
+    RETURNS: List of hypothesis dicts ready for Crucible experiment queue.
+    NEXT: Enrich with configs, then enqueue_experiment or design_enqueue_batch.
+    """
+    try:
+        bridge = _get_dag_bridge()
+        hypotheses = bridge.pull_manual_nodes(flow_id=args.get("flow_id", ""))
+        return {
+            "status": "pulled",
+            "count": len(hypotheses),
+            "hypotheses": hypotheses,
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Show current research DAG bridge status and mapping summary.
+
+    REQUIRES: research_dag_init completed.
+    RETURNS: Mapping counts, status breakdown, flow_id.
+    """
+    try:
+        bridge = _get_dag_bridge()
+        return {"status": "ok", **bridge.status()}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
@@ -4801,4 +4970,10 @@ TOOL_DISPATCH: dict[str, Any] = {
     "data_search": data_search,
     "data_link": data_link,
     "data_get_linked": data_get_linked,
+    # Research DAG bridge tools
+    "research_dag_init": research_dag_init,
+    "research_dag_sync": research_dag_sync,
+    "research_dag_push_node": research_dag_push_node,
+    "research_dag_pull_manual": research_dag_pull_manual,
+    "research_dag_status": research_dag_status,
 }
