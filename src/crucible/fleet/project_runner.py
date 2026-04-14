@@ -54,14 +54,16 @@ def launch_project(
     source_env = f"if [ -f {ws}/.env ]; then source {ws}/.env; fi"
 
     train_cmd = spec.train
+    exit_code_file = f"{log_dir}/{run_id}.exit_code"
     launch_snippet = (
-        "import pathlib, subprocess; "
+        "import pathlib, subprocess, threading; "
         f"pathlib.Path({log_dir!r}).mkdir(parents=True, exist_ok=True); "
         f"log = open({log_file!r}, 'ab', buffering=0); "
         f"proc = subprocess.Popen(['bash', '-lc', {train_cmd!r}], "
         "stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, "
         "start_new_session=True); "
-        "print(proc.pid)"
+        "print(proc.pid); "
+        f"threading.Thread(target=lambda: open({exit_code_file!r},'w').write(str(proc.wait())), daemon=True).start()"
     )
     cmd = (
         f"{activate} && {source_env} && "
@@ -177,22 +179,33 @@ def chain_project_variants(
 
         # Poll until process finishes
         log_info(f"chain: polling {node['name']} PID {pid} every {poll_interval}s")
+        final_probe = None
         while True:
             time.sleep(poll_interval)
-            if not check_project_running(node, pid):
+            final_probe = probe_project_process(
+                node, pid, run_id=run_id, workspace=spec.workspace,
+            )
+            if not final_probe.get("running"):
                 break
 
         duration_s = round(time.time() - start_time)
-        log_success(
+        exit_code = final_probe.get("exit_code") if final_probe else None
+        status = "completed" if exit_code == 0 else (
+            "failed" if exit_code is not None else "completed"
+        )
+
+        log_fn = log_success if status == "completed" else log_warn
+        log_fn(
             f"chain [{i + 1}/{len(variants)}] variant {variant_name!r} "
-            f"completed in {duration_s}s"
+            f"{status} in {duration_s}s (exit_code={exit_code})"
         )
 
         result = {
             "variant": variant_name,
             "run_id": run_id,
             "pid": pid,
-            "status": "completed",
+            "status": status,
+            "exit_code": exit_code,
             "duration_s": duration_s,
         }
         results.append(result)
@@ -209,16 +222,20 @@ def check_project_running(node: dict[str, Any], pid: int) -> bool:
     return bool(probe.get("running"))
 
 
-def probe_project_process(node: dict[str, Any], pid: int) -> dict[str, Any]:
-    """Probe a detached remote process, preserving SSH reachability details."""
+def probe_project_process(
+    node: dict[str, Any],
+    pid: int,
+    run_id: str | None = None,
+    workspace: str = "/workspace/project",
+) -> dict[str, Any]:
+    """Probe a detached remote process, including exit code if finished."""
     try:
-        proc = remote_exec(
-            node,
-            f"kill -0 {int(pid)} 2>/dev/null && echo running || echo stopped",
-            check=False,
-        )
+        exit_code_path = f"{workspace}/logs/{run_id}.exit_code" if run_id else ""
+        read_exit = f" && cat {shlex.quote(exit_code_path)} 2>/dev/null" if exit_code_path else ""
+        cmd = f"kill -0 {int(pid)} 2>/dev/null && echo running || (echo stopped{read_exit})"
+        proc = remote_exec(node, cmd, check=False)
     except Exception as exc:
-        return {"reachable": False, "running": None, "error": str(exc)}
+        return {"reachable": False, "running": None, "exit_code": None, "error": str(exc)}
 
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
@@ -226,11 +243,23 @@ def probe_project_process(node: dict[str, Any], pid: int) -> dict[str, Any]:
         return {
             "reachable": False,
             "running": None,
+            "exit_code": None,
             "error": stderr or stdout or f"ssh_returncode_{proc.returncode}",
         }
+
+    is_running = "running" in stdout
+    exit_code = None
+    if not is_running and stdout:
+        lines = stdout.strip().split("\n")
+        if len(lines) >= 2:
+            try:
+                exit_code = int(lines[-1].strip())
+            except ValueError:
+                pass
     return {
         "reachable": True,
-        "running": "running" in stdout,
+        "running": is_running,
+        "exit_code": exit_code,
         "error": stderr or None,
     }
 
@@ -321,6 +350,16 @@ def collect_project_result(
     except Exception as exc:
         log_sync_failed = True
         log_warn(f"{name}: failed to rsync log: {exc}")
+
+    # Collect checkpoints (best-effort)
+    try:
+        ws = node.get("workspace_path", "/workspace/project")
+        remote_ckpt = f"{user}@{host}:{ws}/checkpoints/"
+        local_ckpt_dir = logs_dir.parent / "checkpoints" / run_id
+        local_ckpt_dir.mkdir(parents=True, exist_ok=True)
+        _run(rsync_base(node) + [remote_ckpt, str(local_ckpt_dir) + "/"], check=False)
+    except Exception as exc:
+        log_warn(f"{name}: failed to rsync checkpoints: {exc}")
 
     # Parse stdout metrics from log
     parser = OutputParser()

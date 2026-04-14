@@ -669,6 +669,15 @@ def bootstrap_project(
 
     ensure_project_system_tools(node, spec, timeout=project_step_timeout)
 
+    # 0. Kill any old training processes to free GPU memory
+    log_step(f"{name}: cleaning up previous training processes")
+    try:
+        # Uses pkill to find python training scripts in the workspace
+        cleanup_cmd = f"pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
+        remote_exec(node, cleanup_cmd, check=False, timeout=15)
+    except Exception:
+        pass  # Non-fatal: cleanup is best-effort
+
     # 1. Clone or update repo
     log_step(f"{name}: cloning {spec.repo} (branch={spec.branch})")
     clone_check = bootstrap_step(
