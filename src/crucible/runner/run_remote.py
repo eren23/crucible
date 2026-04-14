@@ -115,6 +115,9 @@ def main() -> None:
         summary += f" val_loss={result['result']['val_loss']:.4f}"
     print(summary)
 
+    if status not in ("completed", "success"):
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
