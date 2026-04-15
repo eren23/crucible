@@ -539,7 +539,6 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.fleet.bootstrap import _materialize_global_architectures
 
         _materialize_global_architectures(config.project_root)
-        # Simple sync implementation
         from crucible.fleet.inventory import load_nodes
         from crucible.fleet.sync import sync_repo, sync_taps
 
@@ -1727,7 +1726,7 @@ def finding_promote(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_research_briefing(args: dict[str, Any]) -> dict[str, Any]:
-    """Comprehensive session orientation: project state, leaderboard, hypotheses, findings, notes, and suggested next steps."""
+    """Session orientation: project state, leaderboard, hypotheses, findings, notes, and suggested next steps."""
     config = _get_config()
     try:
         from crucible.researcher.briefing import build_briefing
@@ -4258,7 +4257,7 @@ def _plugin_add_common(args: dict[str, Any], plugin_type: str) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
-# Generic plugin tools (consolidated from 15 type-specific tools)
+# Generic plugin tools
 # ---------------------------------------------------------------------------
 
 _PLUGIN_LIST_DISPATCH: dict[str, tuple[str, str, str]] = {
@@ -4893,7 +4892,7 @@ def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
 
 
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-    # Existing tools
+    # Fleet status & lifecycle
     "get_fleet_status": get_fleet_status,
     "get_leaderboard": get_leaderboard,
     "get_queue_status": get_queue_status,
@@ -4983,11 +4982,11 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Config tools
     "config_get_presets": config_get_presets,
     "config_get_project": config_get_project,
-    # New tools (Phase 1)
+    # Agent assistance
     "get_run_logs": get_run_logs,
     "model_fetch_architecture": model_fetch_architecture,
     "get_architecture_guide": get_architecture_guide,
-    # Tree search tools (Phase 2)
+    # Tree search tools
     "tree_create": tree_create,
     "tree_get": tree_get,
     "tree_expand_node": tree_expand_node,
@@ -4996,7 +4995,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "tree_enqueue_pending": tree_enqueue_pending,
     "tree_sync_results": tree_sync_results,
     "tree_list": tree_list,
-    # Modalities tool (Phase 3)
+    # Modalities
     "config_get_modalities": config_get_modalities,
     # External project tools
     "list_projects": list_projects,
@@ -5010,7 +5009,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "recipe_save": recipe_save,
     "recipe_list": recipe_list,
     "recipe_get": recipe_get,
-    # Plugin registry tools (consolidated)
+    # Plugin registry tools
     "plugin_list": plugin_list,
     "plugin_add": plugin_add,
     "plugin_get_schema": plugin_get_schema,

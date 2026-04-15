@@ -7,7 +7,7 @@ variables (the standard Crucible training contract) and emits metrics
 in both the LM-compatible format (``step:N/M train_loss:X``) and the
 generic format (``metric:name=value``).
 
-This file is a NEW backend -- it does NOT modify ``torch_backend.py``.
+Separate from ``torch_backend.py`` which handles the LM-specific pipeline.
 """
 from __future__ import annotations
 
