@@ -584,8 +584,9 @@ def run_experiment(
                     data_links.append(entry.get("data_name"))
             if data_links:
                 result["data_sources"] = data_links
-        except Exception:
-            pass  # data provenance is best-effort
+        except Exception as exc:
+            from crucible.core.log import log_warn
+            log_warn(f"Data provenance lookup failed for {exp_id}: {exc}")
 
     # -- Persist result --
     append_jsonl(results_path, result)

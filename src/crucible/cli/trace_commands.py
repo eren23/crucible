@@ -51,7 +51,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
     for meta_path in meta_files:
         try:
             meta = load_trace_meta(meta_path)
-        except Exception:
+        except (OSError, ValueError):
             continue
         session_id = meta.get("session_id", meta_path.stem.replace(".meta", ""))
         started = meta.get("started_at", "")[:19]

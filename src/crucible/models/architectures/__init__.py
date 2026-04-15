@@ -21,8 +21,9 @@ try:
         _specs_dir = _Path(__file__).resolve().parent.parent / "specs"
         if _specs_dir.is_dir():
             _reg.load_global_architectures(_specs_dir, source="builtin")
-except Exception:
-    pass
+except Exception as _exc_builtin:
+    from crucible.core.log import log_warn as _lw1
+    _lw1(f"Builtin YAML spec loading failed (non-fatal): {_exc_builtin}")
 
 # --- Global hub architectures (source="global") ---
 # Loads .py plugins and .yaml specs from hub architecture directories.
@@ -57,8 +58,9 @@ try:
         _tap_install_arch_dir = _hub_dir / "plugins" / "architectures"
         if _tap_install_arch_dir.is_dir():
             _reg.load_global_architectures(_tap_install_arch_dir, source="global")
-except Exception:
-    pass
+except Exception as _exc_hub:
+    from crucible.core.log import log_warn as _lw2
+    _lw2(f"Global hub architecture loading failed (non-fatal): {_exc_hub}")
 
 # --- Project-local architectures from .crucible/architectures/ (source="local") ---
 # Loads both .py plugins and .yaml specs from the project architectures directory.
@@ -72,6 +74,7 @@ try:
     _local_arch_dir = _cfg.project_root / _cfg.store_dir / "architectures"
     if _local_arch_dir.is_dir():
         _reg.load_global_architectures(_local_arch_dir, source="local")
-except Exception:
-    pass
+except Exception as _exc_local:
+    from crucible.core.log import log_warn as _lw3
+    _lw3(f"Local architecture loading failed (non-fatal): {_exc_local}")
 

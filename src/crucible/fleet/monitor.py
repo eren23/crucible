@@ -75,7 +75,7 @@ def load_statuses(logs_dir: Path) -> list[dict[str, Any]]:
     for path in sorted(logs_dir.glob("*.status.json")):
         try:
             statuses.append(json.loads(path.read_text(encoding="utf-8")))
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             statuses.append({
                 "run_id": path.stem,
                 "state": "corrupt",

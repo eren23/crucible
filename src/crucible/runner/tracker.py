@@ -144,8 +144,9 @@ class RunTracker:
                     self.manifest_path.read_text(encoding="utf-8")
                 )
                 manifest = {**existing, **manifest}
-            except Exception:
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                from crucible.core.log import log_warn
+                log_warn(f"Failed to merge existing manifest {self.manifest_path}: {exc}")
 
         if extra:
             manifest.update(_json_ready(extra))

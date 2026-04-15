@@ -97,8 +97,9 @@ class AutonomousResearcher:
                     literature_context = format_literature_context(all_papers, max_papers=5)
                     if literature_context:
                         print(f"  Literature: found {len(all_papers)} relevant papers.")
-                except Exception:
-                    pass
+                except Exception as lit_exc:
+                    from crucible.core.log import log_warn as _lit_warn
+                    _lit_warn(f"Literature search failed (non-fatal): {lit_exc}")
 
                 if self.dry_run:
                     hypotheses = _dry_run_hypotheses(self._iteration)
