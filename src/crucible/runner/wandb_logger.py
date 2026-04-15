@@ -223,7 +223,9 @@ def wandb_annotate_finished_run(
             run.summary["crucible_findings"] = findings
         run.summary.update()
         return True
-    except Exception:
+    except Exception as exc:
+        from crucible.core.log import log_warn
+        log_warn(f"W&B annotation failed for {run_id}: {exc}")
         return False
 
 
@@ -239,7 +241,7 @@ def _resolve_wandb_url(run_id: str, config: Any) -> str | None:
             url = wandb_info.get("url")
             if url:
                 return url
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, AttributeError):
         pass
 
     # Fallback: scan results JSONL
@@ -252,7 +254,7 @@ def _resolve_wandb_url(run_id: str, config: Any) -> str | None:
                     url = wandb_info.get("url")
                     if url:
                         return url
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError):
         pass
 
     return None
@@ -288,7 +290,9 @@ def fetch_wandb_metrics(
             if isinstance(val, (int, float)):
                 result[key] = float(val)
         return result
-    except Exception:
+    except Exception as exc:
+        from crucible.core.log import log_warn
+        log_warn(f"W&B metric fetch failed for project={project!r}: {exc}")
         return {}
 
 
@@ -313,7 +317,9 @@ def fetch_wandb_run_info(
             "run_name": getattr(run, "name", None) or getattr(run, "display_name", None),
             "metrics": metrics,
         }
-    except Exception:
+    except Exception as exc:
+        from crucible.core.log import log_warn
+        log_warn(f"W&B run info fetch failed for project={project!r}: {exc}")
         return {}
 
 

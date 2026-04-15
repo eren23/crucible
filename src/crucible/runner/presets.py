@@ -139,7 +139,7 @@ def get_preset(
         try:
             cfg = load_config()
             yaml_presets = cfg.presets or {}
-        except Exception:
+        except (OSError, ValueError):
             yaml_presets = {}
 
     builtin = PRESET_DEFAULTS.get(name)
@@ -170,7 +170,7 @@ def list_presets(
     try:
         cfg = project_config or load_config()
         yaml_presets = cfg.presets or {}
-    except Exception:
+    except (OSError, ValueError):
         pass
     return sorted(set(PRESET_DEFAULTS) | set(yaml_presets))
 

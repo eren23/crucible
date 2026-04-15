@@ -563,9 +563,7 @@ def bootstrap_node(
             )
 
     # Build a probe command from project config. Returns None if no
-    # probe is configured (in which case data bootstrap is a no-op —
-    # previously this used hardcoded fineweb paths that silently
-    # failed for non-LM projects).
+    # probe is configured (data bootstrap is a no-op for unconfigured projects).
     probe_command = _build_data_probe_command(proj_cfg, workspace, py)
 
     data_probe: Any = None
@@ -675,8 +673,8 @@ def bootstrap_project(
         # Uses pkill to find python training scripts in the workspace
         cleanup_cmd = f"pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
         remote_exec(node, cleanup_cmd, check=False, timeout=15)
-    except Exception:
-        pass  # Non-fatal: cleanup is best-effort
+    except Exception as exc:
+        log_warn(f"{name}: process cleanup failed (non-fatal): {exc}")
 
     # 1. Clone or update repo
     log_step(f"{name}: cloning {spec.repo} (branch={spec.branch})")

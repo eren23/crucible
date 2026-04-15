@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from crucible.core.log import log_warn
+
 
 # Simple in-memory cache with 1-hour TTL
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
@@ -49,7 +51,10 @@ def _search_via_hub(query: str, limit: int) -> list[dict[str, Any]] | None:
                 break
             papers.append(_normalize_paper(p))
         return papers
-    except Exception:
+    except ImportError:
+        return None
+    except Exception as exc:
+        log_warn(f"Literature search via huggingface_hub failed: {exc}")
         return None
 
 
@@ -79,7 +84,8 @@ def _search_via_api(query: str, limit: int) -> list[dict[str, Any]]:
                 }
             )
         return papers
-    except Exception:
+    except Exception as exc:
+        log_warn(f"Literature search via HTTP API failed: {exc}")
         return []
 
 
@@ -107,8 +113,10 @@ def get_paper_detail(paper_id: str) -> dict[str, Any] | None:
         api = HfApi()
         p = api.paper_info(paper_id)
         return _normalize_paper(p)
-    except Exception:
+    except ImportError:
         pass
+    except Exception as exc:
+        log_warn(f"Paper detail fetch via huggingface_hub failed for {paper_id!r}: {exc}")
     try:
         url = f"https://huggingface.co/api/papers/{urllib.request.quote(paper_id)}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -124,7 +132,8 @@ def get_paper_detail(paper_id: str) -> dict[str, Any] | None:
             "github_repo": data.get("github_repo", ""),
             "keywords": data.get("ai_keywords", []),
         }
-    except Exception:
+    except Exception as exc:
+        log_warn(f"Paper detail fetch via HTTP API failed for {paper_id!r}: {exc}")
         return None
 
 

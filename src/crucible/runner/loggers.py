@@ -139,8 +139,9 @@ class MultiLogger(TrainingLogger):
         for logger in self.loggers:
             try:
                 logger.finish(exit_code=exit_code)
-            except Exception:
-                pass  # Ensure all loggers get finalized even if one raises
+            except Exception as exc:
+                from crucible.core.log import log_warn
+                log_warn(f"Logger {type(logger).__name__} finish() failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
