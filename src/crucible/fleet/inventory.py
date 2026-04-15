@@ -8,7 +8,6 @@ from typing import Any
 
 from crucible.core.errors import FleetError
 from crucible.core.io import atomic_write_json
-from crucible.core.log import utc_now_iso
 from crucible.core.types import NodeRecord
 from crucible.fleet.sync import ssh_ok
 

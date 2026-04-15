@@ -14,7 +14,7 @@ from typing import Any
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
 from crucible.core.hub import HubStore
-from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.core.log import log_step, log_success, log_warn, utc_now_iso
 from crucible.core.types import NodeRecord
 from crucible.fleet.day_run import append_event
 from crucible.fleet.inventory import (

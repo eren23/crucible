@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Type
+from typing import Any, Callable
 
 _REGISTRY: dict[str, Callable[..., Any]] = {}
 _REGISTRY_META: dict[str, dict] = {}

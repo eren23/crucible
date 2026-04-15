@@ -9,7 +9,6 @@ import os
 import re
 from typing import Any, Protocol
 
-from crucible.core.errors import ResearcherError
 
 
 class LLMClient(Protocol):

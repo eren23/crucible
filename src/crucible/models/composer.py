@@ -281,7 +281,6 @@ class EncoderDecoderSkipPattern(StackPattern):
         }
 
     def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
-        import torch
         num_encoder = extra["_num_encoder"]
         num_decoder = extra["_num_decoder"]
         skip_weights = extra["skip_weights"]

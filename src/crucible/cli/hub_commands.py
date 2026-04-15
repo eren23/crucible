@@ -73,7 +73,7 @@ def _cmd_link(args: argparse.Namespace) -> None:
 
     config = load_config()
     hub = _get_hub(args)
-    entry = hub.link_project(config.name, config.project_root)
+    hub.link_project(config.name, config.project_root)
     print(f"Linked project '{config.name}' at {config.project_root}")
 
 

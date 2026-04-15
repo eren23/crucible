@@ -27,14 +27,13 @@ import numpy as np
 import sentencepiece as spm
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # Crucible training modules (siblings)
 from crucible.training.hyperparams import Hyperparameters
-from crucible.training.muon import Muon, zeropower_via_newtonschulz5
-from crucible.training.data_loader import DistributedTokenLoader, TokenStream, load_data_shard
+from crucible.training.muon import zeropower_via_newtonschulz5
+from crucible.training.data_loader import DistributedTokenLoader
 from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
 from crucible.training.quantization import (
     CONTROL_TENSOR_NAME_PATTERNS,

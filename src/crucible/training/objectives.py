@@ -105,8 +105,6 @@ class CompositeObjective(TrainingObjective):
     def compute(
         self, predictions: dict[str, Any], targets: dict[str, Any]
     ) -> dict[str, Any]:
-        import torch
-
         total_loss = None
         result: dict[str, Any] = {}
         for weight, obj in self.objectives:

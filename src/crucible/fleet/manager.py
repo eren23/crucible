@@ -9,12 +9,10 @@ from typing import Any
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import ConfigError
 from crucible.core.experiment_contract import validate_experiment_contract
-from crucible.core.io import atomic_write_json, read_jsonl
+from crucible.core.io import atomic_write_json
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.bootstrap import (
-    BOOTSTRAP_ATTEMPTS,
     bootstrap_node,
-    bootstrap_node_worker,
     start_bootstrap_supervisor,
 )
 from crucible.fleet.day_run import (
@@ -44,17 +42,13 @@ from crucible.fleet.queue import (
     load_queue,
     load_wave_spec,
     prepare_wave_experiments,
-    reconcile_queue_with_results,
     reset_queue,
-    results_by_id,
-    save_queue,
 )
 from crucible.fleet.scheduler import (
     collect_from_node,
     dispatch,
     load_baseline_curve,
     merge_results,
-    refresh_and_save_nodes,
     run_wave,
 )
 

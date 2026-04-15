@@ -9,7 +9,7 @@ import argparse
 import sys
 from typing import Any
 
-from crucible.core.errors import CrucibleError, TapError
+from crucible.core.errors import CrucibleError
 
 
 def _get_tap_manager(args: argparse.Namespace) -> Any:

@@ -1,8 +1,6 @@
 """Post-experiment reflection: compare predictions to outcomes, update beliefs."""
 from __future__ import annotations
 
-from typing import Any
-
 from crucible.researcher.llm_client import LLMClient, parse_json_from_text
 from crucible.researcher.state import ResearchState
 

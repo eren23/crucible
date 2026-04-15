@@ -1,13 +1,11 @@
 """Export experiment results: top configs, ranked tables, markdown summaries."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 from crucible.core.config import ProjectConfig
-from crucible.core.io import atomic_write_json, _json_ready
-from crucible.core.log import log_info, log_step, log_warn
+from crucible.core.io import atomic_write_json
+from crucible.core.log import log_step, log_warn
 from crucible.core.types import ExperimentResult
 
 from crucible.analysis.results import completed_results

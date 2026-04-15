@@ -58,7 +58,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
     tags = getattr(args, "tags", None) or []
 
     try:
-        meta = hub.create_track(name, description=description, tags=tags)
+        hub.create_track(name, description=description, tags=tags)
         print(f"Track '{name}' created.")
         if description:
             print(f"  Description: {description}")
