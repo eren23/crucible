@@ -9,6 +9,7 @@ from typing import Any
 from crucible.core.errors import ConfigError
 from crucible.core.io import read_jsonl, write_jsonl
 from crucible.core.log import utc_now_iso, utc_stamp
+from crucible.core.types import ExperimentConfig, ExperimentResult, NodeRecord, QueueItem
 
 
 # ---------------------------------------------------------------------------
@@ -25,12 +26,12 @@ def make_run_id(name: str) -> str:
 # Queue persistence
 # ---------------------------------------------------------------------------
 
-def load_queue(path: Path) -> list[dict[str, Any]]:
+def load_queue(path: Path) -> list[QueueItem]:
     """Read the fleet queue from a JSONL file."""
-    return read_jsonl(path)
+    return read_jsonl(path)  # type: ignore[return-value]
 
 
-def save_queue(path: Path, rows: list[dict[str, Any]]) -> None:
+def save_queue(path: Path, rows: list[QueueItem]) -> None:
     """Write the entire fleet queue atomically."""
     write_jsonl(path, rows)
 
@@ -60,10 +61,10 @@ def purge_finished(path: Path) -> int:
 
 def enqueue_experiments(
     queue_path: Path,
-    experiments: list[dict[str, Any]],
+    experiments: list[ExperimentConfig],
     *,
     limit: int = 0,
-) -> list[dict[str, Any]]:
+) -> list[QueueItem]:
     """Append new experiments to the queue, skipping duplicates.
 
     Duplicate detection uses ``(experiment_name, tier)`` as the key.
@@ -113,9 +114,9 @@ def enqueue_experiments(
 # ---------------------------------------------------------------------------
 
 def reconcile_queue_with_results(
-    rows: list[dict[str, Any]],
-    result_index: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
+    rows: list[QueueItem],
+    result_index: dict[str, ExperimentResult],
+) -> list[QueueItem]:
     """Match queue items with collected results and update lease states."""
     updated: list[dict[str, Any]] = []
     for item in rows:
@@ -132,7 +133,7 @@ def reconcile_queue_with_results(
 # Queue summary helpers
 # ---------------------------------------------------------------------------
 
-def summarize_queue(rows: list[dict[str, Any]], *, wave_name: str | None = None) -> dict[str, int]:
+def summarize_queue(rows: list[QueueItem], *, wave_name: str | None = None) -> dict[str, int]:
     """Return aggregate counts for the queue (optionally scoped to a wave)."""
     scoped = [row for row in rows if wave_name is None or row.get("wave") == wave_name]
     return {
@@ -150,8 +151,8 @@ def summarize_queue(rows: list[dict[str, Any]], *, wave_name: str | None = None)
 
 
 def summarize_idle_capacity(
-    nodes: list[dict[str, Any]],
-    queue: list[dict[str, Any]],
+    nodes: list[NodeRecord],
+    queue: list[QueueItem],
     *,
     wave_name: str | None = None,
 ) -> dict[str, int]:
@@ -171,16 +172,16 @@ def summarize_idle_capacity(
     return {"nodes_ready_idle": len(ready_idle)}
 
 
-def wave_rows(queue: list[dict[str, Any]], wave_name: str) -> list[dict[str, Any]]:
+def wave_rows(queue: list[QueueItem], wave_name: str) -> list[QueueItem]:
     """Filter queue to items belonging to a specific wave."""
     return [row for row in queue if row.get("wave") == wave_name]
 
 
 def wave_result_rows(
-    queue: list[dict[str, Any]],
-    result_index: dict[str, dict[str, Any]],
+    queue: list[QueueItem],
+    result_index: dict[str, ExperimentResult],
     wave_name: str,
-) -> list[dict[str, Any]]:
+) -> list[ExperimentResult]:
     """Collect actual result dicts for completed items in a wave."""
     rows = []
     for item in wave_rows(queue, wave_name):
@@ -190,7 +191,7 @@ def wave_result_rows(
     return rows
 
 
-def results_by_id(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def results_by_id(rows: list[ExperimentResult]) -> dict[str, ExperimentResult]:
     """Index results by their ``id`` field."""
     return {row["id"]: row for row in rows if "id" in row}
 
@@ -199,7 +200,7 @@ def results_by_id(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 # Spec loading
 # ---------------------------------------------------------------------------
 
-def load_wave_spec(path: Path, *, default_backend: str = "torch") -> list[dict[str, Any]]:
+def load_wave_spec(path: Path, *, default_backend: str = "torch") -> list[ExperimentConfig]:
     """Load and validate a JSON wave/spec file.
 
     Each entry must have ``name`` (str) and ``config`` (dict).
@@ -210,7 +211,7 @@ def load_wave_spec(path: Path, *, default_backend: str = "torch") -> list[dict[s
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise ConfigError(f"Spec file must contain a JSON array: {path}")
-    normalized: list[dict[str, Any]] = []
+    normalized: list[ExperimentConfig] = []
     inferred_wave = path.stem
     for idx, entry in enumerate(payload, 1):
         if not isinstance(entry, dict):
@@ -238,10 +239,10 @@ def load_wave_spec(path: Path, *, default_backend: str = "torch") -> list[dict[s
 
 
 def prepare_wave_experiments(
-    experiments: list[dict[str, Any]],
+    experiments: list[ExperimentConfig],
     *,
     extra_tags: list[str],
-) -> list[dict[str, Any]]:
+) -> list[ExperimentConfig]:
     """Clone experiments with additional tags merged in (preserving order)."""
     prepared: list[dict[str, Any]] = []
     for exp in experiments:

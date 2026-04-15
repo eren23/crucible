@@ -12,6 +12,7 @@ from typing import Any
 from crucible.core.errors import RunnerError
 from crucible.core.io import read_jsonl
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.core.types import ExperimentConfig, ExperimentResult, NodeRecord, QueueItem
 from crucible.fleet.bootstrap import bootstrap_node, bootstrap_node_worker
 from crucible.fleet.day_run import append_event, record_day_progress, write_day_leaderboard
 from crucible.fleet.inventory import (
@@ -46,8 +47,8 @@ REMOTE_LOG_DIR = "logs"
 # ---------------------------------------------------------------------------
 
 def launch_experiment(
-    node: dict[str, Any],
-    item: dict[str, Any],
+    node: NodeRecord,
+    item: QueueItem,
     *,
     run_script: str = "crucible/runner/run_experiment.py",
     timeout_map: dict[str, dict[str, int]] | None = None,
@@ -107,14 +108,14 @@ def launch_experiment(
 # ---------------------------------------------------------------------------
 
 def dispatch(
-    nodes: list[dict[str, Any]],
-    queue: list[dict[str, Any]],
+    nodes: list[NodeRecord],
+    queue: list[QueueItem],
     *,
     queue_path: Path,
     max_assignments: int,
     run_script: str = "crucible/runner/run_experiment.py",
     timeout_map: dict[str, dict[str, int]] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[QueueItem]:
     """Assign queued (or retryable) runs to idle ready nodes.
 
     Returns the updated queue.
@@ -163,7 +164,7 @@ def dispatch(
 # ---------------------------------------------------------------------------
 
 def collect_from_node(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     fleet_runs_dir: Path,
     results_file_rel: str = "experiments.jsonl",
@@ -207,13 +208,13 @@ def recover_running_leases(
     *,
     day_dir: Path,
     summary: dict[str, Any],
-    queue: list[dict[str, Any]],
+    queue: list[QueueItem],
     queue_path: Path,
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     wave_name: str,
-    result_index: dict[str, dict[str, Any]],
+    result_index: dict[str, ExperimentResult],
     max_attempts_per_run: int,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[QueueItem], int]:
     """Detect leases on dead nodes and mark them retryable (or exhausted)."""
     node_state = {n["name"]: str(n.get("state") or "").lower() for n in nodes}
     changed = 0
@@ -324,9 +325,9 @@ def early_stop_underperformers(
     *,
     day_dir: Path,
     wave_name: str,
-    queue: list[dict[str, Any]],
+    queue: list[QueueItem],
     queue_path: Path,
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     baseline_curve: list[tuple[int, float]],
     step_threshold: int = 6000,
     margin: float = 0.05,
@@ -385,7 +386,7 @@ def early_stop_underperformers(
 # ---------------------------------------------------------------------------
 
 def pending_capacity_need(
-    queue: list[dict[str, Any]], *, wave_name: str, dispatch_limit: int,
+    queue: list[QueueItem], *, wave_name: str, dispatch_limit: int,
 ) -> int:
     """How many nodes are needed to serve the remaining wave queue."""
     active = [
@@ -395,16 +396,16 @@ def pending_capacity_need(
     return min(dispatch_limit, len(active))
 
 
-def live_capacity_gap(*, nodes: list[dict[str, Any]], target_total: int) -> int:
+def live_capacity_gap(*, nodes: list[NodeRecord], target_total: int) -> int:
     return max(0, target_total - len(nodes))
 
 
 def bootstrap_recovery_candidates(
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     *,
-    wave_queue: list[dict[str, Any]],
+    wave_queue: list[QueueItem],
     limit: int,
-) -> list[dict[str, Any]]:
+) -> list[NodeRecord]:
     """Find nodes that could be re-bootstrapped to fill capacity."""
     from crucible.fleet.sync import ssh_ok
 
@@ -433,9 +434,9 @@ def recover_bootstrap_incomplete_nodes(
     *,
     day_dir: Path,
     wave_name: str,
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     nodes_file: Path,
-    queue: list[dict[str, Any]],
+    queue: list[QueueItem],
     project_root: Path,
     sync_excludes: list[str],
     train_shards: int,
@@ -443,7 +444,7 @@ def recover_bootstrap_incomplete_nodes(
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
+) -> list[NodeRecord]:
     """Try to bootstrap partially-ready nodes when more capacity is needed."""
     wq = wave_rows(queue, wave_name)
     if not any(row.get("lease_state") in {"queued", "retryable"} for row in wq):
@@ -482,11 +483,11 @@ def recover_bootstrap_incomplete_nodes(
 # ---------------------------------------------------------------------------
 
 def refresh_and_save_nodes(
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     *,
     nodes_file: Path,
     refresh_fn: Any = None,
-) -> list[dict[str, Any]]:
+) -> list[NodeRecord]:
     """Refresh node records from provider API, classify health, and save."""
     from crucible.fleet.inventory import merge_node_snapshots, load_nodes_if_exists
 
@@ -513,8 +514,8 @@ def run_wave(
     day_dir: Path,
     summary: dict[str, Any],
     wave_name: str,
-    experiments: list[dict[str, Any]],
-    nodes: list[dict[str, Any]],
+    experiments: list[ExperimentConfig],
+    nodes: list[NodeRecord],
     nodes_file: Path,
     queue_path: Path,
     fleet_runs_dir: Path,
@@ -535,7 +536,7 @@ def run_wave(
     results_file_rel: str = "experiments.jsonl",
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[ExperimentResult], list[NodeRecord]]:
     """Run a single wave: enqueue, dispatch, monitor, collect, until done.
 
     Returns ``(results_for_wave, updated_nodes)``.

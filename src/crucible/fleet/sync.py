@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from crucible.core.types import NodeRecord
+
 
 # ---------------------------------------------------------------------------
 # Subprocess wrapper
@@ -33,7 +35,7 @@ def _run(
 # SSH / rsync building blocks
 # ---------------------------------------------------------------------------
 
-def ssh_base(node: dict[str, Any]) -> list[str]:
+def ssh_base(node: NodeRecord) -> list[str]:
     """Build the base ``ssh`` command list for a node."""
     ssh_key = str(Path(node.get("ssh_key", "~/.ssh/id_ed25519")).expanduser())
     return [
@@ -48,7 +50,7 @@ def ssh_base(node: dict[str, Any]) -> list[str]:
     ]
 
 
-def scp_to_node(node: dict[str, Any], local_path: str, remote_path: str) -> None:
+def scp_to_node(node: NodeRecord, local_path: str, remote_path: str) -> None:
     """Copy a local file to a remote node via scp."""
     ssh_key = str(Path(node.get("ssh_key", "~/.ssh/id_ed25519")).expanduser())
     port = str(node.get("ssh_port", 22))
@@ -67,7 +69,7 @@ def scp_to_node(node: dict[str, Any], local_path: str, remote_path: str) -> None
     _run(cmd, check=True)
 
 
-def rsync_base(node: dict[str, Any]) -> list[str]:
+def rsync_base(node: NodeRecord) -> list[str]:
     """Build the base ``rsync`` command list for a node."""
     ssh_key = str(Path(node.get("ssh_key", "~/.ssh/id_ed25519")).expanduser())
     ssh_cmd = " ".join([
@@ -93,7 +95,7 @@ def rsync_base(node: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def remote_exec(
-    node: dict[str, Any],
+    node: NodeRecord,
     command: str,
     *,
     check: bool = True,
@@ -103,7 +105,7 @@ def remote_exec(
     return _run(ssh_base(node) + [command], check=check, timeout=timeout)
 
 
-def remote_python(node: dict[str, Any], code: str) -> subprocess.CompletedProcess[str]:
+def remote_python(node: NodeRecord, code: str) -> subprocess.CompletedProcess[str]:
     """Execute a Python snippet on a remote node."""
     py = shlex.quote(node.get("python_bin", "python3"))
     workspace = shlex.quote(node.get("workspace_path", "/workspace/project"))
@@ -112,7 +114,7 @@ def remote_python(node: dict[str, Any], code: str) -> subprocess.CompletedProces
 
 
 def checked_remote_exec(
-    node: dict[str, Any],
+    node: NodeRecord,
     label: str,
     command: str,
     *,
@@ -137,7 +139,7 @@ def checked_remote_exec(
 # SSH connectivity probe
 # ---------------------------------------------------------------------------
 
-def ssh_ok(node: dict[str, Any]) -> bool:
+def ssh_ok(node: NodeRecord) -> bool:
     """Return True if we can reach the node over SSH."""
     if not node.get("ssh_host"):
         return False
@@ -183,7 +185,7 @@ def _classify_ssh_failure(
 
 
 def wait_for_ssh_ready(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     max_attempts: int = 6,
     backoff_base: int = 5,
@@ -277,7 +279,7 @@ def wait_for_ssh_ready(
 # ---------------------------------------------------------------------------
 
 def sync_repo(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     project_root: Path,
     sync_excludes: list[str],
@@ -307,7 +309,7 @@ def sync_repo(
 
 
 def sync_taps(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     expected_shas: dict[str, str] | None = None,
 ) -> None:
@@ -370,7 +372,7 @@ def sync_taps(
 
 
 def sync_env_file(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     project_root: Path,
 ) -> None:
@@ -402,7 +404,7 @@ _SENSITIVE_PATTERNS = ("_SECRET", "_PRIVATE", "_CREDENTIAL")
 
 
 def write_remote_env(
-    node: dict[str, Any],
+    node: NodeRecord,
     env_forward: list[str],
     env_set: dict[str, str],
     workspace: str,

@@ -31,6 +31,7 @@ from crucible.core.io import append_jsonl, read_jsonl, _json_ready
 from crucible.core.log import log_info, log_warn
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
+from crucible.core.types import ExperimentResult
 from crucible.runner.output_parser import (
     OutputParser,
     classify_failure,
@@ -159,7 +160,7 @@ def run_experiment(
     project_config: ProjectConfig | None = None,
     results_file: str | Path | None = None,
     parser: OutputParser | None = None,
-) -> dict[str, Any]:
+) -> ExperimentResult:
     """Run a single training experiment as a monitored subprocess.
 
     Args:
@@ -177,9 +178,9 @@ def run_experiment(
         parser: Custom OutputParser (default patterns if None).
 
     Returns:
-        Result dict with keys: id, name, timestamp, backend, preset,
-        config, result, model_bytes, status, tags, error, failure_class,
-        returncode, log_path, status_path, manifest_path.
+        ExperimentResult dict with keys: id, name, timestamp, backend,
+        preset, config, result, model_bytes, status, tags, error,
+        failure_class, returncode, log_path, status_path, manifest_path.
     """
     # -- Resolve project config and paths --
     if project_config is None:
