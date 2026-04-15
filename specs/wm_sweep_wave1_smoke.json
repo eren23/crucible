@@ -1,0 +1,264 @@
+[
+  {
+    "name": "kwm-token-baseline",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "kernelwm", "baseline"],
+    "config": {
+      "WM_HDF5_PATH": "kernel_pairs_v3.h5",
+      "WM_DELTA_STATESPACE": "0",
+      "WM_EARLY_READOUT": "0",
+      "ACTION_DIM": "12",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "kwm-token-baseline",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "kwm-dense-baseline",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "kernelwm", "dense"],
+    "config": {
+      "WM_HDF5_PATH": "kernel_pairs_v3.h5",
+      "WM_DELTA_STATESPACE": "0",
+      "KWM_DENSE": "1",
+      "ACTION_DIM": "12",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "kwm-dense-baseline",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "kwm-delta-statespace",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "kernelwm", "delta"],
+    "config": {
+      "WM_HDF5_PATH": "kernel_pairs_v3.h5",
+      "WM_DELTA_STATESPACE": "1",
+      "WM_EARLY_READOUT": "1",
+      "WM_EARLY_READOUT_LOOPS": "1,2,3",
+      "ACTION_DIM": "12",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "kwm-delta-statespace",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "kwm-dense-delta",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "kernelwm", "dense", "delta"],
+    "config": {
+      "WM_HDF5_PATH": "kernel_pairs_v3.h5",
+      "WM_DELTA_STATESPACE": "1",
+      "KWM_DENSE": "1",
+      "WM_EARLY_READOUT": "1",
+      "WM_EARLY_READOUT_LOOPS": "1,2,3",
+      "ACTION_DIM": "12",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "kwm-dense-delta",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-encoder-loops3",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "early-loop"],
+    "config": {
+      "WM_ENCODER_LOOPS": "3",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-encoder-loops3",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-encoder-loops2",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "early-loop"],
+    "config": {
+      "WM_ENCODER_LOOPS": "2",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-encoder-loops2",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-unit-delta",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "prediction-target"],
+    "config": {
+      "WM_DELTA_STATESPACE": "1",
+      "WM_DELTA_NORMALIZE_LOSS": "1",
+      "WM_DELTA_UNIT_TARGET": "1",
+      "WM_EARLY_READOUT": "1",
+      "WM_EARLY_READOUT_LOOPS": "1,2,3",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-unit-delta",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-lowrank-r8",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture"],
+    "config": {
+      "WM_PRED_BOTTLENECK": "8",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-lowrank-r8",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-lowrank-r16",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture"],
+    "config": {
+      "WM_PRED_BOTTLENECK": "16",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-lowrank-r16",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-pred-d1-l3",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture"],
+    "config": {
+      "WM_PREDICTOR_DEPTH": "1",
+      "WM_NUM_LOOPS": "3",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-pred-d1-l3",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-pred-d1-l6",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture"],
+    "config": {
+      "WM_PREDICTOR_DEPTH": "1",
+      "WM_NUM_LOOPS": "6",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-pred-d1-l6",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-contrastive-only",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "contrastive"],
+    "config": {
+      "WM_LAMBDA_CONTRAST": "1.0",
+      "WM_LAMBDA_PRED": "0.0",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-contrastive-only",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-dim256-l8",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture", "wider"],
+    "config": {
+      "WM_MODEL_DIM": "256",
+      "WM_NUM_HEADS": "8",
+      "WM_NUM_LOOPS": "8",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-dim256-l8",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-dim256-l4",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "architecture", "wider"],
+    "config": {
+      "WM_MODEL_DIM": "256",
+      "WM_NUM_HEADS": "8",
+      "WM_NUM_LOOPS": "4",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-dim256-l4",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-concat-early-late",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "multi-resolution"],
+    "config": {
+      "WM_CONCAT_EARLY_LATE": "1",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-concat-early-late",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-filter-struct",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "data-filter"],
+    "config": {
+      "WM_FILTER_STRUCTURAL": "1",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-filter-struct",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-filter-large-delta",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "data-filter"],
+    "config": {
+      "WM_FILTER_LARGE_DELTA": "1",
+      "WM_FILTER_DELTA_PERCENTILE": "50",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-filter-large-delta",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  },
+  {
+    "name": "codewm-progressive-readout",
+    "tier": "smoke",
+    "backend": "torch",
+    "wave": "wm-sweep-w1",
+    "tags": ["wm-sweep", "wave1", "codewm", "early-loop"],
+    "config": {
+      "WM_PROGRESSIVE_READOUT": "1",
+      "WM_EARLY_READOUT_LOOPS": "1,2,3",
+      "WM_STEPS": "400",
+      "WANDB_RUN_NAME": "codewm-progressive-readout",
+      "WANDB_PROJECT": "crucible-wm-sweep"
+    }
+  }
+]
