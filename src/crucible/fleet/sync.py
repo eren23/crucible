@@ -281,8 +281,21 @@ def sync_repo(
     *,
     project_root: Path,
     sync_excludes: list[str],
-) -> None:
-    """Rsync the project directory to a remote node."""
+    enforce_clean: bool = True,
+    auto_commit: bool = False,
+) -> str | None:
+    """Rsync the project directory to a remote node.
+
+    When *enforce_clean* is True (default), verifies the working tree is
+    committed before syncing.  Returns the git SHA that was synced, or
+    None if enforcement is disabled / not in a git repo.
+    """
+    git_sha: str | None = None
+    if enforce_clean:
+        from crucible.runner.fingerprint import ensure_clean_commit
+
+        git_sha = ensure_clean_commit(project_root, auto_commit=auto_commit)
+
     workspace = node.get("workspace_path", "/workspace/project")
     destination = f"{node.get('user', 'root')}@{node['ssh_host']}:{workspace}/"
     cmd = rsync_base(node)
@@ -290,14 +303,22 @@ def sync_repo(
         cmd.extend(["--exclude", item])
     cmd.extend([str(project_root) + "/", destination])
     _run(cmd, check=True)
+    return git_sha
 
 
-def sync_taps(node: dict[str, Any]) -> None:
+def sync_taps(
+    node: dict[str, Any],
+    *,
+    expected_shas: dict[str, str] | None = None,
+) -> None:
     """Rsync crucible-hub taps to a remote node.
 
     Syncs each tap directory under ``~/.crucible-hub/taps/`` to
     ``/workspace/<tap_name>/`` on the remote node, making tap architectures,
     launchers, and data available for external project training.
+
+    When *expected_shas* is provided, verifies each tap's local git SHA
+    matches before syncing.  Mismatches are logged as warnings.
 
     Best-effort: logs a warning on failure instead of aborting bootstrap.
     """
@@ -308,6 +329,20 @@ def sync_taps(node: dict[str, Any]) -> None:
     host = node.get("ssh_host")
     if not host:
         return
+    # Verify tap SHAs if expected
+    if expected_shas:
+        from crucible.core.log import log_warn
+        from crucible.runner.fingerprint import safe_git_sha
+
+        for tap_name, expected in expected_shas.items():
+            tap_dir = taps_dir / tap_name
+            if tap_dir.is_dir():
+                actual = safe_git_sha(tap_dir)
+                if actual and actual != expected:
+                    log_warn(
+                        f"sync_taps: tap {tap_name} SHA mismatch "
+                        f"(local={actual[:8]}, expected={expected[:8]})"
+                    )
     for tap in sorted(taps_dir.iterdir()):
         if not tap.is_dir() or tap.name.startswith("."):
             continue

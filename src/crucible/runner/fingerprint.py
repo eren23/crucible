@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def safe_git_sha(project_root: Path) -> str | None:
@@ -60,6 +61,43 @@ def safe_git_branch(project_root: Path) -> str | None:
     return branch or None
 
 
+def ensure_clean_commit(
+    project_root: Path,
+    *,
+    auto_commit: bool = False,
+) -> str:
+    """Ensure working tree is committed.  Returns HEAD SHA.
+
+    When *auto_commit* is True and the tree is dirty, creates a snapshot
+    commit.  When False and dirty, raises RuntimeError.
+    """
+    dirty = safe_git_dirty(project_root)
+    if dirty and not auto_commit:
+        raise RuntimeError(
+            "Working tree has uncommitted changes. Either commit them or "
+            "set auto_commit_versions: true in crucible.yaml to auto-snapshot."
+        )
+    if dirty and auto_commit:
+        from crucible.core.log import utc_now_iso
+
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=project_root,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"crucible: auto-snapshot {utc_now_iso()}"],
+            cwd=project_root,
+            capture_output=True,
+            check=True,
+        )
+    sha = safe_git_sha(project_root)
+    if sha is None:
+        raise RuntimeError("Not in a git repository — cannot verify code identity.")
+    return sha
+
+
 def code_fingerprint(
     project_root: Path,
     extra_files: tuple[str, ...] | list[str] | None = None,
@@ -97,7 +135,7 @@ def _discover_files(project_root: Path) -> list[str]:
 
     Looks for:
       - train*.py in project root
-      - Any .py files in src/ directory (first level only)
+      - Any .py files in src/ directory (recursive)
     """
     found: list[str] = []
 
@@ -105,10 +143,47 @@ def _discover_files(project_root: Path) -> list[str]:
     for p in project_root.glob("train*.py"):
         found.append(p.relative_to(project_root).as_posix())
 
-    # Source files one level deep in src/
+    # Source files recursively in src/
     src_dir = project_root / "src"
     if src_dir.is_dir():
-        for p in src_dir.glob("*.py"):
+        for p in src_dir.glob("**/*.py"):
             found.append(p.relative_to(project_root).as_posix())
 
     return sorted(found)
+
+
+def build_run_manifest(project_root: Path) -> dict[str, Any]:
+    """Build a cryptographic identity of the current code + data state.
+
+    The manifest is stored in queue entries and verified at dispatch time
+    to guarantee code consistency across experiments.
+    """
+    fp = code_fingerprint(project_root)
+
+    # Tap versions
+    tap_versions: dict[str, str] = {}
+    hub_taps = Path.home() / ".crucible-hub" / "taps"
+    if hub_taps.is_dir():
+        for tap_dir in hub_taps.iterdir():
+            if tap_dir.is_dir() and (tap_dir / ".git").exists():
+                sha = safe_git_sha(tap_dir)
+                if sha:
+                    tap_versions[tap_dir.name] = sha
+
+    # Data manifest checksum
+    data_checksum: str | None = None
+    manifest_path = project_root / "data" / "manifest.json"
+    if manifest_path.is_file():
+        data_checksum = hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest()[:16]
+
+    return {
+        "git_sha": safe_git_sha(project_root),
+        "git_dirty": safe_git_dirty(project_root),
+        "git_branch": safe_git_branch(project_root),
+        "code_fingerprint": fp["fingerprint"],
+        "code_files": fp["files"],
+        "tap_versions": tap_versions,
+        "data_manifest_checksum": data_checksum,
+    }

@@ -77,6 +77,11 @@ def launch_experiment(
     cmd += ["--set", f"CRUCIBLE_EXECUTION_PROVIDER={node.get('provider', 'runpod')}"]
     cmd += ["--set", f"GPU_COUNT={gpu_count}"]
     cmd += ["--set", "CRUCIBLE_ENFORCE_CONTRACT=1"]
+    manifest = item.get("run_manifest") or {}
+    if manifest.get("git_sha"):
+        cmd += ["--set", f"CRUCIBLE_EXPECTED_GIT_SHA={manifest['git_sha']}"]
+    if manifest.get("code_fingerprint"):
+        cmd += ["--set", f"CRUCIBLE_EXPECTED_FINGERPRINT={manifest['code_fingerprint']}"]
     for key, value in item["config"].items():
         cmd += ["--set", f"{key}={value}"]
 
@@ -129,6 +134,16 @@ def dispatch(
         node = next((n for n in idle_nodes if n["name"] not in active_names), None)
         if node is None:
             break
+        # Verify code version matches if manifest present
+        manifest = item.get("run_manifest") or {}
+        expected_sha = manifest.get("git_sha")
+        if expected_sha and node.get("git_sha") != expected_sha:
+            log_warn(
+                f"dispatch: skipping {node['name']} for {item['experiment_name']} — "
+                f"code SHA mismatch (node={node.get('git_sha', '?')[:8]}, "
+                f"expected={expected_sha[:8]})"
+            )
+            continue
         pid = launch_experiment(
             node, item, run_script=run_script, timeout_map=timeout_map,
         )

@@ -74,12 +74,45 @@ class AutonomousResearcher:
 
             try:
                 analysis = self.analyze()
+
+                # Literature awareness (best-effort, never blocks the loop)
+                literature_context = ""
+                try:
+                    from crucible.researcher.literature import (
+                        format_literature_context,
+                        search_papers,
+                        suggest_queries,
+                    )
+
+                    queries = suggest_queries(
+                        self._get_program_text(),
+                        self.state.beliefs,
+                        self.state.get_findings() if hasattr(self.state, "get_findings") else [],
+                    )
+                    all_papers: list[dict[str, Any]] = []
+                    seen: set[str] = set()
+                    for q in queries[:3]:
+                        for p in search_papers(q, limit=5):
+                            if p["id"] not in seen:
+                                seen.add(p["id"])
+                                all_papers.append(p)
+                    literature_context = format_literature_context(all_papers, max_papers=5)
+                    if literature_context:
+                        print(f"  Literature: found {len(all_papers)} relevant papers.")
+                except Exception:
+                    pass
+
                 if self.dry_run:
                     hypotheses = _dry_run_hypotheses(self._iteration)
                     print(f"  [DRY RUN] Generated {len(hypotheses)} fixture hypotheses.")
                 else:
                     hypotheses = generate_hypotheses(
-                        analysis, self._get_program_text(), self.state, self.llm, self._iteration
+                        analysis,
+                        self._get_program_text(),
+                        self.state,
+                        self.llm,
+                        self._iteration,
+                        literature_context=literature_context,
                     )
                 if not hypotheses:
                     print("LLM returned no hypotheses. Stopping.")

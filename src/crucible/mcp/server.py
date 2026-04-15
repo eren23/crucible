@@ -2506,6 +2506,43 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # Literature search
+    Tool(
+        name="research_literature_search",
+        description=(
+            "Search AI research papers on HuggingFace for literature relevant to "
+            "current research direction.\n\n"
+            "REQUIRES: Nothing (optional: active research state for auto mode).\n"
+            "RETURNS: {papers: [{id, title, summary, upvotes, github_repo}], "
+            "query_used, literature_context, count}\n"
+            "NEXT: design_generate_hypotheses with extra_context containing relevant papers."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query for papers. If empty and auto=true, "
+                        "queries are auto-generated from research state."
+                    ),
+                },
+                "auto": {
+                    "type": "boolean",
+                    "description": (
+                        "Auto-generate queries from research state "
+                        "(beliefs, findings, program.md). Default false."
+                    ),
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum papers to return. Default 10.",
+                    "default": 10,
+                },
+            },
+        },
+    ),
 ]
 
 

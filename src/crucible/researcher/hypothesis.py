@@ -16,6 +16,7 @@ def generate_hypotheses(
     state: ResearchState,
     llm: LLMClient,
     iteration: int,
+    literature_context: str = "",
 ) -> list[dict[str, Any]]:
     """Use an LLM to generate ranked experiment hypotheses from the current research state."""
 
@@ -37,11 +38,16 @@ def generate_hypotheses(
         "- \"family\": which model family this tests\n\n"
         "IMPORTANT: All config values must be strings. The config dict contains environment "
         "variable overrides like {\"MODEL_FAMILY\": \"looped\", \"RECURRENCE_STEPS\": \"12\"}.\n\n"
+        "If related literature is provided, use it to ground your hypotheses in established "
+        "methods. Cite specific papers when relevant. Prefer directions with published "
+        "evidence over pure speculation.\n\n"
         "Focus on the research priorities in the program document. "
         "Mix exploitation (refine what works) with exploration (test new ideas)."
     )
 
     user_prompt = f"{program_text}\n\n---\n\n{context}"
+    if literature_context:
+        user_prompt += f"\n\n---\n\n{literature_context}"
 
     response_text = llm.complete(system_prompt, user_prompt)
     if response_text is None:

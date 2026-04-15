@@ -224,14 +224,17 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     try:
         from crucible.fleet.queue import enqueue_experiments
+        from crucible.runner.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
+        manifest = build_run_manifest(config.project_root)
         experiment = {
             "name": args["name"],
             "config": args["config"],
             "tier": args.get("tier", "proxy"),
             "backend": args.get("backend", "torch"),
             "tags": args.get("tags", []),
+            "run_manifest": manifest,
             **contract,
         }
         added = enqueue_experiments(
@@ -959,8 +962,10 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     try:
         from crucible.fleet.queue import enqueue_experiments
+        from crucible.runner.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
+        manifest = build_run_manifest(config.project_root)
         batch = args.get("batch", [])
         wave_name = args.get("wave_name", "")
         if not wave_name:
@@ -969,7 +974,7 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
         experiments = []
         for exp in batch:
             exp.setdefault("wave", wave_name)
-            experiments.append({**exp, **contract})
+            experiments.append({**exp, "run_manifest": manifest, **contract})
 
         added = enqueue_experiments(
             config.project_root / "fleet_queue.jsonl",
@@ -1249,8 +1254,10 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import enqueue_experiments
         from crucible.runner.design import design_to_experiment_config
+        from crucible.runner.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
+        manifest = build_run_manifest(config.project_root)
         store = _get_store()
         design_name = args["design_name"]
 
@@ -1275,6 +1282,7 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
             "tier": exp_config.get("tier", "proxy"),
             "backend": exp_config.get("backend", "torch"),
             "tags": exp_config.get("tags", []),
+            "run_manifest": manifest,
             **contract,
         }
         added = enqueue_experiments(
@@ -1795,6 +1803,67 @@ def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except Exception as exc:
         return {"error": f"[unexpected] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Literature search tools
+# ---------------------------------------------------------------------------
+
+
+def research_literature_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search AI research papers on HuggingFace."""
+    from crucible.researcher.literature import (
+        format_literature_context,
+        search_papers,
+        suggest_queries,
+    )
+
+    query = args.get("query", "")
+    auto = args.get("auto", False)
+    limit = args.get("limit", 10)
+
+    if auto and not query:
+        # Auto-generate queries from research state
+        config = _get_config()
+        beliefs: list[str] = []
+        findings: list[dict[str, Any]] = []
+        program_text = ""
+        try:
+            from crucible.researcher.state import ResearchState
+
+            state_path = config.project_root / config.research_state_file
+            if state_path.exists():
+                state = ResearchState(state_path, budget_hours=0)
+                beliefs = state.beliefs
+                findings = state.findings
+        except Exception:
+            pass
+        try:
+            prog_path = config.project_root / config.researcher.program_file
+            if prog_path.exists():
+                program_text = prog_path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        queries = suggest_queries(program_text, beliefs, findings)
+        all_papers: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for q in queries:
+            for p in search_papers(q, limit=5):
+                if p["id"] not in seen:
+                    seen.add(p["id"])
+                    all_papers.append(p)
+        papers = all_papers[:limit]
+        query_used: Any = queries
+    else:
+        papers = search_papers(query, limit=limit)
+        query_used = query
+
+    return {
+        "papers": papers,
+        "query_used": query_used,
+        "literature_context": format_literature_context(papers),
+        "count": len(papers),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -4888,6 +4957,8 @@ TOOL_DISPATCH: dict[str, Any] = {
     # Briefing tools
     "get_research_briefing": get_research_briefing,
     "annotate_run": annotate_run,
+    # Literature search tools
+    "research_literature_search": research_literature_search,
     # Model extensibility tools
     "model_list_families": model_list_families,
     "model_list_activations": model_list_activations,

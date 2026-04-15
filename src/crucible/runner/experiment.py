@@ -240,6 +240,18 @@ def run_experiment(
         pid=None,
     )
 
+    # -- Verify code version if expected SHA was set by dispatcher --
+    expected_sha = env.get("CRUCIBLE_EXPECTED_GIT_SHA")
+    if expected_sha:
+        from crucible.runner.fingerprint import safe_git_sha
+
+        actual_sha = safe_git_sha(root)
+        if actual_sha and actual_sha != expected_sha:
+            raise RunnerError(
+                f"Code version mismatch on remote: expected {expected_sha[:8]}, "
+                f"got {actual_sha[:8]}. Re-sync code before dispatching."
+            )
+
     contract = contract_metadata(
         project_config,
         env=env,

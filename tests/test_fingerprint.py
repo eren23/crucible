@@ -7,7 +7,9 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from crucible.runner.fingerprint import (
+    build_run_manifest,
     code_fingerprint,
+    ensure_clean_commit,
     safe_git_sha,
     safe_git_dirty,
     safe_git_branch,
@@ -90,6 +92,13 @@ class TestDiscoverFiles:
         (src / "module.py").write_text("", encoding="utf-8")
         files = _discover_files(tmp_path)
         assert "src/module.py" in files
+
+    def test_discovers_nested_src_files(self, tmp_path):
+        pkg = tmp_path / "src" / "crucible" / "core"
+        pkg.mkdir(parents=True)
+        (pkg / "config.py").write_text("", encoding="utf-8")
+        files = _discover_files(tmp_path)
+        assert "src/crucible/core/config.py" in files
 
     def test_returns_sorted(self, tmp_path):
         (tmp_path / "train_z.py").write_text("", encoding="utf-8")
@@ -175,3 +184,63 @@ class TestSafeGitBranch:
     def test_returns_none_on_exception(self, mock_run):
         result = safe_git_branch(Path("/fake"))
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_clean_commit
+# ---------------------------------------------------------------------------
+
+class TestEnsureCleanCommit:
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123")
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    def test_clean_repo_returns_sha(self, mock_dirty, mock_sha):
+        result = ensure_clean_commit(Path("/fake"))
+        assert result == "abc123"
+
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123")
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=True)
+    def test_dirty_repo_raises_without_auto_commit(self, mock_dirty, mock_sha):
+        with pytest.raises(RuntimeError, match="uncommitted changes"):
+            ensure_clean_commit(Path("/fake"), auto_commit=False)
+
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value=None)
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    def test_no_git_repo_raises(self, mock_dirty, mock_sha):
+        with pytest.raises(RuntimeError, match="Not in a git repository"):
+            ensure_clean_commit(Path("/fake"))
+
+
+# ---------------------------------------------------------------------------
+# build_run_manifest
+# ---------------------------------------------------------------------------
+
+class TestBuildRunManifest:
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    def test_basic_manifest(self, mock_branch, mock_dirty, mock_sha, tmp_path):
+        (tmp_path / "train.py").write_text("code", encoding="utf-8")
+        manifest = build_run_manifest(tmp_path)
+        assert manifest["git_sha"] == "abc123def"
+        assert manifest["git_dirty"] is False
+        assert manifest["git_branch"] == "main"
+        assert "code_fingerprint" in manifest
+        assert isinstance(manifest["tap_versions"], dict)
+
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    def test_manifest_includes_data_checksum(self, mock_branch, mock_dirty, mock_sha, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "manifest.json").write_text('{"shards": 10}', encoding="utf-8")
+        manifest = build_run_manifest(tmp_path)
+        assert manifest["data_manifest_checksum"] is not None
+        assert len(manifest["data_manifest_checksum"]) == 16
+
+    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    def test_manifest_no_data_dir(self, mock_branch, mock_dirty, mock_sha, tmp_path):
+        manifest = build_run_manifest(tmp_path)
+        assert manifest["data_manifest_checksum"] is None

@@ -100,6 +100,7 @@ def enqueue_experiments(
                 "execution_provider": exp.get("execution_provider"),
                 "contract_status": exp.get("contract_status"),
                 "wandb": exp.get("wandb"),
+                "run_manifest": exp.get("run_manifest"),
             }
         )
     if added:
