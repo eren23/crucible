@@ -104,7 +104,7 @@ class JsonlLogger(TrainingLogger):
 class WandbLoggerAdapter(TrainingLogger):
     """Adapter wrapping the existing WandbLogger for the registry interface."""
 
-    def __init__(self, *, run_id: str = "", config: dict | None = None, **kwargs: Any) -> None:
+    def __init__(self, *, run_id: str = "", config: dict[str, Any] | None = None, **kwargs: Any) -> None:
         from crucible.runner.wandb_logger import WandbLogger
         self._inner = WandbLogger.create(
             run_id=run_id,
@@ -147,7 +147,7 @@ class MultiLogger(TrainingLogger):
 # Convenience API
 # ---------------------------------------------------------------------------
 
-def register_logger(name: str, factory: Any, *, source: str = "builtin") -> None:
+def register_logger(name: str, factory: type[TrainingLogger], *, source: str = "builtin") -> None:
     LOGGER_REGISTRY.register(name, factory, source=source)
 
 

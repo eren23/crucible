@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import ConfigError
 
 
-def _cfg_attr(obj: Any, name: str, default: Any) -> Any:
+def _cfg_attr(obj: object, name: str, default: object) -> Any:
     return getattr(obj, name, default)
 
 

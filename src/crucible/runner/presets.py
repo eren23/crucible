@@ -17,8 +17,6 @@ Usage::
 """
 from __future__ import annotations
 
-from typing import Any
-
 from crucible.core.config import ProjectConfig, load_config
 
 # ---------------------------------------------------------------------------
@@ -166,7 +164,7 @@ def list_presets(
     project_config: ProjectConfig | None = None,
 ) -> list[str]:
     """Return sorted list of all available preset names."""
-    yaml_presets: dict[str, Any] = {}
+    yaml_presets: dict[str, dict[str, str]] = {}
     try:
         cfg = project_config or load_config()
         yaml_presets = cfg.presets or {}

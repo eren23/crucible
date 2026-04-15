@@ -16,7 +16,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -24,6 +24,10 @@ from mcp.types import TextContent, Tool
 
 from crucible.core.env import load_env_files
 from crucible.mcp.tools import TOOL_DISPATCH
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from crucible.mcp.tracer import SessionTracer
 
 # Load .env files so secrets (RUNPOD_API_KEY, WANDB_API_KEY) are available to tools
 load_env_files(Path(__file__).resolve().parent.parent.parent.parent)
@@ -59,7 +63,7 @@ _setup_logging()
 # Session tracer (enabled via --trace flag or CRUCIBLE_TRACE=1 env var)
 # ---------------------------------------------------------------------------
 
-_tracer: Any = None  # SessionTracer | None — avoid import at module level
+_tracer: SessionTracer | None = None
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -91,7 +95,7 @@ def _format_error(exc: BaseException, tb: str | None = None) -> dict[str, Any]:
     }
 
 
-def _safe_call(fn: Any, *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
+def _safe_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
     """Call a tool handler and return (result, is_error, exception).
 
     Never raises for normal tool failures (Exception). KeyboardInterrupt, SystemExit,
@@ -207,8 +211,8 @@ _KEEPALIVE_INTERVAL = 8.0  # seconds between keepalive pings
 
 
 async def _run_with_keepalive(
-    handler: Any,
-    arguments: dict,
+    handler: Callable[..., Any],
+    arguments: dict[str, Any],
     tool_name: str,
     session: Any,
     request_id: Any,
@@ -222,7 +226,7 @@ async def _run_with_keepalive(
     Returns (result, is_error, exception) to match _safe_call signature.
     """
     done = asyncio.Event()
-    result_box: list[Any] = [None]  # holds _safe_call's 3-tuple
+    result_box: list[tuple[list[TextContent], bool, BaseException | None] | None] = [None]
     exc_box: list[BaseException | None] = [None]
 
     async def _worker() -> None:

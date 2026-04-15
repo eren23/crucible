@@ -18,11 +18,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Mapping, TYPE_CHECKING
+from collections.abc import Mapping
+from typing import Any, TYPE_CHECKING
 
 from crucible.core.io import _json_ready, read_jsonl
 
 if TYPE_CHECKING:
+    from crucible.core.config import ProjectConfig
     from crucible.runner.tracker import RunTracker
 
 
@@ -227,7 +229,7 @@ def wandb_annotate_finished_run(
         return False
 
 
-def _resolve_wandb_url(run_id: str, config: Any) -> str | None:
+def _resolve_wandb_url(run_id: str, config: ProjectConfig) -> str | None:
     """Look up W&B URL for a crucible run_id from status sidecar or results."""
     # Check logs/{run_id}.status.json for wandb.url
     try:

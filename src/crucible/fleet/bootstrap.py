@@ -7,7 +7,11 @@ import shlex
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from crucible.core.config import ProjectConfig, ProjectSpec
 
 from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.day_run import append_event
@@ -147,7 +151,7 @@ def bootstrap_step(
 def _record_step(
     node: dict[str, Any],
     step_name: str,
-    fn: Any,
+    fn: Callable[[], Any],
     *,
     required: bool = True,
 ) -> Any:
@@ -267,7 +271,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 def ensure_project_system_tools(
     node: dict[str, Any],
-    spec: Any,
+    spec: ProjectSpec,
     *,
     timeout: int,
 ) -> None:
@@ -307,7 +311,7 @@ def ensure_project_system_tools(
 
 
 def _build_data_probe_command(
-    proj_cfg: Any,
+    proj_cfg: ProjectConfig,
     workspace: str,
     py: str,
 ) -> str | None:
@@ -392,7 +396,7 @@ def _generate_paths_probe(workspace: str, py: str, paths: list[str]) -> str:
 
 
 def _legacy_fineweb_download_command(
-    proj_cfg: Any,
+    proj_cfg: ProjectConfig,
     workspace: str,
     py: str,
     train_shards: int,
@@ -649,7 +653,7 @@ def bootstrap_node(
 
 def bootstrap_project(
     node: dict[str, Any],
-    spec: Any,
+    spec: ProjectSpec,
     *,
     project_root: Path | None = None,
 ) -> dict[str, Any]:
@@ -880,8 +884,8 @@ def start_bootstrap_supervisor(
     min_ready_to_start: int,
     bootstrap_workers: int,
     replacement_budget: int,
-    replace_fn: Any = None,
-    refresh_fn: Any = None,
+    replace_fn: Callable[..., list[dict[str, Any]]] | None = None,
+    refresh_fn: Callable[..., list[dict[str, Any]]] | None = None,
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,

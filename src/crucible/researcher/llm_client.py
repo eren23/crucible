@@ -7,9 +7,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from crucible.core.errors import ResearcherError
+
+if TYPE_CHECKING:
+    import anthropic
 
 
 class LLMClient(Protocol):
@@ -26,9 +29,9 @@ class AnthropicClient:
     def __init__(self, model: str | None = None, max_tokens: int = 4096) -> None:
         self.model = model or os.environ.get("RESEARCHER_MODEL", "claude-sonnet-4-6-20250514")
         self.default_max_tokens = max_tokens
-        self._client: Any = None
+        self._client: anthropic.Anthropic | None = None
 
-    def _get_client(self) -> Any:
+    def _get_client(self) -> anthropic.Anthropic:
         if self._client is None:
             import anthropic
             self._client = anthropic.Anthropic()
