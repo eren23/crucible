@@ -354,6 +354,12 @@ def sync_taps(
             "--exclude", "__pycache__",
             "--exclude", "*.pyc",
             "--exclude", "wandb",
+            "--exclude", "data/",
+            "--exclude", "checkpoints/",
+            "--exclude", "*.h5",
+            "--exclude", "*.pt",
+            "--exclude", "*.ckpt",
+            "--exclude", "*.safetensors",
         ])
         cmd.extend([str(tap) + "/", destination])
         try:
