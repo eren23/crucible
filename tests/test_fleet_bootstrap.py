@@ -185,18 +185,3 @@ class TestMaterializeGlobalArchitectures:
         assert (mirror_dir / "demo_code.py").exists()
         assert (mirror_dir / "demo_spec.yaml").exists()
 
-    def test_removes_legacy_prefixed_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from crucible.core.hub import HubStore
-
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        (project_root / "crucible.yaml").write_text(f"hub_dir: {tmp_path / 'hub'}\n", encoding="utf-8")
-        arch_root = project_root / ".crucible" / "architectures"
-        arch_root.mkdir(parents=True)
-        (arch_root / "_hub_old.py").write_text("# legacy\n", encoding="utf-8")
-
-        HubStore.init(hub_dir=tmp_path / "hub", name="test-hub")
-        monkeypatch.delenv("CRUCIBLE_HUB_DIR", raising=False)
-        _materialize_global_architectures(project_root)
-
-        assert not (arch_root / "_hub_old.py").exists()

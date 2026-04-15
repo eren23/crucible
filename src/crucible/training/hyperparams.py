@@ -11,9 +11,8 @@ from pathlib import Path
 
 from crucible.core.env import load_env_files
 
-# Load .env files from the project root (two levels up from this file:
+# Load .env files from the project root (three levels up from this file:
 # src/crucible/training/ -> src/crucible/ -> src/ -> project root).
-# Also try the direct parent chain for backward compatibility.
 _training_dir = Path(__file__).resolve().parent
 _project_root = _training_dir.parent.parent.parent
 load_env_files(_project_root)

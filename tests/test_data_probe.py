@@ -21,7 +21,6 @@ from crucible.core.config import (
 )
 from crucible.fleet.bootstrap import (
     _build_data_probe_command,
-    _legacy_fineweb_download_command,
     _generate_paths_probe,
 )
 
@@ -117,20 +116,8 @@ class TestBuildDataProbeCommand:
         # paths list should not be embedded
         assert "'a'" not in cmd
 
-    def test_legacy_fineweb_fallback_fires_only_for_pg_config(self):
-        # PG-style: huggingface + fineweb variant
-        cfg = _make_cfg(source="huggingface", variant="fineweb10B_sp1024")
-        cmd = _build_data_probe_command(cfg, "/ws", "python3")
-        assert cmd is not None
-        assert "fineweb10B_sp1024" in cmd
-        assert "fineweb_1024_bpe.model" in cmd
-
-    def test_non_fineweb_no_probe_returns_none(self):
+    def test_no_probe_no_paths_returns_none(self):
         cfg = _make_cfg(source="huggingface", variant="c4-en")
-        assert _build_data_probe_command(cfg, "/ws", "python3") is None
-
-    def test_wandb_artifact_source_no_legacy_fallback(self):
-        cfg = _make_cfg(source="wandb_artifact", variant="fineweb10B_sp1024")
         assert _build_data_probe_command(cfg, "/ws", "python3") is None
 
 
@@ -162,34 +149,6 @@ class TestGeneratePathsProbe:
         probe = _generate_paths_probe("/ws", "python3", ["f.txt"])
         assert probe.startswith("cd /ws && python3 - <<'PY'")
         assert probe.endswith("PY")
-
-
-# ---------------------------------------------------------------------------
-# _legacy_fineweb_download_command
-# ---------------------------------------------------------------------------
-
-
-class TestLegacyFinewebDownloadCommand:
-    def test_returns_command_for_pg_config(self):
-        cfg = _make_cfg(source="huggingface", variant="fineweb10B_sp1024")
-        cmd = _legacy_fineweb_download_command(cfg, "/ws", "python3", 4)
-        assert "cached_challenge_fineweb.py" in cmd
-        assert "sp1024" in cmd
-        assert "--train-shards 4" in cmd
-
-    def test_empty_for_non_fineweb_configs(self):
-        cfg = _make_cfg(source="huggingface", variant="c4")
-        assert _legacy_fineweb_download_command(cfg, "/ws", "python3", 4) == ""
-
-    def test_empty_for_wandb_artifact(self):
-        cfg = _make_cfg(source="wandb_artifact", variant="fineweb10B_sp1024")
-        assert _legacy_fineweb_download_command(cfg, "/ws", "python3", 4) == ""
-
-    def test_handles_missing_data(self):
-        cfg = ProjectConfig()  # default has huggingface + fineweb10B_sp1024
-        cmd = _legacy_fineweb_download_command(cfg, "/ws", "python3", 1)
-        # default variant is fineweb-like, so this should fire
-        assert "fineweb" in cmd
 
 
 # ---------------------------------------------------------------------------

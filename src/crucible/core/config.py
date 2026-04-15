@@ -427,8 +427,7 @@ class ProjectSpec:
     # Named variant dicts. Each variant maps to {ENV_VAR: value} that
     # `run_project(variant=...)` merges into the launch overrides before
     # the caller's own `overrides` (which still win). Until the caller
-    # passes a variant name, the dict is inert — this preserves
-    # backward-compat with specs that list variants as templates.
+    # passes a variant name, the dict is inert.
     variants: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
@@ -513,10 +512,7 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         install_torch=raw.get("install_torch", ""),
         launcher=raw.get("launcher", ""),
         launcher_entry=raw.get("launcher_entry", ""),
-        # Accept `data_files` as an alias for `local_files` so tap specs that
-        # use either naming ship files correctly. `local_files` wins if both
-        # are set (backward compatible).
-        local_files=raw.get("local_files") or raw.get("data_files", []),
+        local_files=raw.get("local_files", []),
         system_packages=raw.get("system_packages", []),
         setup=raw.get("setup", []),
         setup_timeout=raw.get("setup_timeout", 3600),

@@ -199,7 +199,7 @@ def run_generic_training() -> None:
 
         # Logging
         if step % log_interval == 0 or step == 1:
-            # Standard format for backward compat
+            # Standard step format consumed by OutputParser
             print(f"step:{step}/{iterations} train_loss:{loss_val:.6f}", flush=True)
             # Generic metrics
             print(f"metric:train_loss={loss_val:.6f}", flush=True)
