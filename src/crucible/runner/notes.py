@@ -15,6 +15,7 @@ import yaml
 from crucible.core.errors import RunnerError
 from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import utc_now_iso, utc_stamp
+from crucible.core.types import ExperimentNote
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +77,7 @@ class NoteStore:
         supersedes: str | None = None,
         finding_ids: list[str] | None = None,
         created_by: str = "unknown",
-    ) -> dict[str, Any]:
+    ) -> ExperimentNote:
         """Create a new note for *run_id* and return its index entry.
 
         Raises
@@ -120,7 +121,7 @@ class NoteStore:
 
         return index_entry
 
-    def get_for_run(self, run_id: str) -> list[dict[str, Any]]:
+    def get_for_run(self, run_id: str) -> list[ExperimentNote]:
         """Return all index entries for *run_id*, newest first."""
         entries = [
             e for e in read_jsonl(self.index_path)
@@ -137,7 +138,7 @@ class NoteStore:
         stage: str = "",
         run_id: str = "",
         limit: int = 50,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ExperimentNote]:
         """Search the note index with optional filters.
 
         Parameters
@@ -192,7 +193,7 @@ class NoteStore:
         results.sort(key=lambda e: e.get("created_at", ""), reverse=True)
         return results
 
-    def get_note(self, note_id: str) -> tuple[dict[str, Any], str] | None:
+    def get_note(self, note_id: str) -> tuple[ExperimentNote, str] | None:
         """Return (index_entry, body) for a single note, or ``None``.
 
         Reads the markdown file from disk and parses frontmatter to extract

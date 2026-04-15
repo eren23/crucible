@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from crucible.core.log import utc_now_iso
+from crucible.core.types import Finding
 
 
 # Valid finding statuses
@@ -53,7 +54,7 @@ def make_finding_id(title: str, scope: str = "project", track: str | None = None
     return f"{slug}-{suffix}"
 
 
-def validate_finding(finding: dict[str, Any]) -> list[str]:
+def validate_finding(finding: Finding) -> list[str]:
     """Validate a finding dict. Returns a list of error strings (empty = valid)."""
     errors: list[str] = []
 
@@ -98,7 +99,7 @@ def can_promote(from_scope: str, to_scope: str) -> bool:
 # Markdown serialization
 # ---------------------------------------------------------------------------
 
-def render_finding_markdown(finding: dict[str, Any]) -> str:
+def render_finding_markdown(finding: Finding) -> str:
     """Render a finding as markdown with YAML frontmatter."""
     frontmatter: dict[str, Any] = {}
     for key in ("id", "title", "scope", "status", "confidence", "tags",
@@ -113,7 +114,7 @@ def render_finding_markdown(finding: dict[str, Any]) -> str:
     return f"---\n{fm_text}\n---\n\n{body}\n"
 
 
-def parse_finding_markdown(text: str) -> dict[str, Any]:
+def parse_finding_markdown(text: str) -> Finding:
     """Parse markdown-with-frontmatter back to a Finding dict."""
     finding: dict[str, Any] = {}
 
@@ -150,7 +151,7 @@ def new_finding(
     created_by: str = "unknown",
     track: str | None = None,
     category: str = "observation",
-) -> dict[str, Any]:
+) -> Finding:
     """Create a new Finding dict with sensible defaults."""
     return {
         "id": make_finding_id(title, scope, track),

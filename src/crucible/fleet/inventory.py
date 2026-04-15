@@ -9,6 +9,7 @@ from typing import Any
 from crucible.core.errors import FleetError
 from crucible.core.io import atomic_write_json
 from crucible.core.log import utc_now_iso
+from crucible.core.types import NodeRecord
 from crucible.fleet.sync import ssh_ok
 
 # ---------------------------------------------------------------------------
@@ -33,7 +34,7 @@ TERMINAL_RESULT_STATUSES: set[str] = frozenset(
 # Load / Save
 # ---------------------------------------------------------------------------
 
-def load_nodes(path: Path) -> list[dict[str, Any]]:
+def load_nodes(path: Path) -> list[NodeRecord]:
     """Load nodes from a JSON file.  Raises FleetError if the file is missing
     or malformed."""
     if not path.exists():
@@ -44,25 +45,25 @@ def load_nodes(path: Path) -> list[dict[str, Any]]:
     return nodes
 
 
-def load_nodes_if_exists(path: Path) -> list[dict[str, Any]]:
+def load_nodes_if_exists(path: Path) -> list[NodeRecord]:
     """Like :func:`load_nodes` but returns ``[]`` when the file is absent."""
     if not path.exists():
         return []
     return load_nodes(path)
 
 
-def save_nodes(path: Path, nodes: list[dict[str, Any]]) -> None:
+def save_nodes(path: Path, nodes: list[NodeRecord]) -> None:
     """Atomically persist the nodes list to *path*."""
     atomic_write_json(path, nodes)
 
 
-def save_nodes_threadsafe(path: Path, nodes: list[dict[str, Any]]) -> None:
+def save_nodes_threadsafe(path: Path, nodes: list[NodeRecord]) -> None:
     """Thread-safe wrapper around :func:`save_nodes`."""
     with NODES_LOCK:
         save_nodes(path, nodes)
 
 
-def load_nodes_snapshot(path: Path) -> list[dict[str, Any]]:
+def load_nodes_snapshot(path: Path) -> list[NodeRecord]:
     """Thread-safe read of the current on-disk node list."""
     with NODES_LOCK:
         return load_nodes_if_exists(path)
@@ -72,7 +73,7 @@ def load_nodes_snapshot(path: Path) -> list[dict[str, Any]]:
 # Upsert / Merge
 # ---------------------------------------------------------------------------
 
-def upsert_node_record(path: Path, node: dict[str, Any]) -> list[dict[str, Any]]:
+def upsert_node_record(path: Path, node: NodeRecord) -> list[NodeRecord]:
     """Insert or update a single node in the on-disk list.
 
     Matching is by ``node_id`` (or ``pod_id`` for backward compat) then ``name``.
@@ -93,7 +94,7 @@ def upsert_node_record(path: Path, node: dict[str, Any]) -> list[dict[str, Any]]
         return nodes
 
 
-def merge_node_record(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+def merge_node_record(existing: NodeRecord | None, incoming: NodeRecord) -> NodeRecord:
     """Merge an *incoming* node record on top of an *existing* one.
 
     Preserves local bootstrap flags when API data does not supersede them.
@@ -128,9 +129,9 @@ def merge_node_record(existing: dict[str, Any] | None, incoming: dict[str, Any])
 
 
 def merge_node_snapshots(
-    existing_nodes: list[dict[str, Any]],
-    incoming_nodes: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    existing_nodes: list[NodeRecord],
+    incoming_nodes: list[NodeRecord],
+) -> list[NodeRecord]:
     """Three-way merge: incoming records update existing ones; orphans are kept."""
     existing_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
     for node in existing_nodes:
@@ -154,7 +155,7 @@ def merge_node_snapshots(
 # Ready state / health classification
 # ---------------------------------------------------------------------------
 
-def ready_state(node: dict[str, Any]) -> str:
+def ready_state(node: NodeRecord) -> str:
     """Determine if a node is fully bootstrapped and usable."""
     if not node.get("env_ready"):
         return "env_missing"
@@ -165,7 +166,7 @@ def ready_state(node: dict[str, Any]) -> str:
     return node.get("state", "ready")
 
 
-def classify_health(node: dict[str, Any]) -> str:
+def classify_health(node: NodeRecord) -> str:
     """Probe a node and return a single health label (``ready``, ``unreachable``, etc.)."""
     api_state = str(node.get("api_state") or "").lower()
     state = str(node.get("state") or "").lower()
@@ -183,12 +184,12 @@ def classify_health(node: dict[str, Any]) -> str:
     return "ready"
 
 
-def count_bootstrapped_ready(nodes: list[dict[str, Any]]) -> int:
+def count_bootstrapped_ready(nodes: list[NodeRecord]) -> int:
     """Return the number of fully bootstrapped & ready nodes."""
     return sum(1 for n in nodes if ready_state(n) == "ready")
 
 
-def next_node_index(nodes: list[dict[str, Any]], name_prefix: str) -> int:
+def next_node_index(nodes: list[NodeRecord], name_prefix: str) -> int:
     """Find the next ordinal index for a new node with the given prefix."""
     prefix = f"{name_prefix}-"
     indexes: list[int] = []
@@ -206,7 +207,7 @@ def next_node_index(nodes: list[dict[str, Any]], name_prefix: str) -> int:
 # Summary helpers
 # ---------------------------------------------------------------------------
 
-def summarize_nodes(nodes: list[dict[str, Any]]) -> dict[str, int]:
+def summarize_nodes(nodes: list[NodeRecord]) -> dict[str, int]:
     """Return a dict of aggregate counts for the fleet status display."""
     healthy_states = {"ready"}
     unhealthy_states = (BAD_API_STATES - PAUSED_STATES) | {"unreachable", "ssh_timeout", "boot_failed"}

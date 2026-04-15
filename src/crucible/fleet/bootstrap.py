@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.core.types import NodeRecord
 from crucible.fleet.day_run import append_event
 from crucible.fleet.inventory import (
     NODES_LOCK,
@@ -125,7 +126,7 @@ def _resolve_step_timeout(label: str, explicit: int | None) -> int | None:
 
 
 def bootstrap_step(
-    node: dict[str, Any],
+    node: NodeRecord,
     label: str,
     command: str,
     *,
@@ -145,7 +146,7 @@ def bootstrap_step(
 
 
 def _record_step(
-    node: dict[str, Any],
+    node: NodeRecord,
     step_name: str,
     fn: Any,
     *,
@@ -208,7 +209,7 @@ def _record_step(
     return result
 
 
-def bootstrap_state_summary(node: dict[str, Any]) -> dict[str, Any]:
+def bootstrap_state_summary(node: NodeRecord) -> dict[str, Any]:
     """Summarize bootstrap progress for display in get_fleet_status.
 
     Returns a compact dict with:
@@ -266,7 +267,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 
 def ensure_project_system_tools(
-    node: dict[str, Any],
+    node: NodeRecord,
     spec: Any,
     *,
     timeout: int,
@@ -419,7 +420,7 @@ def _legacy_fineweb_download_command(
 
 
 def bootstrap_node(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     project_root: Path,
     sync_excludes: list[str],
@@ -648,7 +649,7 @@ def bootstrap_node(
 # ---------------------------------------------------------------------------
 
 def bootstrap_project(
-    node: dict[str, Any],
+    node: NodeRecord,
     spec: Any,
     *,
     project_root: Path | None = None,
@@ -824,7 +825,7 @@ def bootstrap_project(
 # ---------------------------------------------------------------------------
 
 def bootstrap_node_worker(
-    node: dict[str, Any],
+    node: NodeRecord,
     *,
     nodes_file: Path,
     project_root: Path,
@@ -871,7 +872,7 @@ def bootstrap_node_worker(
 def start_bootstrap_supervisor(
     *,
     day_dir: Path,
-    nodes: list[dict[str, Any]],
+    nodes: list[NodeRecord],
     nodes_file: Path,
     project_root: Path,
     sync_excludes: list[str],
@@ -919,7 +920,7 @@ def start_bootstrap_supervisor(
         completed_names: set[str] = set()
         abandoned_names: set[str] = set()
 
-        def refresh_ready_state(current_nodes: list[dict[str, Any]]) -> int:
+        def refresh_ready_state(current_nodes: list[NodeRecord]) -> int:
             ready_names = {n["name"] for n in current_nodes if ready_state(n) == "ready"}
             completed_names.update(ready_names)
             ready_bootstrapped = len(ready_names)

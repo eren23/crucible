@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from crucible.core.types import NodeRecord
 from crucible.fleet.inventory import ready_state
 from crucible.fleet.sync import remote_exec
 
@@ -22,7 +23,7 @@ ACTIVE_STATES = frozenset(
 )
 
 
-def probe_node_status(node: dict[str, Any]) -> dict[str, Any]:
+def probe_node_status(node: NodeRecord) -> dict[str, Any]:
     """SSH into a node and read the most recent ``*.status.json``."""
     workspace = node.get("workspace_path", "/workspace/project")
     py = node.get("python_bin", "python3")
@@ -138,7 +139,7 @@ def render_statuses(
 # Fleet-wide monitor (probes all nodes)
 # ---------------------------------------------------------------------------
 
-def render_monitor(nodes: list[dict[str, Any]]) -> str:
+def render_monitor(nodes: list[NodeRecord]) -> str:
     """Probe every node and render a fleet-wide status table."""
     lines = [
         f"{'Node':<18} {'Ready':<14} {'Run':<28} {'State':<18} "
@@ -165,7 +166,7 @@ def render_monitor(nodes: list[dict[str, Any]]) -> str:
 # Render node inventory table
 # ---------------------------------------------------------------------------
 
-def render_nodes(nodes: list[dict[str, Any]]) -> str:
+def render_nodes(nodes: list[NodeRecord]) -> str:
     """Pretty-print the node inventory."""
     lines = [
         f"{'Name':<18} {'GPU':<12} {'Host':<18} {'Port':<7} "

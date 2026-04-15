@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from crucible.core.types import ExperimentConfig
+from crucible.core.types import ExperimentConfig, ExperimentDesign, VersionMeta
 
 
 def design_to_experiment_config(
-    design: dict[str, Any], version_meta: dict[str, Any]
+    design: ExperimentDesign, version_meta: VersionMeta
 ) -> ExperimentConfig:
     """Convert a versioned design to an executable ExperimentConfig.
 
@@ -34,7 +34,7 @@ def link_result_to_design(
     store: Any,  # VersionStore — Any to avoid circular import
     design_name: str,
     run_id: str,
-) -> dict[str, Any] | None:
+) -> VersionMeta | None:
     """Link an experiment result back to a design by updating linked_run_ids.
 
     Creates a new version of the design with the run_id added.
