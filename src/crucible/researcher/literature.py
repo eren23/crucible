@@ -3,22 +3,31 @@
 Enriches hypothesis generation with relevant published research.
 All functions are best-effort -- failures return empty results,
 never blocking the research loop.
+
+Multi-angle search: a single query is expanded into 3-5 cross-domain
+reformulations (synonyms, enabling mechanisms, applications) via a
+cheap LLM call, then each angle is searched independently. This
+captures papers that use different terminology for the same concept.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.error
 import urllib.request
 from typing import Any
 
-from crucible.core.log import log_warn
+from crucible.core.log import log_info, log_warn
 
 
 # Simple in-memory cache with 1-hour TTL
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _CACHE_TTL = 3600.0
+
+# Expansion cache — keyed by original query, value is list of angle queries
+_expansion_cache: dict[str, tuple[float, list[str]]] = {}
 
 
 def search_papers(query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -101,6 +110,85 @@ def _normalize_paper(paper: Any) -> dict[str, Any]:
         "github_repo": getattr(paper, "github_repo", "") or "",
         "keywords": getattr(paper, "ai_keywords", []) or [],
     }
+
+
+_EXPAND_SYSTEM = (
+    "You are a research query expander. Given a search query about ML/AI, "
+    "generate 3-5 alternative search queries that approach the same concept "
+    "from different angles:\n"
+    "- Cross-domain synonyms (e.g. 'weight sharing' -> 'parameter tying')\n"
+    "- Enabling mechanisms (e.g. 'sparse attention' -> 'local attention patterns')\n"
+    "- Application framing (e.g. 'model compression' -> 'efficient inference')\n"
+    "- Adjacent fields (e.g. 'foveated rendering' in graphics for 'mixed-resolution tokens')\n\n"
+    "Return ONLY a JSON array of query strings. No explanation."
+)
+
+
+def expand_query(query: str) -> list[str]:
+    """Expand a search query into 3-5 cross-domain angles via LLM.
+
+    Returns the original query plus expansions. Falls back to just the
+    original query if the LLM is unavailable or fails.
+    """
+    if not query.strip():
+        return []
+
+    now = time.monotonic()
+    if query in _expansion_cache:
+        ts, cached = _expansion_cache[query]
+        if now - ts < _CACHE_TTL:
+            return cached
+
+    angles = [query]
+    try:
+        import anthropic
+
+        model = os.environ.get("EXPANSION_MODEL", "claude-haiku-4-5-20251001")
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model=model,
+            max_tokens=256,
+            system=_EXPAND_SYSTEM,
+            messages=[{"role": "user", "content": query}],
+        )
+        text = response.content[0].text.strip()
+        # Parse JSON array from response
+        parsed = json.loads(text) if text.startswith("[") else json.loads(
+            re.search(r"\[.*\]", text, re.DOTALL).group()  # type: ignore[union-attr]
+        )
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, str) and item.strip() and item.strip() != query:
+                    angles.append(item.strip())
+        log_info(f"Query expansion: {query!r} -> {len(angles)} angles")
+    except ImportError:
+        pass  # anthropic not installed
+    except Exception as exc:
+        log_warn(f"Query expansion failed (non-fatal): {exc}")
+
+    _expansion_cache[query] = (now, angles)
+    return angles
+
+
+def multi_angle_search(
+    query: str, limit: int = 10, per_angle_limit: int = 5
+) -> list[dict[str, Any]]:
+    """Expand query into cross-domain angles, search each, dedupe results.
+
+    Uses expand_query() for LLM-powered multi-angle reformulation, then
+    searches each angle independently via search_papers(). Results are
+    deduplicated by paper ID and capped at limit.
+    """
+    angles = expand_query(query)
+    all_papers: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for angle in angles:
+        for p in search_papers(angle, limit=per_angle_limit):
+            pid = p.get("id", "")
+            if pid and pid not in seen:
+                seen.add(pid)
+                all_papers.append(p)
+    return all_papers[:limit]
 
 
 def get_paper_detail(paper_id: str) -> dict[str, Any] | None:

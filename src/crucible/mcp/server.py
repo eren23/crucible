@@ -2514,8 +2514,11 @@ TOOLS: list[Tool] = [
         name="research_literature_search",
         description=(
             "Search AI research papers on HuggingFace for literature relevant to "
-            "current research direction.\n\n"
-            "REQUIRES: Nothing (optional: active research state for auto mode).\n"
+            "current research direction. Supports multi-angle search: expands a "
+            "query into cross-domain reformulations (synonyms, enabling mechanisms, "
+            "adjacent fields) via LLM before searching.\n\n"
+            "REQUIRES: Nothing (optional: active research state for auto mode, "
+            "ANTHROPIC_API_KEY for multi-angle expansion).\n"
             "RETURNS: {papers: [{id, title, summary, upvotes, github_repo}], "
             "query_used, literature_context, count}\n"
             "NEXT: design_generate_hypotheses with extra_context containing relevant papers."
@@ -2537,6 +2540,14 @@ TOOLS: list[Tool] = [
                         "(beliefs, findings, program.md). Default false."
                     ),
                     "default": False,
+                },
+                "multi_angle": {
+                    "type": "boolean",
+                    "description": (
+                        "Expand query into cross-domain search angles via LLM "
+                        "before searching. Finds papers using different terminology "
+                        "for the same concept. Default true for auto mode, false otherwise."
+                    ),
                 },
                 "limit": {
                     "type": "integer",

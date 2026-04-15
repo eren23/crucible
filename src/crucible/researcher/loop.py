@@ -78,7 +78,7 @@ class AutonomousResearcher:
                 try:
                     from crucible.researcher.literature import (
                         format_literature_context,
-                        search_papers,
+                        multi_angle_search,
                         suggest_queries,
                     )
 
@@ -90,7 +90,7 @@ class AutonomousResearcher:
                     all_papers: list[dict[str, Any]] = []
                     seen: set[str] = set()
                     for q in queries[:3]:
-                        for p in search_papers(q, limit=5):
+                        for p in multi_angle_search(q, limit=5):
                             if p["id"] not in seen:
                                 seen.add(p["id"])
                                 all_papers.append(p)

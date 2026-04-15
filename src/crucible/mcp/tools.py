@@ -1813,19 +1813,25 @@ def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_literature_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search AI research papers on HuggingFace."""
+    """Search AI research papers on HuggingFace.
+
+    When multi_angle=true (default for auto mode), each query is expanded
+    into cross-domain reformulations via LLM before searching. This finds
+    papers that use different terminology for the same concept.
+    """
     from crucible.researcher.literature import (
         format_literature_context,
+        multi_angle_search,
         search_papers,
         suggest_queries,
     )
 
     query = args.get("query", "")
     auto = args.get("auto", False)
+    multi_angle = args.get("multi_angle", auto)  # default on for auto mode
     limit = args.get("limit", 10)
 
     if auto and not query:
-        # Auto-generate queries from research state
         config = _get_config()
         beliefs: list[str] = []
         findings: list[dict[str, Any]] = []
@@ -1847,15 +1853,19 @@ def research_literature_search(args: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
         queries = suggest_queries(program_text, beliefs, findings)
+        _search = multi_angle_search if multi_angle else search_papers
         all_papers: list[dict[str, Any]] = []
         seen: set[str] = set()
         for q in queries:
-            for p in search_papers(q, limit=5):
+            for p in _search(q, limit=5):
                 if p["id"] not in seen:
                     seen.add(p["id"])
                     all_papers.append(p)
         papers = all_papers[:limit]
         query_used: str | list[str] = queries
+    elif multi_angle:
+        papers = multi_angle_search(query, limit=limit)
+        query_used = query
     else:
         papers = search_papers(query, limit=limit)
         query_used = query
