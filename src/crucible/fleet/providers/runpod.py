@@ -19,9 +19,8 @@ from urllib import request as urlrequest
 
 from crucible.core.errors import FleetError
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
-from crucible.fleet.inventory import BAD_API_STATES
 from crucible.fleet.provider import FleetProvider
-from crucible.fleet.sync import remote_exec, ssh_ok
+from crucible.fleet.sync import ssh_ok
 
 RUNPOD_REST_BASE = os.environ.get("RUNPOD_REST_BASE", "https://rest.runpod.io/v1")
 RUNPOD_GRAPHQL_URL = os.environ.get("RUNPOD_GRAPHQL_URL", "https://api.runpod.io/graphql")

@@ -70,14 +70,12 @@ def run_generic_training() -> None:
     # ---------------------------------------------------------------
     # Configuration from env vars
     # ---------------------------------------------------------------
-    model_family = _env("MODEL_FAMILY", "baseline")
     data_adapter_name = _env("DATA_ADAPTER", "token")
     objective_name = _env("TRAINING_OBJECTIVE", "cross_entropy")
     iterations = _env_int("ITERATIONS", 400)
     batch_size = _env_int("BATCH_SIZE", 8)
     lr = _env_float("LR", 3e-4)
     weight_decay = _env_float("WEIGHT_DECAY", 0.0)
-    grad_accum_steps = _env_int("GRAD_ACCUM_STEPS", 1)
     max_wallclock = _env_int("MAX_WALLCLOCK_SECONDS", 0)
     log_interval = _env_int("LOG_INTERVAL", 10)
     val_interval = _env_int("VAL_INTERVAL", 0)

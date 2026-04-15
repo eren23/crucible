@@ -1,7 +1,6 @@
 """Load, merge, and filter experiment results from local, project, and fleet JSONL files."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig, load_config

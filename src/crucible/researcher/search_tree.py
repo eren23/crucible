@@ -20,7 +20,7 @@ from typing import Any
 import yaml
 
 from crucible.core.errors import SearchTreeError
-from crucible.core.io import append_jsonl, read_jsonl, atomic_write_json
+from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import utc_now_iso
 
 

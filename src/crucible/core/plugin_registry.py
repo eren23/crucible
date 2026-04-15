@@ -19,7 +19,7 @@ import importlib.util
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from crucible.core.errors import PluginError
 

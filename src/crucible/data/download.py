@@ -11,9 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.config import DataConfig, ProjectConfig
-from crucible.core.log import log_error, log_info, log_step, log_success, log_warn
+from crucible.core.log import log_info, log_step, log_success, log_warn
 from crucible.data.manifest import (
-    fetch_manifest,
     find_dataset,
     find_tokenizer,
     list_datasets,

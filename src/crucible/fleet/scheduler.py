@@ -1,7 +1,6 @@
 """Wave-based scheduling, dispatch assignments, early stopping, wave completion."""
 from __future__ import annotations
 
-import json
 import re
 import shlex
 import time
@@ -12,7 +11,7 @@ from typing import Any
 from crucible.core.errors import RunnerError
 from crucible.core.io import read_jsonl
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
-from crucible.fleet.bootstrap import bootstrap_node, bootstrap_node_worker
+from crucible.fleet.bootstrap import bootstrap_node_worker
 from crucible.fleet.day_run import append_event, record_day_progress, write_day_leaderboard
 from crucible.fleet.inventory import (
     BAD_API_STATES,

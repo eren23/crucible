@@ -13,7 +13,6 @@ from fastapi import APIRouter
 from crucible.core.errors import CrucibleError
 from crucible.api.models import (
     FindingCreate,
-    HealthResponse,
     NoteCreate,
 )
 from crucible.core.config import ProjectConfig, load_config
@@ -63,7 +62,7 @@ def list_experiments(
 ) -> dict[str, Any]:
     config = _get_config()
     try:
-        from crucible.analysis.results import completed_results, merged_results
+        from crucible.analysis.results import merged_results
 
         results = merged_results(config)
         if name:

@@ -7,12 +7,10 @@ automatic promotion/killing of experiment branches.
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig
-from crucible.core.errors import CrucibleError, ResearcherError
-from crucible.core.log import utc_now_iso
+from crucible.core.errors import CrucibleError
 from crucible.researcher.batch_design import DEFAULT_TIER_COSTS, design_batch
 from crucible.researcher.hypothesis import generate_hypotheses
 from crucible.researcher.llm_client import AnthropicClient, LLMClient

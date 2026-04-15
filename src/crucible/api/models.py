@@ -1,7 +1,7 @@
 """Pydantic response/request models for the Crucible API."""
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 

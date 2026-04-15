@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.core.log import log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.day_run import append_event
 from crucible.fleet.inventory import (
     NODES_LOCK,

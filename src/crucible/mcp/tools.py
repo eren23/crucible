@@ -529,10 +529,8 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     try:
         from crucible.fleet.bootstrap import _materialize_global_architectures
-        from crucible.fleet.manager import FleetManager
 
         _materialize_global_architectures(config.project_root)
-        fleet = FleetManager(config)
         # Simple sync implementation
         from crucible.fleet.inventory import load_nodes
         from crucible.fleet.sync import sync_repo, sync_taps
@@ -678,7 +676,6 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.fleet.manager import FleetManager
         from crucible.analysis.results import merged_results
         from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
-        from crucible.core.io import read_jsonl
 
         fm = FleetManager(config)
         fm.collect()
@@ -1424,8 +1421,6 @@ def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     run_id = args["run_id"]
     image_path = args["image_path"]
-    caption = args.get("caption", "")
-    key = args.get("key", "image")
 
     try:
         from crucible.runner.wandb_logger import _resolve_wandb_url
@@ -1995,7 +1990,7 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
     if scope == "global":
         try:
             hub = _get_hub_store()
-            result = hub.store_architecture(
+            hub.store_architecture(
                 name=name,
                 code=code,
                 source_project=_get_config().name if _get_config else "",
@@ -2194,8 +2189,6 @@ def _scan_spec_vars(
     missing: list[str],
 ) -> None:
     """Recursively scan a spec dict for unresolved template vars without defaults."""
-    import re
-
     if isinstance(obj, str):
         for m in var_pattern.finditer(obj):
             var_name, default = m.group(1), m.group(2)
@@ -2230,7 +2223,6 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
 def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     """Create architecture from declarative YAML spec. No Python code written."""
     import yaml
-    from pathlib import Path as _Path
 
     name = args.get("name")
     spec = args.get("spec")
@@ -3994,7 +3986,6 @@ def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
     REQUIRES: run_project has been called.
     RETURNS: {status, metrics, log_tail, run_id}
     """
-    config = _get_config()
     try:
         launch_id = args.get("launch_id")
         run_id = args.get("run_id")
@@ -4679,7 +4670,6 @@ def data_link(args: dict[str, Any]) -> dict[str, Any]:
         if not run_id or not data_name:
             return {"error": "run_id and data_name are required"}
 
-        from pathlib import Path
         import json
 
         config = _get_config()
@@ -4706,7 +4696,6 @@ def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
         if not run_id:
             return {"error": "run_id is required"}
 
-        from pathlib import Path
         import json
 
         config = _get_config()

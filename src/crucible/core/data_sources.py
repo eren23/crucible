@@ -10,13 +10,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from crucible.core.config import DataConfig
 from crucible.core.plugin_registry import PluginRegistry
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 # Default HuggingFace repo for the Parameter Golf dataset, used as a fallback
 # when `data.repo_id` is not set in the project spec. This exists because

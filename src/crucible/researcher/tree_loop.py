@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig
-from crucible.core.errors import ResearcherError
-from crucible.core.log import utc_now_iso
 from crucible.researcher.search_tree import SearchTree
 
 

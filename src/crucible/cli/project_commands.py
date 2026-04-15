@@ -19,7 +19,6 @@ from pathlib import Path
 from crucible.core.config import list_project_specs, load_project_spec
 from crucible.core.errors import ProjectTemplateError
 from crucible.core.project_template import (
-    iter_required_missing,
     list_templates,
     required_vars,
     write_project_spec,

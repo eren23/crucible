@@ -27,8 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import RunnerError
-from crucible.core.io import append_jsonl, read_jsonl, _json_ready
-from crucible.core.log import log_info, log_warn
+from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
 from crucible.runner.output_parser import (

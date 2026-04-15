@@ -11,7 +11,6 @@ import atexit
 import json
 import logging
 import os
-import socket
 import sys
 import time
 import traceback
