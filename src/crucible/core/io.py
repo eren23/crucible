@@ -1,4 +1,4 @@
-"""File I/O utilities: atomic writes, JSONL operations."""
+"""File I/O utilities: atomic writes, JSONL operations, YAML helpers."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,8 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 
 def _json_ready(value: Any) -> Any:
@@ -91,6 +93,71 @@ def atomic_write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for record in records:
                 f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+def read_yaml(path: Path) -> dict | list | None:
+    """Read a YAML file, returning its parsed content.
+
+    Returns ``None`` if the file does not exist.  Unlike
+    :func:`yaml.safe_load`, this never returns raw strings or scalars —
+    callers always get a ``dict``, ``list``, or ``None``.
+    """
+    if not path.exists():
+        return None
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if isinstance(raw, (dict, list)):
+        return raw
+    return None
+
+
+def write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None:
+    """Write *data* as YAML, creating parent directories as needed.
+
+    This is a simple (non-atomic) write suitable for files where
+    partial writes are acceptable (e.g. versioned snapshots that are
+    also tracked elsewhere).  For ledgers and registries use
+    :func:`atomic_write_yaml`.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=sort_keys,
+        allow_unicode=True,
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def atomic_write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None:
+    """Write YAML atomically via temp file + rename.
+
+    Mirrors the pattern used by :func:`atomic_write_json` and
+    :func:`atomic_write_jsonl`: write to a tempfile in the same
+    directory, fsync, then ``os.replace`` into the target path.  This
+    guarantees readers never see a half-written file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=sort_keys,
+        allow_unicode=True,
+    )
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, path)

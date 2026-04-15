@@ -9,8 +9,11 @@ import pytest
 from crucible.core.io import (
     _json_ready,
     atomic_write_json,
+    atomic_write_yaml,
     read_jsonl,
+    read_yaml,
     write_jsonl,
+    write_yaml,
     append_jsonl,
     collect_public_attrs,
 )
@@ -241,3 +244,137 @@ class TestCollectPublicAttrs:
             path = Path("/foo/bar")
         attrs = collect_public_attrs(Obj())
         assert attrs["path"] == "/foo/bar"
+
+
+# ---------------------------------------------------------------------------
+# read_yaml
+# ---------------------------------------------------------------------------
+
+class TestReadYaml:
+    def test_missing_file_returns_none(self, tmp_path):
+        assert read_yaml(tmp_path / "missing.yaml") is None
+
+    def test_reads_dict(self, tmp_path):
+        path = tmp_path / "data.yaml"
+        path.write_text("key: value\nnum: 42\n", encoding="utf-8")
+        data = read_yaml(path)
+        assert data == {"key": "value", "num": 42}
+
+    def test_reads_list(self, tmp_path):
+        path = tmp_path / "list.yaml"
+        path.write_text("- one\n- two\n- three\n", encoding="utf-8")
+        data = read_yaml(path)
+        assert data == ["one", "two", "three"]
+
+    def test_empty_file_returns_none(self, tmp_path):
+        path = tmp_path / "empty.yaml"
+        path.write_text("", encoding="utf-8")
+        assert read_yaml(path) is None
+
+    def test_scalar_returns_none(self, tmp_path):
+        path = tmp_path / "scalar.yaml"
+        path.write_text("just a string\n", encoding="utf-8")
+        assert read_yaml(path) is None
+
+    def test_nested_structure(self, tmp_path):
+        path = tmp_path / "nested.yaml"
+        path.write_text("parent:\n  child: value\n  list:\n    - a\n    - b\n", encoding="utf-8")
+        data = read_yaml(path)
+        assert data == {"parent": {"child": "value", "list": ["a", "b"]}}
+
+
+# ---------------------------------------------------------------------------
+# write_yaml
+# ---------------------------------------------------------------------------
+
+class TestWriteYaml:
+    def test_writes_dict(self, tmp_path):
+        path = tmp_path / "out.yaml"
+        write_yaml(path, {"key": "value", "num": 42})
+        data = read_yaml(path)
+        assert data["key"] == "value"
+        assert data["num"] == 42
+
+    def test_creates_parent_dirs(self, tmp_path):
+        path = tmp_path / "sub" / "deep" / "out.yaml"
+        write_yaml(path, {"nested": True})
+        assert path.exists()
+        data = read_yaml(path)
+        assert data["nested"] is True
+
+    def test_overwrites_existing(self, tmp_path):
+        path = tmp_path / "overwrite.yaml"
+        write_yaml(path, {"v": 1})
+        write_yaml(path, {"v": 2})
+        data = read_yaml(path)
+        assert data["v"] == 2
+
+    def test_sort_keys_option(self, tmp_path):
+        path = tmp_path / "sorted.yaml"
+        write_yaml(path, {"z": 1, "a": 2, "m": 3}, sort_keys=True)
+        text = path.read_text(encoding="utf-8")
+        a_pos = text.index("a:")
+        m_pos = text.index("m:")
+        z_pos = text.index("z:")
+        assert a_pos < m_pos < z_pos
+
+    def test_unicode_content(self, tmp_path):
+        path = tmp_path / "unicode.yaml"
+        write_yaml(path, {"emoji": "hello", "cjk": "test"})
+        data = read_yaml(path)
+        assert data["emoji"] == "hello"
+
+    def test_writes_list(self, tmp_path):
+        path = tmp_path / "list.yaml"
+        write_yaml(path, [{"name": "a"}, {"name": "b"}])
+        data = read_yaml(path)
+        assert isinstance(data, list)
+        assert len(data) == 2
+
+
+# ---------------------------------------------------------------------------
+# atomic_write_yaml
+# ---------------------------------------------------------------------------
+
+class TestAtomicWriteYaml:
+    def test_writes_valid_yaml(self, tmp_path):
+        path = tmp_path / "atomic.yaml"
+        atomic_write_yaml(path, {"key": "value", "num": 42})
+        data = read_yaml(path)
+        assert data["key"] == "value"
+        assert data["num"] == 42
+
+    def test_creates_parent_dirs(self, tmp_path):
+        path = tmp_path / "sub" / "dir" / "atomic.yaml"
+        atomic_write_yaml(path, {"nested": True})
+        assert path.exists()
+
+    def test_overwrites_existing(self, tmp_path):
+        path = tmp_path / "overwrite.yaml"
+        atomic_write_yaml(path, {"v": 1})
+        atomic_write_yaml(path, {"v": 2})
+        data = read_yaml(path)
+        assert data["v"] == 2
+
+    def test_no_temp_file_left_on_success(self, tmp_path):
+        path = tmp_path / "clean.yaml"
+        atomic_write_yaml(path, {"clean": True})
+        # Only the target file should exist
+        files = list(tmp_path.iterdir())
+        assert len(files) == 1
+        assert files[0].name == "clean.yaml"
+
+    def test_sort_keys_option(self, tmp_path):
+        path = tmp_path / "sorted.yaml"
+        atomic_write_yaml(path, {"z": 1, "a": 2}, sort_keys=True)
+        text = path.read_text(encoding="utf-8")
+        a_pos = text.index("a:")
+        z_pos = text.index("z:")
+        assert a_pos < z_pos
+
+    def test_roundtrip_with_read_yaml(self, tmp_path):
+        path = tmp_path / "roundtrip.yaml"
+        original = {"name": "test", "items": [1, 2, 3], "nested": {"a": "b"}}
+        atomic_write_yaml(path, original)
+        loaded = read_yaml(path)
+        assert loaded == original

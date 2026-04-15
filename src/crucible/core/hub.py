@@ -35,8 +35,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from crucible.core.errors import HubError
 from crucible.core.finding import (
     FINDING_STATUSES,
@@ -44,7 +42,7 @@ from crucible.core.finding import (
     make_finding_id,
     validate_finding,
 )
-from crucible.core.io import append_jsonl, read_jsonl, write_jsonl
+from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_jsonl, write_yaml
 from crucible.core.log import utc_now_iso
 
 
@@ -194,10 +192,7 @@ class HubStore:
             "default_track": "",
             "version": _HUB_VERSION,
         }
-        hub_yaml.write_text(
-            yaml.dump(config, default_flow_style=False, sort_keys=False),
-            encoding="utf-8",
-        )
+        write_yaml(hub_yaml, config)
 
         # Git init (best-effort)
         try:
@@ -231,16 +226,13 @@ class HubStore:
 
     def _read_hub_yaml(self) -> dict[str, Any]:
         self._require_init()
-        raw = yaml.safe_load(self._hub_yaml_path.read_text(encoding="utf-8"))
+        raw = read_yaml(self._hub_yaml_path)
         if not isinstance(raw, dict):
             raise HubError(f"Invalid hub.yaml at {self._hub_yaml_path}")
         return raw
 
     def _write_hub_yaml(self, data: dict[str, Any]) -> None:
-        self._hub_yaml_path.write_text(
-            yaml.dump(data, default_flow_style=False, sort_keys=False),
-            encoding="utf-8",
-        )
+        write_yaml(self._hub_yaml_path, data)
 
     # ------------------------------------------------------------------
     # Project registry
@@ -296,18 +288,14 @@ class HubStore:
         path = self._track_yaml_path(name)
         if not path.exists():
             raise HubError(f"Track '{name}' not found.")
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = read_yaml(path)
         if not isinstance(raw, dict):
             raise HubError(f"Invalid track.yaml for '{name}'")
         return raw
 
     def _write_track_yaml(self, name: str, data: dict[str, Any]) -> None:
         path = self._track_yaml_path(name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            yaml.dump(data, default_flow_style=False, sort_keys=False),
-            encoding="utf-8",
-        )
+        write_yaml(path, data)
 
     def create_track(
         self,
@@ -353,7 +341,7 @@ class HubStore:
             track_yaml = child / "track.yaml"
             if track_yaml.exists():
                 try:
-                    raw = yaml.safe_load(track_yaml.read_text(encoding="utf-8"))
+                    raw = read_yaml(track_yaml)
                     if isinstance(raw, dict):
                         tracks.append(raw)
                     else:
@@ -454,10 +442,8 @@ class HubStore:
         fdir = self._finding_dir(finding_id, scope, track)
         fdir.mkdir(parents=True, exist_ok=True)
 
-        text = yaml.dump(finding, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
         version_path = fdir / f"v{version}.yaml"
-        version_path.write_text(text, encoding="utf-8")
+        write_yaml(version_path, finding)
 
         current_path = fdir / "current.yaml"
         shutil.copy2(version_path, current_path)
@@ -475,9 +461,7 @@ class HubStore:
             path = fdir / f"v{version}.yaml"
         else:
             path = fdir / "current.yaml"
-        if not path.exists():
-            return None
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = read_yaml(path)
         return raw if isinstance(raw, dict) else None
 
     # ------------------------------------------------------------------

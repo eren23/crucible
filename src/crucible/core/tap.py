@@ -16,17 +16,16 @@ Usage::
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from crucible.core.errors import TapError
+from crucible.core.io import atomic_write_yaml, read_yaml
 from crucible.core.log import utc_now_iso
 
 VALID_PLUGIN_TYPES = frozenset({
@@ -69,50 +68,20 @@ class TapManager:
     # ------------------------------------------------------------------
 
     def _load_taps_yaml(self) -> list[dict[str, Any]]:
-        if not self._taps_file.exists():
-            return []
-        data = yaml.safe_load(self._taps_file.read_text(encoding="utf-8"))
+        data = read_yaml(self._taps_file)
         return data if isinstance(data, list) else []
 
     def _save_taps_yaml(self, taps: list[dict[str, Any]]) -> None:
         """Atomic write of taps.yaml (write-then-rename)."""
-        content = yaml.dump(taps, default_flow_style=False, sort_keys=False)
-        fd, tmp = tempfile.mkstemp(dir=str(self.hub_dir), suffix=".tmp")
-        try:
-            os.write(fd, content.encode("utf-8"))
-            os.close(fd)
-            os.replace(tmp, str(self._taps_file))
-        except BaseException:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
+        atomic_write_yaml(self._taps_file, taps)
 
     def _load_installed_yaml(self) -> list[dict[str, Any]]:
-        if not self._installed_file.exists():
-            return []
-        data = yaml.safe_load(self._installed_file.read_text(encoding="utf-8"))
+        data = read_yaml(self._installed_file)
         return data if isinstance(data, list) else []
 
     def _save_installed_yaml(self, packages: list[dict[str, Any]]) -> None:
         """Atomic write of installed.yaml (write-then-rename)."""
-        content = yaml.dump(packages, default_flow_style=False, sort_keys=False)
-        fd, tmp = tempfile.mkstemp(dir=str(self.hub_dir), suffix=".tmp")
-        try:
-            os.write(fd, content.encode("utf-8"))
-            os.close(fd)
-            os.replace(tmp, str(self._installed_file))
-        except BaseException:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
+        atomic_write_yaml(self._installed_file, packages)
 
     def _git_run(self, *args: str, cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

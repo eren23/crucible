@@ -24,7 +24,7 @@ from typing import Any
 import yaml
 
 from crucible.core.errors import StoreError
-from crucible.core.io import append_jsonl, read_jsonl
+from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_yaml
 from crucible.core.log import utc_now_iso
 
 
@@ -80,15 +80,13 @@ class VersionStore:
 
     def _write_yaml(self, path: Path, content: dict[str, Any]) -> None:
         """Write content as YAML, creating parent dirs as needed."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        text = yaml.dump(content, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        path.write_text(text, encoding="utf-8")
+        write_yaml(path, content)
 
     def _read_yaml(self, path: Path) -> dict[str, Any]:
         """Read a YAML file and return its contents."""
         if not path.exists():
             raise StoreError(f"Version file not found: {path}")
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = read_yaml(path)
         if not isinstance(raw, dict):
             raise StoreError(f"Invalid YAML content in {path}")
         return raw
