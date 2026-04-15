@@ -563,9 +563,7 @@ def bootstrap_node(
             )
 
     # Build a probe command from project config. Returns None if no
-    # probe is configured (in which case data bootstrap is a no-op —
-    # previously this used hardcoded fineweb paths that silently
-    # failed for non-LM projects).
+    # probe is configured (data bootstrap is a no-op for unconfigured projects).
     probe_command = _build_data_probe_command(proj_cfg, workspace, py)
 
     data_probe: Any = None

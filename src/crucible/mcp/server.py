@@ -1236,7 +1236,7 @@ TOOLS: list[Tool] = [
     Tool(
         name="get_research_briefing",
         description=(
-            "Comprehensive session orientation: project state, leaderboard, hypotheses, findings, notes, next steps.\n\n"
+            "Session orientation: project state, leaderboard, hypotheses, findings, notes, next steps.\n\n"
             "REQUIRES: Nothing (best with completed experiments).\n"
             "RETURNS: {project_state, leaderboard, hypotheses, findings, notes, suggested_next_steps}\n"
             "NEXT: Follow the suggested_next_steps, or design_generate_hypotheses for new directions."
