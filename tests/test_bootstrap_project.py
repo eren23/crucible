@@ -27,7 +27,7 @@ def _make_node(**overrides):
 
 
 class TestBootstrapProject:
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_existing_repo_triggers_update(self, mock_step, mock_env):
         # repo_check returns "exists"
@@ -42,7 +42,7 @@ class TestBootstrapProject:
         assert "repo_update" in step_labels
         assert "repo_clone" not in step_labels
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_new_repo_triggers_clone(self, mock_step, mock_env):
         mock_step.return_value = MagicMock(stdout="missing\n")
@@ -55,7 +55,7 @@ class TestBootstrapProject:
         assert "repo_clone" in step_labels
         assert "repo_update" not in step_labels
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_venv_skipped_if_exists(self, mock_step, mock_env):
         # repo_check=exists, venv_check=exists
@@ -71,7 +71,7 @@ class TestBootstrapProject:
         step_labels = [c.args[1] for c in mock_step.call_args_list]
         assert "create_venv" not in step_labels
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_node_marked_ready(self, mock_step, mock_env):
         mock_step.return_value = MagicMock(stdout="exists\n")
@@ -84,7 +84,7 @@ class TestBootstrapProject:
         assert result["env_ready"] is True
         assert result["project"] == "testproj"
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_env_forwarding_called(self, mock_step, mock_env):
         mock_step.return_value = MagicMock(stdout="exists\n")
@@ -98,7 +98,7 @@ class TestBootstrapProject:
         assert kwargs[1]["env_forward"] == ["WANDB_API_KEY"]
         assert kwargs[1]["env_set"] == {"FOO": "bar"}
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_no_python_skips_venv(self, mock_step, mock_env):
         mock_step.return_value = MagicMock(stdout="exists\n")
@@ -111,7 +111,7 @@ class TestBootstrapProject:
         assert "venv_check" not in step_labels
         assert "create_venv" not in step_labels
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_install_and_setup_steps_use_project_timeout(self, mock_step, mock_env):
         def side_effect(node, label, cmd, **kwargs):
@@ -150,7 +150,7 @@ class TestBootstrapProject:
             "setup_0": 900,
         }
 
-    @patch("crucible.fleet.sync.write_remote_env")
+    @patch("crucible.fleet.bootstrap.write_remote_env")
     @patch("crucible.fleet.bootstrap.bootstrap_step")
     def test_system_tools_step_installs_generic_packages(self, mock_step, mock_env):
         mock_step.return_value = MagicMock(stdout="exists\n")

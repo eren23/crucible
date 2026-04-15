@@ -4,11 +4,16 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import shlex
+import shutil
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
+from crucible.core.config import ProjectConfig, load_config
+from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
+from crucible.core.hub import HubStore
 from crucible.core.log import log_info, log_step, log_success, log_warn, utc_now_iso
 from crucible.fleet.day_run import append_event
 from crucible.fleet.inventory import (
@@ -21,11 +26,14 @@ from crucible.fleet.inventory import (
     save_nodes,
     upsert_node_record,
 )
+from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launcher_bundle
 from crucible.fleet.sync import (
     checked_remote_exec,
     local_git_sha,
     rsync_base,
+    scp_to_node,
     ssh_ok,
+    write_remote_env,
     _run,
     sync_env_file,
     sync_repo,
@@ -56,10 +64,7 @@ def _remote_data_source_partial_probe_script(plugin_name: str, config_dict: dict
 
 def _materialize_global_architectures(project_root: Path) -> None:
     """Mirror hub architectures into .crucible/architectures/_hub/ for pod sync."""
-    import shutil
     try:
-        from crucible.core.config import ProjectConfig, load_config
-        from crucible.core.hub import HubStore
         cfg_path = project_root / "crucible.yaml"
         cfg = load_config(cfg_path) if cfg_path.exists() else ProjectConfig(project_root=project_root)
         hub_dir = HubStore.discover(config_hub_dir=getattr(cfg, "hub_dir", ""))
@@ -111,7 +116,6 @@ def _resolve_step_timeout(label: str, explicit: int | None) -> int | None:
     if explicit is not None:
         return explicit
     try:
-        from crucible.core.config import load_config
         cfg = load_config()
         timeouts = cfg.fleet.ssh.step_timeouts
     except Exception:
@@ -167,7 +171,6 @@ def _record_step(
         auxiliary data probes and hub-plugin materialization — useful
         when they work, non-fatal when they don't.
     """
-    import traceback
     steps = node.setdefault("bootstrap_steps", {})
     steps[step_name] = {
         "status": "running",
@@ -367,7 +370,6 @@ def _generate_paths_probe(workspace: str, py: str, paths: list[str]) -> str:
     least one path. Prints ``1`` if every path check succeeds, ``0``
     otherwise.
     """
-    import json
     paths_literal = json.dumps(list(paths))
     body = (
         "from pathlib import Path\n"
@@ -449,7 +451,6 @@ def bootstrap_node(
     # Load the project config once up front — the data probe/download
     # step needs it, and loading it multiple times inside step closures
     # adds latency and confuses test mocks.
-    from crucible.core.config import ProjectConfig, load_config
     cfg_path = project_root / "crucible.yaml"
     proj_cfg = (
         load_config(cfg_path)
@@ -529,8 +530,6 @@ def bootstrap_node(
     # silently swallowed all errors.
     _skip_auto_download = False
     if not skip_data:
-        from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
-
         spec = bootstrap_data_source_spec_from_data_config(
             proj_cfg.data,
             plugin_name_override=data_source_name,
@@ -658,13 +657,10 @@ def bootstrap_project(
     Steps: clone repo, create venv, install deps, forward env, run setup, mark ready.
     All values passed to shell commands are quoted via shlex.quote.
     """
-    import shlex as _shlex
-    from crucible.fleet.sync import write_remote_env
-
-    ws = _shlex.quote(spec.workspace)
+    ws = shlex.quote(spec.workspace)
     name = node["name"]
-    branch_q = _shlex.quote(spec.branch)
-    repo_q = _shlex.quote(spec.repo)
+    branch_q = shlex.quote(spec.branch)
+    repo_q = shlex.quote(spec.repo)
     project_step_timeout = max(int(getattr(spec, "setup_timeout", 600) or 600), 1)
 
     ensure_project_system_tools(node, spec, timeout=project_step_timeout)
@@ -713,7 +709,7 @@ def bootstrap_project(
                 "(curl -LsSf https://astral.sh/uv/install.sh | sh)",
                 timeout=project_step_timeout,
             )
-            python_q = _shlex.quote(spec.python)
+            python_q = shlex.quote(spec.python)
             bootstrap_step(
                 node, "create_venv",
                 f'export PATH="$HOME/.local/bin:$PATH" && '
@@ -732,7 +728,7 @@ def bootstrap_project(
         log_step(f"{name}: installing torch")
         flags = spec.install_flags or ""
         # Quote each package spec to prevent shell interpretation of < > chars
-        torch_pkgs = " ".join(_shlex.quote(p) for p in spec.install_torch.split())
+        torch_pkgs = " ".join(shlex.quote(p) for p in spec.install_torch.split())
         bootstrap_step(
             node, "install_torch",
             f"{uv_pfx}{activate} && uv pip install {torch_pkgs} {flags}",
@@ -752,10 +748,6 @@ def bootstrap_project(
 
     # 5. Materialize shared launcher bundles into the external workspace.
     if spec.launcher:
-        from crucible.core.config import ProjectConfig, load_config
-        from crucible.core.hub import HubStore
-        from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launcher_bundle
-
         launcher_root = project_root or Path.cwd()
         cfg_path = launcher_root / "crucible.yaml"
         cfg = load_config(cfg_path) if cfg_path.exists() else ProjectConfig(project_root=launcher_root)
@@ -771,7 +763,7 @@ def bootstrap_project(
             )
 
         remote_root = launcher_runtime_dir(spec.workspace, spec.launcher)
-        bootstrap_step(node, "launcher_dir", f"mkdir -p {_shlex.quote(remote_root)}")
+        bootstrap_step(node, "launcher_dir", f"mkdir -p {shlex.quote(remote_root)}")
         user = node.get("user", "root")
         remote_dest = f"{user}@{node['ssh_host']}:{remote_root}/"
         log_step(f"{name}: syncing launcher {spec.launcher!r} from {launcher['source']}")
@@ -782,7 +774,6 @@ def bootstrap_project(
 
     # 6. Copy local files to workspace
     if spec.local_files:
-        from crucible.fleet.sync import scp_to_node
         log_step(f"{name}: copying {len(spec.local_files)} local files")
         for local_path in spec.local_files:
             p = Path(local_path).expanduser()

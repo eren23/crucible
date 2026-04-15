@@ -101,7 +101,7 @@ class TestResolveStepTimeout:
         def boom() -> Any:
             raise RuntimeError("no config")
 
-        monkeypatch.setattr("crucible.core.config.load_config", boom)
+        monkeypatch.setattr("crucible.fleet.bootstrap.load_config", boom)
         # Must not raise — callers fall back to checked_remote_exec's default
         assert bootstrap_module._resolve_step_timeout("pip_install", None) is None
 
