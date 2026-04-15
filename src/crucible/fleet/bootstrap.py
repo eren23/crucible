@@ -73,12 +73,6 @@ def _materialize_global_architectures(project_root: Path) -> None:
         target_dir = arch_root / "_hub"
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Remove legacy top-level mirrors from the old _hub_<name>.py scheme.
-        for legacy in arch_root.glob("_hub_*.py"):
-            legacy.unlink(missing_ok=True)
-        for legacy in arch_root.glob("_hub_*.yaml"):
-            legacy.unlink(missing_ok=True)
-
         # Rebuild the mirror directory so deletions in the hub propagate cleanly.
         for existing in target_dir.glob("*"):
             if existing.is_file():
@@ -322,10 +316,7 @@ def _build_data_probe_command(
     2. ``data.probe.paths``: generate a Python one-liner that checks
        every listed path exists (files must exist, directories must
        be non-empty).
-    3. Legacy fineweb paths: only when ``data.source == "huggingface"``
-       and ``data.variant`` starts with ``fineweb`` (preserves the
-       Parameter Golf reference config's behavior without hardcoding).
-    4. Otherwise: ``None``.
+    3. Otherwise: ``None``.
     """
     data_cfg = getattr(proj_cfg, "data", None)
     if data_cfg is None:
@@ -340,22 +331,6 @@ def _build_data_probe_command(
         paths = list(getattr(probe, "paths", []) or [])
         if paths:
             return _generate_paths_probe(workspace, py, paths)
-    # Legacy fineweb fallback — fires only when this is clearly a
-    # Parameter Golf-style LM setup. Every other project needs an
-    # explicit ``data.probe.paths`` or ``data.probe.script``.
-    source = str(getattr(data_cfg, "source", "") or "").lower()
-    variant = str(getattr(data_cfg, "variant", "") or "").lower()
-    if source == "huggingface" and variant.startswith("fineweb"):
-        return (
-            f"cd {workspace} && {py} - <<'PY'\n"
-            "from pathlib import Path\n"
-            "root = Path('data/datasets/fineweb10B_sp1024')\n"
-            "tok = Path('data/tokenizers/fineweb_1024_bpe.model')\n"
-            "train = list(root.glob('fineweb_train_*.bin')) if root.exists() else []\n"
-            "val = list(root.glob('fineweb_val_*.bin')) if root.exists() else []\n"
-            "print(int(tok.exists() and bool(train) and bool(val)))\n"
-            "PY"
-        )
     return None
 
 
@@ -389,33 +364,6 @@ def _generate_paths_probe(workspace: str, py: str, paths: list[str]) -> str:
         "print(1 if ok else 0)\n"
     )
     return f"cd {workspace} && {py} - <<'PY'\n{body}PY"
-
-
-def _legacy_fineweb_download_command(
-    proj_cfg: Any,
-    workspace: str,
-    py: str,
-    train_shards: int,
-) -> str:
-    """Return the legacy fineweb auto-download command for PG-style configs.
-
-    Only fires when the project config looks like a Parameter Golf LM
-    setup (source=huggingface, variant starts with 'fineweb'). For
-    every other project the caller should supply an explicit
-    ``data.probe.download_command``. Returns an empty string when no
-    fallback is warranted.
-    """
-    data_cfg = getattr(proj_cfg, "data", None)
-    if data_cfg is None:
-        return ""
-    source = str(getattr(data_cfg, "source", "") or "").lower()
-    variant = str(getattr(data_cfg, "variant", "") or "").lower()
-    if source == "huggingface" and variant.startswith("fineweb"):
-        return (
-            f"cd {workspace} && {py} data/cached_challenge_fineweb.py "
-            f"--variant sp1024 --train-shards {train_shards}"
-        )
-    return ""
 
 
 def bootstrap_node(
@@ -600,9 +548,6 @@ def bootstrap_node(
                 download_cmd = (
                     data_download_cmd
                     or (proj_cfg.data.probe.download_command or "").strip()
-                    or _legacy_fineweb_download_command(
-                        proj_cfg, workspace, py, train_shards
-                    )
                 )
                 if download_cmd:
                     cmd_for_step = download_cmd

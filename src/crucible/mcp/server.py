@@ -1419,7 +1419,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Plugin family name (must exist in user_architectures/)."},
+                "name": {"type": "string", "description": "Plugin family name (must exist in .crucible/architectures/)."},
             },
             "required": ["name"],
             "additionalProperties": False,

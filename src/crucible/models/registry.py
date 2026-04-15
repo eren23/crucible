@@ -16,7 +16,7 @@ def register_model(name: str, factory: Callable[..., Any], *, source: str = "") 
     argparse-style namespace and returns a constructed model.
 
     *source* indicates where the registration originates: ``"builtin"``,
-    ``"global"`` (hub), or ``"local"`` (project ``user_architectures/``).
+    ``"global"`` (hub), or ``"local"`` (project ``.crucible/architectures/``).
     When omitted, defaults to the current module-level source context
     (``_CURRENT_REGISTER_SOURCE``).
 
@@ -75,7 +75,8 @@ def list_families(*, include_builtins: bool = True) -> list[str]:
         try:
             import crucible.models.architectures  # noqa: F401 — triggers registration
         except ImportError:
-            # torch not installed — return known built-in names
+            # torch not installed — return known built-in names (includes
+            # the "memory" alias registered by prefix_memory.py)
             return sorted([
                 "baseline", "looped", "convloop", "memory", "prefix_memory",
             ])

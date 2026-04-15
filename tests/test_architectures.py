@@ -89,17 +89,6 @@ class TestBuiltinArchitectures:
         _forward_check(model)
 
 
-class TestPluginArchitecture:
-    def test_two_tower_forward(self, base_args):
-        base_args.model_family = "two_tower"
-        model = build_model(base_args)
-        _forward_check(model)
-
-    def test_two_tower_registered(self):
-        families = list_families()
-        assert "two_tower" in families
-
-
 class TestRegistry:
     def test_all_builtins_registered(self):
         families = list_families()

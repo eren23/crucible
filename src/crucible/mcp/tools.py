@@ -2129,7 +2129,7 @@ def model_promote_architecture(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def model_import_architecture(args: dict[str, Any]) -> dict[str, Any]:
-    """Import a global hub architecture into the project's user_architectures/ directory."""
+    """Import a global hub architecture into the project's .crucible/architectures/ directory."""
     name = args["name"]
     try:
         hub = _get_hub_store()

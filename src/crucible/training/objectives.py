@@ -202,13 +202,13 @@ class JEPAObjective(TrainingObjective):
 
 
 # ---------------------------------------------------------------------------
-# Registry (PluginRegistry-backed, with backward-compatible API)
+# Registry (PluginRegistry-backed)
 # ---------------------------------------------------------------------------
 
 from crucible.core.plugin_registry import PluginRegistry
 
 _OBJECTIVE_REGISTRY = PluginRegistry[type["TrainingObjective"]]("objective")
-OBJECTIVE_REGISTRY: dict[str, type["TrainingObjective"]] = _OBJECTIVE_REGISTRY._registry  # backward compat
+OBJECTIVE_REGISTRY: dict[str, type["TrainingObjective"]] = _OBJECTIVE_REGISTRY._registry  # convenience alias
 
 
 def register_objective(name: str, cls: type["TrainingObjective"], *, source: str = "builtin") -> None:

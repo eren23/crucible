@@ -222,30 +222,6 @@ def test_model_generate_template_usage():
 
 
 # ---------------------------------------------------------------------------
-# user_architectures auto-import
-# ---------------------------------------------------------------------------
-
-
-def test_user_architectures_package_exists():
-    """The user_architectures package should be importable."""
-    mod = importlib.import_module("crucible.models.user_architectures")
-    assert mod is not None
-    assert hasattr(mod, "__path__")
-
-
-def test_user_architectures_auto_imports(tmp_path):
-    """Verify that .py files in user_architectures are auto-imported."""
-    # We test the auto-import mechanism by checking the __init__.py logic
-    # without actually writing files to the installed package.
-    init_path = Path(__file__).parent.parent / "src" / "crucible" / "models" / "user_architectures" / "__init__.py"
-    assert init_path.exists(), f"user_architectures/__init__.py not found at {init_path}"
-
-    source = init_path.read_text()
-    assert "pkgutil.iter_modules" in source
-    assert "importlib.import_module" in source
-
-
-# ---------------------------------------------------------------------------
 # Schema registry
 # ---------------------------------------------------------------------------
 

@@ -192,7 +192,7 @@ class SpecResolver:
 from crucible.core.plugin_registry import PluginRegistry
 
 BLOCK_TYPE_REGISTRY = PluginRegistry("block_type")
-BLOCK_TYPES: dict[str, Callable[..., Any]] = BLOCK_TYPE_REGISTRY._registry  # backward compat
+BLOCK_TYPES: dict[str, Callable[..., Any]] = BLOCK_TYPE_REGISTRY._registry  # convenience alias
 
 
 def _ensure_block_types() -> None:
@@ -210,7 +210,7 @@ def _ensure_block_types() -> None:
 # ---------------------------------------------------------------------------
 
 AUGMENTATION_REGISTRY = PluginRegistry("augmentation")
-AUGMENTATIONS: dict[str, Callable[..., Any]] = AUGMENTATION_REGISTRY._registry  # backward compat
+AUGMENTATIONS: dict[str, Callable[..., Any]] = AUGMENTATION_REGISTRY._registry  # convenience alias
 
 
 def _ensure_augmentations() -> None:
@@ -363,7 +363,7 @@ STACK_PATTERN_REGISTRY.register("sequential", SequentialPattern(), source="built
 STACK_PATTERN_REGISTRY.register("encoder_decoder_skip", EncoderDecoderSkipPattern(), source="builtin")
 STACK_PATTERN_REGISTRY.register("looped", LoopedPattern(), source="builtin")
 STACK_PATTERN_REGISTRY.register("prefix_memory_stack", PrefixMemoryStackPattern(), source="builtin")
-STACK_PATTERNS: dict[str, StackPattern] = STACK_PATTERN_REGISTRY._registry  # backward compat
+STACK_PATTERNS: dict[str, StackPattern] = STACK_PATTERN_REGISTRY._registry  # convenience alias
 
 
 # ---------------------------------------------------------------------------

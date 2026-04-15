@@ -241,21 +241,19 @@ class SyntheticVideoAdapter(DataAdapter):
 
 
 # ---------------------------------------------------------------------------
-# Registry (PluginRegistry-backed, with backward-compatible API)
+# Registry (PluginRegistry-backed)
 # ---------------------------------------------------------------------------
 
 from crucible.core.plugin_registry import PluginRegistry
 
 _ADAPTER_REGISTRY = PluginRegistry[type["DataAdapter"]]("data_adapter")
-DATA_ADAPTER_REGISTRY: dict[str, type["DataAdapter"]] = _ADAPTER_REGISTRY._registry  # backward compat
+DATA_ADAPTER_REGISTRY: dict[str, type["DataAdapter"]] = _ADAPTER_REGISTRY._registry  # convenience alias
 
 
 def register_data_adapter(name: str, cls: type["DataAdapter"], *, source: str = "builtin") -> None:
     """Register a data adapter class under *name*.
 
     Supports 3-tier precedence (builtin < global < local) via *source*.
-    The plain dict ``DATA_ADAPTER_REGISTRY`` remains available for
-    backward compatibility.
     """
     _ADAPTER_REGISTRY.register(name, cls, source=source)
 
