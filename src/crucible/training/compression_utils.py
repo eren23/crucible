@@ -5,7 +5,7 @@ operate on ``nn.Module`` instances without assuming architecture details.
 """
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Iterator
 
 import torch
 import torch.nn as nn
@@ -50,7 +50,7 @@ def apply_weight_mask(module: nn.Module, mask: Tensor) -> torch.utils.hooks.Remo
 
     Returns a handle that can be removed to detach the mask.
     """
-    def _hook(mod: nn.Module, inputs: Any) -> None:
+    def _hook(mod: nn.Module, inputs: tuple[Tensor, ...]) -> None:
         mod.weight.data.mul_(mask)
 
     return module.register_forward_pre_hook(_hook)

@@ -6,6 +6,7 @@ import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from crucible.core.errors import RunnerError
@@ -485,7 +486,7 @@ def refresh_and_save_nodes(
     nodes: list[NodeRecord],
     *,
     nodes_file: Path,
-    refresh_fn: Any = None,
+    refresh_fn: Callable[[list[NodeRecord]], list[NodeRecord]] | None = None,
 ) -> list[NodeRecord]:
     """Refresh node records from provider API, classify health, and save."""
     from crucible.fleet.inventory import merge_node_snapshots, load_nodes_if_exists
@@ -525,8 +526,8 @@ def run_wave(
     monitor_interval: int,
     min_completed: int,
     recovery: dict[str, Any],
-    refresh_fn: Any = None,
-    provision_replacement_fn: Any = None,
+    refresh_fn: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
+    provision_replacement_fn: Callable[..., list[dict[str, Any]]] | None = None,
     baseline_curve: list[tuple[int, float]] | None = None,
     early_stop_step_threshold: int = 6000,
     early_stop_margin: float = 0.05,

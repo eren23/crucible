@@ -15,24 +15,29 @@ Usage::
 """
 from __future__ import annotations
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from typing import Any
 
 from crucible.core.plugin_registry import PluginRegistry
 
-PROVIDER_REGISTRY = PluginRegistry("fleet_provider")
+PROVIDER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("fleet_provider")
 
 
 # ---------------------------------------------------------------------------
 # Convenience wrappers (public API)
 # ---------------------------------------------------------------------------
 
-def register_provider(name: str, factory: Any, *, source: str = "builtin") -> None:
+def register_provider(name: str, factory: Callable[..., Any], *, source: str = "builtin") -> None:
     """Register a fleet provider factory under *name*."""
     PROVIDER_REGISTRY.register(name, factory, source=source)
 
 
-def build_provider(name: str, **kwargs: Any) -> Any:
+def build_provider(name: str, **kwargs: Any) -> FleetProvider:
     """Build a fleet provider by name."""
+    from crucible.fleet.provider import FleetProvider  # noqa: F811 — lazy to avoid circular
+
     factory = PROVIDER_REGISTRY.get(name)
     if factory is None:
         from crucible.core.errors import PluginError
@@ -58,7 +63,18 @@ def list_providers_detailed() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: Any = None, defaults: Any = None, gpu_count: int = 1, network_volume_id: str = "", template_id: str = "", **kwargs: Any) -> Any:
+def _runpod_factory(
+    *,
+    ssh_key: str = "",
+    image_name: str = "",
+    gpu_type_ids: list[str] | None = None,
+    defaults: dict[str, Any] | None = None,
+    gpu_count: int = 1,
+    network_volume_id: str = "",
+    template_id: str = "",
+    **kwargs: Any,
+) -> FleetProvider:
+    from crucible.fleet.provider import FleetProvider  # noqa: F811
     from crucible.fleet.providers.runpod import RunPodProvider
     return RunPodProvider(
         image_name=image_name or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
@@ -72,7 +88,13 @@ def _runpod_factory(*, ssh_key: str = "", image_name: str = "", gpu_type_ids: An
     )
 
 
-def _ssh_factory(*, ssh_key: str = "", defaults: Any = None, **kwargs: Any) -> Any:
+def _ssh_factory(
+    *,
+    ssh_key: str = "",
+    defaults: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> FleetProvider:
+    from crucible.fleet.provider import FleetProvider  # noqa: F811
     from crucible.fleet.providers.ssh import SSHProvider
     return SSHProvider(
         ssh_key=ssh_key,

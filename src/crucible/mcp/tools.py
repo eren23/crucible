@@ -3,13 +3,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.errors import CrucibleError
+
+if TYPE_CHECKING:
+    from crucible.core.config import ProjectSpec
+    from crucible.core.hub import HubStore
+    from crucible.core.tap import TapManager
+    from crucible.research_dag.bridge import ResearchDAGBridge
 from crucible.core.experiment_contract import (
     contract_metadata,
     resolve_wandb_settings,
@@ -23,7 +31,7 @@ def _get_config() -> ProjectConfig:
     return load_config()
 
 
-def _get_hub_store() -> Any:
+def _get_hub_store() -> HubStore:
     """Return a HubStore honoring project config hub_dir overrides."""
     from crucible.core.hub import HubStore
 
@@ -45,7 +53,7 @@ def _queue_contract_fields(config: ProjectConfig) -> dict[str, Any]:
     }
 
 
-def _project_contract_env(config: ProjectConfig, spec: Any) -> dict[str, str]:
+def _project_contract_env(config: ProjectConfig, spec: ProjectSpec) -> dict[str, str]:
     env = os.environ.copy()
     env.update({k: str(v) for k, v in getattr(spec, "env_set", {}).items()})
     wandb = resolve_wandb_settings(config, env=env)
@@ -1631,7 +1639,7 @@ def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
-def _research_finding_to_hub_finding(finding: dict[str, Any], config: Any) -> dict[str, Any]:
+def _research_finding_to_hub_finding(finding: dict[str, Any], config: ProjectConfig) -> dict[str, Any]:
     """Convert a ResearchState finding to hub-compatible Finding format."""
     from crucible.core.finding import make_finding_id
 
@@ -1848,7 +1856,7 @@ def research_literature_search(args: dict[str, Any]) -> dict[str, Any]:
                     seen.add(p["id"])
                     all_papers.append(p)
         papers = all_papers[:limit]
-        query_used: Any = queries
+        query_used: str | list[str] = queries
     else:
         papers = search_papers(query, limit=limit)
         query_used = query
@@ -2183,9 +2191,9 @@ def _load_spec_dict(family: str) -> dict | None:
 
 
 def _scan_spec_vars(
-    obj: Any,
-    var_pattern: Any,
-    config: dict,
+    obj: str | dict[str, Any] | list[Any] | Any,
+    var_pattern: re.Pattern[str],
+    config: dict[str, Any],
     missing: list[str],
 ) -> None:
     """Recursively scan a spec dict for unresolved template vars without defaults."""
@@ -4064,7 +4072,7 @@ def _validate_recipe_name(name: str) -> str | None:
     return None
 
 
-def _recipes_dir(config: Any) -> Path:
+def _recipes_dir(config: ProjectConfig) -> Path:
     return config.project_root / config.store_dir / "recipes"
 
 
@@ -4327,7 +4335,7 @@ def plugin_get_schema(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_tap_manager() -> Any:
+def _get_tap_manager() -> TapManager | None:
     from crucible.core.tap import TapManager
     hub = _get_hub()
     if hub is None:
@@ -4720,7 +4728,7 @@ def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
 # ------------------------------------------------------------------
 
 
-def _get_dag_bridge() -> Any:
+def _get_dag_bridge() -> ResearchDAGBridge:
     """Return a ResearchDAGBridge for the current project.
 
     Reads Spider Chat URL from persisted DAG state (set during init),
@@ -4884,7 +4892,7 @@ def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
-TOOL_DISPATCH: dict[str, Any] = {
+TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Existing tools
     "get_fleet_status": get_fleet_status,
     "get_leaderboard": get_leaderboard,

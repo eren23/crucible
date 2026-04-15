@@ -5,9 +5,13 @@ and links execution results back to designs via the version store.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.types import ExperimentConfig, ExperimentDesign, VersionMeta
+
+if TYPE_CHECKING:
+    from crucible.core.store import VersionStore
+    from crucible.core.types import VersionMeta
 
 
 def design_to_experiment_config(
@@ -31,7 +35,7 @@ def design_to_experiment_config(
 
 
 def link_result_to_design(
-    store: Any,  # VersionStore — Any to avoid circular import
+    store: VersionStore,
     design_name: str,
     run_id: str,
 ) -> VersionMeta | None:

@@ -130,7 +130,7 @@ class EarlyStoppingCallback(TrainingCallback):
 # Convenience API
 # ---------------------------------------------------------------------------
 
-def register_callback(name: str, factory: Any, *, source: str = "builtin") -> None:
+def register_callback(name: str, factory: type[TrainingCallback], *, source: str = "builtin") -> None:
     CALLBACK_REGISTRY.register(name, factory, source=source)
 
 

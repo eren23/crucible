@@ -7,10 +7,13 @@ promising nodes, generates children, and enqueues them for execution.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.config import ProjectConfig
 from crucible.researcher.search_tree import SearchTree
+
+if TYPE_CHECKING:
+    from crucible.researcher.llm_client import LLMClient
 
 
 class TreeSearchResearcher:
@@ -23,7 +26,7 @@ class TreeSearchResearcher:
         tree_dir: Path | None = None,
         max_iterations: int = 10,
         n_children: int = 3,
-        llm: Any = None,
+        llm: LLMClient | None = None,
     ) -> None:
         self.config = config
         self.tree_name = tree_name
@@ -53,7 +56,7 @@ class TreeSearchResearcher:
         self._llm = llm
 
     @property
-    def llm(self) -> Any:
+    def llm(self) -> LLMClient:
         """Lazy-load the LLM client on first access."""
         if self._llm is None:
             from crucible.researcher.llm_client import AnthropicClient

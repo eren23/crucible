@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.config import DataConfig
 from crucible.core.plugin_registry import PluginRegistry
@@ -37,9 +37,9 @@ class DataStatusResult:
     """Result of checking data source status."""
 
     status: DataStatus
-    manifest: Optional[dict[str, Any]]
+    manifest: dict[str, Any] | None
     shard_count: dict[str, int] = field(default_factory=dict)
-    last_prepared: Optional[datetime] = None
+    last_prepared: datetime | None = None
     issues: list[str] = field(default_factory=list)
 
 
@@ -48,7 +48,7 @@ class PreparationResult:
     """Result of preparing a data source."""
 
     success: bool
-    job_id: Optional[str]
+    job_id: str | None
     message: str
     shards_downloaded: int
 
@@ -70,8 +70,8 @@ class SearchResult:
     source: str
     description: str
     shard_count: int
-    repo_id: Optional[str] = None
-    artifact: Optional[str] = None
+    repo_id: str | None = None
+    artifact: str | None = None
 
 
 class DataSourcePlugin(ABC):
@@ -140,7 +140,7 @@ def list_data_sources() -> list[str]:
     return _DATA_SOURCE_REGISTRY.list_plugins()
 
 
-def describe_data_source(name: str) -> Optional[dict[str, str]]:
+def describe_data_source(name: str) -> dict[str, str] | None:
     """Return metadata for a registered data source, or None if not found.
 
     Returns:
@@ -228,5 +228,5 @@ class DataPipeline:
             for name, plugin in self._sources.items()
         ]
 
-    def get_source(self, name: str) -> Optional[DataSourcePlugin]:
+    def get_source(self, name: str) -> DataSourcePlugin | None:
         return self._sources.get(name)

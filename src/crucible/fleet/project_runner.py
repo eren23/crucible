@@ -10,7 +10,8 @@ import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import RunnerError
 from crucible.core.io import append_jsonl, _json_ready
@@ -18,10 +19,13 @@ from crucible.core.log import log_info, log_step, log_success, log_warn
 from crucible.fleet.inventory import BAD_API_STATES
 from crucible.fleet.sync import remote_exec, rsync_base, _run
 
+if TYPE_CHECKING:
+    from crucible.core.config import ProjectSpec
+
 
 def launch_project(
     node: dict[str, Any],
-    spec: Any,
+    spec: ProjectSpec,
     run_id: str,
     *,
     overrides: dict[str, str] | None = None,
@@ -107,13 +111,13 @@ def launch_project(
 
 def chain_project_variants(
     node: dict[str, Any],
-    spec: Any,
+    spec: ProjectSpec,
     variants: list[str],
     *,
     overrides: dict[str, str] | None = None,
     poll_interval: int = 30,
-    on_variant_start: Any | None = None,
-    on_variant_complete: Any | None = None,
+    on_variant_start: Callable[[str, dict[str, Any]], None] | None = None,
+    on_variant_complete: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Run a sequence of project variants on the same node, auto-chaining.
 
@@ -307,7 +311,7 @@ def _classify_project_status(
 
 def collect_project_result(
     node: dict[str, Any],
-    spec: Any,
+    spec: ProjectSpec,
     run_id: str,
     pid: int,
     *,

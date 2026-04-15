@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import CrucibleError
 
+if TYPE_CHECKING:
+    from crucible.core.tap import TapManager
 
-def _get_tap_manager(args: argparse.Namespace) -> Any:
+
+def _get_tap_manager(args: argparse.Namespace) -> TapManager:
     """Resolve hub dir and return a TapManager."""
     from crucible.core.config import load_config
     from crucible.core.hub import HubStore

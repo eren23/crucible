@@ -9,7 +9,11 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from crucible.core.config import ProjectConfig, ProjectSpec
 
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
@@ -146,7 +150,7 @@ def bootstrap_step(
 def _record_step(
     node: NodeRecord,
     step_name: str,
-    fn: Any,
+    fn: Callable[[], Any],
     *,
     required: bool = True,
 ) -> Any:
@@ -265,7 +269,7 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 def ensure_project_system_tools(
     node: NodeRecord,
-    spec: Any,
+    spec: ProjectSpec,
     *,
     timeout: int,
 ) -> None:
@@ -305,7 +309,7 @@ def ensure_project_system_tools(
 
 
 def _build_data_probe_command(
-    proj_cfg: Any,
+    proj_cfg: ProjectConfig,
     workspace: str,
     py: str,
 ) -> str | None:
@@ -592,7 +596,7 @@ def bootstrap_node(
 
 def bootstrap_project(
     node: NodeRecord,
-    spec: Any,
+    spec: ProjectSpec,
     *,
     project_root: Path | None = None,
 ) -> dict[str, Any]:
@@ -815,8 +819,8 @@ def start_bootstrap_supervisor(
     min_ready_to_start: int,
     bootstrap_workers: int,
     replacement_budget: int,
-    replace_fn: Any = None,
-    refresh_fn: Any = None,
+    replace_fn: Callable[..., list[dict[str, Any]]] | None = None,
+    refresh_fn: Callable[..., list[dict[str, Any]]] | None = None,
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,

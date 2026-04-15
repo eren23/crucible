@@ -101,7 +101,7 @@ def ensure_clean_commit(
 def code_fingerprint(
     project_root: Path,
     extra_files: tuple[str, ...] | list[str] | None = None,
-) -> dict:
+) -> dict[str, str | dict[str, str]]:
     """SHA-256 fingerprint key source files for experiment deduplication.
 
     Args:

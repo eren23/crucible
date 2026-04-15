@@ -1,8 +1,6 @@
 """Pydantic response/request models for the Crucible API."""
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 from crucible import __version__
@@ -20,10 +18,10 @@ class ExperimentSummary(BaseModel):
     run_id: str = ""
     status: str = ""
     primary_metric: str = ""
-    primary_value: Optional[float] = None
-    model_bytes: Optional[int] = None
-    tags: List[str] = Field(default_factory=list)
-    config: dict = Field(default_factory=dict)
+    primary_value: float | None = None
+    model_bytes: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    config: dict[str, str] = Field(default_factory=dict)
     timestamp: str = ""
 
 
@@ -31,7 +29,7 @@ class ExperimentDetail(BaseModel):
     """Full experiment result with all fields."""
 
     found: bool = True
-    result: dict = Field(default_factory=dict)
+    result: dict[str, object] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +43,7 @@ class NoteEntry(BaseModel):
     run_id: str = ""
     text: str = ""
     stage: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_at: str = ""
     created_by: str = ""
 
@@ -55,7 +53,7 @@ class NoteCreate(BaseModel):
 
     text: str
     stage: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_by: str = "api"
 
 
@@ -69,7 +67,7 @@ class FindingEntry(BaseModel):
 
     finding: str = ""
     category: str = "observation"
-    source_experiments: List[str] = Field(default_factory=list)
+    source_experiments: list[str] = Field(default_factory=list)
     confidence: float = 0.7
     created_by: str = ""
     ts: str = ""
@@ -80,7 +78,7 @@ class FindingCreate(BaseModel):
 
     finding: str
     category: str = "observation"
-    source_experiments: List[str] = Field(default_factory=list)
+    source_experiments: list[str] = Field(default_factory=list)
     confidence: float = 0.7
     created_by: str = "api"
 
@@ -95,7 +93,7 @@ class TrackSummary(BaseModel):
 
     name: str = ""
     description: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     status: str = "active"
     created_at: str = ""
     experiment_count: int = 0
