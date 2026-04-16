@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -55,14 +56,42 @@ class SearchTree:
         max_depth: int = 10,
         max_nodes: int = 500,
         max_expansions_per_node: int = 5,
+        metrics: list[dict[str, str]] | None = None,
+        candidate_store_dir: str | None = None,
     ) -> "SearchTree":
-        """Create a new search tree on disk."""
+        """Create a new search tree on disk.
+
+        ``metrics`` enables multi-metric Pareto-frontier tracking. When unset,
+        behavior is single-metric and falls back to ``primary_metric`` /
+        ``metric_direction`` for backward compatibility. Each entry must have
+        a ``name`` and a ``direction`` of ``"minimize"`` or ``"maximize"``.
+
+        ``candidate_store_dir`` is a path (absolute or relative to
+        ``tree_dir``) used by :meth:`store_candidate` to persist candidate
+        source code files. When unset, defaults to ``"candidates"`` inside
+        ``tree_dir``.
+        """
         tree_dir = Path(tree_dir)
         if tree_dir.exists() and (tree_dir / "tree.yaml").exists():
             raise SearchTreeError(f"Search tree already exists at {tree_dir}")
 
         tree_dir.mkdir(parents=True, exist_ok=True)
         now = utc_now_iso()
+
+        # Derive metrics list from (primary_metric, metric_direction) when
+        # callers didn't provide a multi-metric list.
+        resolved_metrics = metrics if metrics else [
+            {"name": primary_metric, "direction": metric_direction}
+        ]
+        for m in resolved_metrics:
+            if "name" not in m or "direction" not in m:
+                raise SearchTreeError(
+                    f"metrics entry missing name/direction: {m!r}"
+                )
+            if m["direction"] not in ("minimize", "maximize"):
+                raise SearchTreeError(
+                    f"metrics direction must be 'minimize' or 'maximize', got {m['direction']!r}"
+                )
 
         tree = cls(tree_dir)
         tree.meta = {
@@ -75,6 +104,8 @@ class SearchTree:
             "pruning_config": pruning_config or {},
             "primary_metric": primary_metric,
             "metric_direction": metric_direction,
+            "metrics": resolved_metrics,
+            "candidate_store_dir": candidate_store_dir or "candidates",
             "max_depth": max_depth,
             "max_nodes": max_nodes,
             "max_expansions_per_node": max_expansions_per_node,
@@ -84,6 +115,7 @@ class SearchTree:
             "pruned_nodes": 0,
             "best_node_id": None,
             "best_metric": None,
+            "frontier_node_ids": [],
             "created_at": now,
             "updated_at": now,
         }
@@ -261,8 +293,9 @@ class SearchTree:
     def record_result(self, node_id: str, result: dict[str, Any]) -> None:
         """Record a completed experiment result for a node.
 
-        Updates status, backpropagates visit counts, and updates best tracking.
-        The result dict should contain the primary metric key.
+        Updates status, backpropagates visit counts, and updates best
+        tracking (single-metric) and the Pareto frontier (multi-metric).
+        The result dict should contain all metric keys listed in tree meta.
         """
         node = self.get_node(node_id)
         if node is None:
@@ -275,9 +308,22 @@ class SearchTree:
         metric_key = self.meta["primary_metric"]
         metric_val = result.get(metric_key)
 
+        # Collect all tracked metric values (multi-metric Pareto support).
+        metric_values: dict[str, float] = {}
+        for m in self._get_metrics():
+            v = result.get(m["name"])
+            if v is not None:
+                try:
+                    metric_values[m["name"]] = float(v)
+                except (TypeError, ValueError):
+                    # Non-numeric metric values are skipped silently so the
+                    # tree stays usable even when a candidate reports garbage.
+                    continue
+
         node["status"] = "completed"
         node["result"] = dict(result)
         node["result_metric"] = float(metric_val) if metric_val is not None else None
+        node["result_metrics"] = metric_values
         node["completed_at"] = now
         if result.get("run_id"):
             node["run_id"] = result["run_id"]
@@ -285,9 +331,12 @@ class SearchTree:
         self.meta["completed_nodes"] += 1
         self.meta["updated_at"] = now
 
-        # Update best tracking
+        # Update best tracking (primary metric)
         if metric_val is not None:
             self._update_best(node_id, float(metric_val))
+
+        # Recompute Pareto frontier across all tracked metrics
+        self._update_frontier()
 
         # Backpropagate visit counts
         self._propagate_visits(node_id)
@@ -380,6 +429,8 @@ class SearchTree:
             return self._select_greedy(pending, n)
         elif policy == "epsilon_greedy":
             return self._select_epsilon_greedy(pending, n)
+        elif policy == "pareto":
+            return self._select_pareto(pending, n)
         else:
             # Unknown policy falls back to priority score
             pending.sort(key=lambda nd: nd.get("priority_score", 0), reverse=True)
@@ -471,6 +522,25 @@ class SearchTree:
             return None
         return parent.get("result_metric")
 
+    def _select_pareto(self, candidates: list[dict], n: int) -> list[str]:
+        """Prefer pending children whose completed parent is on the Pareto frontier.
+
+        Unvisited candidates with frontier ancestry bubble to the top. Ties
+        are broken by priority_score, then by visit_count (lowest first).
+        """
+        frontier_ids = set(self.meta.get("frontier_node_ids") or [])
+        scored: list[tuple[int, float, int, str]] = []
+        for nd in candidates:
+            parent_id = nd.get("parent_node_id")
+            # Higher primary key when parent sits on the Pareto frontier.
+            on_frontier = 1 if parent_id in frontier_ids else 0
+            priority = float(nd.get("priority_score", 0.0))
+            visits = int(nd.get("visit_count", 0))
+            scored.append((on_frontier, priority, -visits, nd["node_id"]))
+        # Sort by (on_frontier desc, priority desc, -visits desc -> visits asc)
+        scored.sort(reverse=True)
+        return [nid for _, _, _, nid in scored[:n]]
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
@@ -545,6 +615,221 @@ class SearchTree:
             if cid != node_id and cid in self.nodes
         ]
 
+    # ------------------------------------------------------------------
+    # Multi-metric Pareto frontier
+    # ------------------------------------------------------------------
+
+    def _get_metrics(self) -> list[dict[str, str]]:
+        """Return the list of tracked metrics, with legacy-tree fallback."""
+        metrics = self.meta.get("metrics")
+        if metrics:
+            return list(metrics)
+        # Backward compat: reconstruct from primary_metric/metric_direction.
+        return [
+            {
+                "name": self.meta.get("primary_metric", "val_bpb"),
+                "direction": self.meta.get("metric_direction", "minimize"),
+            }
+        ]
+
+    def pareto_nodes(self) -> list[str]:
+        """Return node IDs on the current N-dimensional Pareto frontier.
+
+        Only completed, non-pruned nodes with values for every tracked metric
+        are considered. Returns an empty list when no tree results exist or
+        when no node carries a complete metric vector.
+        """
+        from crucible.analysis.leaderboard import pareto_frontier_nd
+
+        metrics = self._get_metrics()
+        directions = [m["direction"] for m in metrics]
+        names = [m["name"] for m in metrics]
+
+        points: list[list[float]] = []
+        node_ids: list[str] = []
+        for nid, node in self.nodes.items():
+            if node.get("status") != "completed":
+                continue
+            values = node.get("result_metrics") or {}
+            # Fall back to primary-metric-only vectors for legacy nodes.
+            if not values and node.get("result_metric") is not None and len(names) == 1:
+                values = {names[0]: node["result_metric"]}
+            if any(n not in values for n in names):
+                continue
+            points.append([float(values[n]) for n in names])
+            node_ids.append(nid)
+
+        if not points:
+            return []
+
+        frontier_idx = pareto_frontier_nd(points, directions, ids=node_ids)
+        return [node_ids[i] for i in frontier_idx]
+
+    def frontier_summary(self) -> dict[str, Any]:
+        """Return a snapshot of the Pareto frontier (useful for iteration logs).
+
+        Contains:
+            - ``frontier_node_ids``: IDs on the current frontier
+            - ``frontier_size``: count of frontier nodes
+            - ``dominated_count``: completed nodes dominated by someone
+            - ``metrics``: [{name, direction}] in use
+            - ``best_per_metric``: {metric: {node_id, value}} winner per axis
+            - ``hypervolume``: 2D HV when exactly two metrics are tracked
+        """
+        from crucible.analysis.leaderboard import hypervolume_2d
+
+        metrics = self._get_metrics()
+        names = [m["name"] for m in metrics]
+        directions = [m["direction"] for m in metrics]
+
+        frontier_ids = self.pareto_nodes()
+
+        completed = [
+            n for n in self.nodes.values() if n.get("status") == "completed"
+        ]
+        dominated_count = max(0, len(completed) - len(frontier_ids))
+
+        best_per_metric: dict[str, Any] = {}
+        for name, direction in zip(names, directions):
+            best_node_id = None
+            best_val: float | None = None
+            for node in completed:
+                values = node.get("result_metrics") or {}
+                if name not in values and node.get("result_metric") is not None and len(names) == 1:
+                    # Legacy single-metric tree
+                    v = node["result_metric"]
+                else:
+                    v = values.get(name)
+                if v is None:
+                    continue
+                try:
+                    vf = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if best_val is None:
+                    best_val = vf
+                    best_node_id = node["node_id"]
+                elif direction == "minimize" and vf < best_val:
+                    best_val = vf
+                    best_node_id = node["node_id"]
+                elif direction == "maximize" and vf > best_val:
+                    best_val = vf
+                    best_node_id = node["node_id"]
+            if best_node_id is not None:
+                best_per_metric[name] = {"node_id": best_node_id, "value": best_val}
+
+        hv: float | None = None
+        if len(names) == 2 and frontier_ids:
+            pts: list[list[float]] = []
+            for nid in frontier_ids:
+                node = self.nodes.get(nid)
+                if not node:
+                    continue
+                values = node.get("result_metrics") or {}
+                pts.append([float(values[n]) for n in names])
+            if pts:
+                hv = hypervolume_2d(pts, directions)
+
+        return {
+            "frontier_node_ids": frontier_ids,
+            "frontier_size": len(frontier_ids),
+            "dominated_count": dominated_count,
+            "metrics": metrics,
+            "best_per_metric": best_per_metric,
+            "hypervolume": hv,
+        }
+
+    def _update_frontier(self) -> None:
+        """Recompute the cached frontier_node_ids after a result is recorded.
+
+        Narrow catch: only structural errors from the frontier computation
+        (bad metric values, inconsistent shapes) are tolerated. Anything
+        else — including OSError during snapshot writes — should propagate.
+        """
+        try:
+            self.meta["frontier_node_ids"] = self.pareto_nodes()
+        except (ValueError, TypeError) as exc:
+            # Metric values can be missing or non-numeric for in-flight nodes.
+            # Logging here would be noisy — the frontier will refresh on the
+            # next record_result() once data is clean.
+            from crucible.core.log import log_warn
+            log_warn(f"Frontier recompute skipped: {exc}")
+
+    # ------------------------------------------------------------------
+    # Code-as-candidate storage
+    # ------------------------------------------------------------------
+
+    def _candidate_dir(self) -> Path:
+        raw = self.meta.get("candidate_store_dir") or "candidates"
+        p = Path(raw)
+        if not p.is_absolute():
+            p = self.tree_dir / p
+        return p
+
+    _SAFE_CANDIDATE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+    _MAX_CANDIDATE_SIZE_BYTES = 256 * 1024  # 256 KB per-candidate source cap
+
+    def store_candidate(self, node_id: str, code: str) -> Path:
+        """Persist candidate source code for a node.
+
+        The file is written to ``{candidate_store_dir}/{node_id}.py``. The
+        tree node's config is augmented with ``HARNESS_CANDIDATE_ID`` and
+        ``HARNESS_CANDIDATES_DIR`` so the runner can locate the code at
+        dispatch time (parallel to how ``MODEL_FAMILY`` points to
+        architecture code on disk).
+
+        Hardens against filesystem misuse: validates the node_id against a
+        safe character set, rejects symlink-escaped destinations, and caps
+        source size.
+        """
+        node = self.get_node(node_id)
+        if node is None:
+            raise SearchTreeError(f"Node '{node_id}' not found")
+        if not self._SAFE_CANDIDATE_ID_RE.match(node_id):
+            raise SearchTreeError(
+                f"Unsafe candidate id {node_id!r}; must match [a-zA-Z0-9][a-zA-Z0-9_-]*"
+            )
+        if len(code.encode("utf-8")) > self._MAX_CANDIDATE_SIZE_BYTES:
+            raise SearchTreeError(
+                f"Candidate source exceeds {self._MAX_CANDIDATE_SIZE_BYTES} bytes"
+            )
+
+        cdir = self._candidate_dir().resolve()
+        cdir.mkdir(parents=True, exist_ok=True)
+        path = (cdir / f"{node_id}.py").resolve()
+        try:
+            path.relative_to(cdir)
+        except ValueError as exc:
+            raise SearchTreeError(
+                f"Candidate path {path} escapes candidate store {cdir}"
+            ) from exc
+
+        path.write_text(code, encoding="utf-8")
+        cfg = node.setdefault("config", {})
+        cfg["HARNESS_CANDIDATE_ID"] = node_id
+        cfg["HARNESS_CANDIDATES_DIR"] = str(cdir)
+        self._append_node_event("store_candidate", node)
+        self._save_snapshot()
+        return path
+
+    def load_candidate(self, node_id: str) -> str:
+        """Read back candidate source code for a node. Raises if missing."""
+        if not self._SAFE_CANDIDATE_ID_RE.match(node_id):
+            raise SearchTreeError(
+                f"Unsafe candidate id {node_id!r}; must match [a-zA-Z0-9][a-zA-Z0-9_-]*"
+            )
+        cdir = self._candidate_dir().resolve()
+        path = (cdir / f"{node_id}.py").resolve()
+        try:
+            path.relative_to(cdir)
+        except ValueError as exc:
+            raise SearchTreeError(
+                f"Candidate path {path} escapes candidate store {cdir}"
+            ) from exc
+        if not path.exists():
+            raise SearchTreeError(f"No candidate code at {path}")
+        return path.read_text(encoding="utf-8")
+
     def get_tree_summary(self) -> dict[str, Any]:
         """Get a summary of the tree state."""
         status_counts: dict[str, int] = {}
@@ -568,6 +853,8 @@ class SearchTree:
             "pruned_nodes": self.meta.get("pruned_nodes", 0),
             "best_node_id": self.meta.get("best_node_id"),
             "best_metric": self.meta.get("best_metric"),
+            "metrics": self._get_metrics(),
+            "frontier_size": len(self.meta.get("frontier_node_ids") or []),
             "max_depth": self.meta.get("max_depth"),
             "max_nodes": self.meta.get("max_nodes"),
             "status_breakdown": status_counts,

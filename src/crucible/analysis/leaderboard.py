@@ -191,3 +191,148 @@ def pareto_frontier(
 
     log_info(f"Pareto frontier: {len(pareto)} optimal point(s) from {len(results)} candidates")
     return pareto
+
+
+# ---------------------------------------------------------------------------
+# N-dimensional Pareto utilities
+# ---------------------------------------------------------------------------
+
+
+def dominates(
+    a: list[float], b: list[float], directions: list[str]
+) -> bool:
+    """Return True iff point *a* dominates point *b* on every axis.
+
+    An axis direction of ``"minimize"`` means lower is better; ``"maximize"``
+    means higher is better. *a* dominates *b* when *a* is at least as good as
+    *b* on all axes and strictly better on at least one.
+    """
+    if len(a) != len(b) or len(a) != len(directions):
+        raise ValueError("Dimension mismatch between points and directions")
+
+    strictly_better_anywhere = False
+    for av, bv, d in zip(a, b, directions):
+        if d == "minimize":
+            if av > bv:
+                return False
+            if av < bv:
+                strictly_better_anywhere = True
+        elif d == "maximize":
+            if av < bv:
+                return False
+            if av > bv:
+                strictly_better_anywhere = True
+        else:
+            raise ValueError(f"Unknown direction {d!r} (expected 'minimize'/'maximize')")
+    return strictly_better_anywhere
+
+
+def pareto_frontier_nd(
+    points: list[list[float]],
+    directions: list[str],
+    *,
+    ids: list[Any] | None = None,
+) -> list[int]:
+    """Return indices of non-dominated points across N dimensions.
+
+    Parameters
+    ----------
+    points:
+        List of *N*-dimensional metric vectors (one per candidate).
+    directions:
+        Per-axis optimization direction: ``"minimize"`` or ``"maximize"``.
+    ids:
+        Optional labels for logging; indices are returned regardless.
+
+    Returns
+    -------
+    List of indices into *points* that are on the Pareto frontier.
+    """
+    if not points:
+        return []
+    if any(len(p) != len(directions) for p in points):
+        raise ValueError("All points must match the length of `directions`")
+
+    n = len(points)
+    frontier: list[int] = []
+    for i in range(n):
+        dominated = False
+        for j in range(n):
+            if i == j:
+                continue
+            if dominates(points[j], points[i], directions):
+                dominated = True
+                break
+        if not dominated:
+            frontier.append(i)
+
+    if ids is not None:
+        log_info(
+            f"Pareto frontier (N-D): {len(frontier)} non-dominated of {n} points"
+        )
+    return frontier
+
+
+def hypervolume_2d(
+    points: list[list[float]],
+    directions: list[str],
+    *,
+    reference: list[float] | None = None,
+) -> float:
+    """Compute 2D hypervolume (area dominated by the frontier).
+
+    Dependency-free 2D implementation. Callers with higher dimensions should
+    use a dedicated HV library (pygmo, moarchiving, etc.). Returns area in
+    the "minimize both" reference frame; maximize axes are flipped internally.
+
+    Parameters
+    ----------
+    points:
+        Pareto frontier points (ideally already non-dominated).
+    directions:
+        Two-element list of ``"minimize"`` / ``"maximize"``.
+    reference:
+        Reference point in the *original* coordinate system. Defaults to the
+        worst observed value on each axis plus a small margin.
+    """
+    if len(directions) != 2:
+        raise ValueError("hypervolume_2d requires exactly 2 dimensions")
+    if not points:
+        return 0.0
+
+    def _to_min(p: list[float]) -> list[float]:
+        return [v if d == "minimize" else -v for v, d in zip(p, directions)]
+
+    mins = [_to_min(p) for p in points]
+
+    if reference is None:
+        worst_x = max(p[0] for p in mins)
+        worst_y = max(p[1] for p in mins)
+        ref = [worst_x + 1.0, worst_y + 1.0]
+    else:
+        ref = _to_min(reference)
+
+    # Filter non-dominated points worse than the reference on either axis.
+    mins.sort(key=lambda p: p[0])
+    filtered: list[list[float]] = []
+    best_y = float("inf")
+    for p in mins:
+        if p[0] >= ref[0] or p[1] >= ref[1]:
+            continue
+        if p[1] < best_y:
+            filtered.append(p)
+            best_y = p[1]
+
+    if not filtered:
+        return 0.0
+
+    # Sweep x ascending: contribution of point i is (x_{i+1} - x_i) * (ref_y - y_i)
+    # where x_{n} = ref_x.
+    area = 0.0
+    for i, (x, y) in enumerate(filtered):
+        next_x = filtered[i + 1][0] if i + 1 < len(filtered) else ref[0]
+        width = next_x - x
+        height = ref[1] - y
+        if width > 0 and height > 0:
+            area += width * height
+    return area
