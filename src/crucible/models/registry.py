@@ -94,7 +94,7 @@ def list_families_detailed(*, include_builtins: bool = True) -> list[dict[str, s
         except ImportError:
             return [{"name": n, "source": "builtin"} for n in sorted(["baseline", "looped", "convloop", "memory", "prefix_memory"])]
     return sorted(
-        [{"name": name, "source": _REGISTRY_META.get(name, {}).get("source", "unknown")} for name in _REGISTRY],
+        [{"name": name, "source": _REGISTRY_META[name]["source"]} for name in _REGISTRY],
         key=lambda d: d["name"],
     )
 
