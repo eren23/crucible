@@ -3,19 +3,18 @@
 > **Read this before touching project specs, crucible.yaml, taps, or any `provision_project` / `bootstrap_project` / `run_project` call.**
 >
 > This is the definitive map of which config layer wins at each stage of the
-> fleet / bootstrap / run flow, plus three known bugs that have already cost
-> several hours of debugging and GPU-hours to track down. Everything in this
-> doc is cross-referenced to exact `file:line` in the `src/crucible/` tree.
+> fleet / bootstrap / run flow, plus the `nodes.json` interruptible-echo bug
+> that has already cost hours of debugging. Everything in this doc is
+> cross-referenced to exact `file:line` in the `src/crucible/` tree.
 
 ## Executive summary
 
 Crucible pulls config from ~12 layers that interact in non-obvious ways. The
-four most surprising facts:
+three most surprising facts:
 
 1. **Project spec resolution is first-match-wins, not merge.** `local > hub > tap`. If you have both a local `.crucible/projects/<name>.yaml` AND a tap-provided `~/.crucible-hub/taps/*/projects/<name>.yaml`, the local one **completely replaces** the tap one — no layering. ([§1](#1-project-spec-loading))
 2. **`nodes.json` records `pod.interruptible` from the RunPod API *response*, not the input.** RunPod's response often omits the field, so the fallback chain lands on either the previous record's value or `True` regardless of what you asked for. Your yaml edit may have worked at the API layer but `nodes.json` lies to you. ([§3](#3-known-bug-nodesjson-interruptible-echo))
-3. **The `variants:` dict in a project yaml is inert.** It is parsed into `ProjectSpec` but never read by any fleet or runner code. To actually run a variant, the caller must pass its env overrides to `run_project(overrides={...})` manually. ([§4](#4-known-bug-variants-dict-is-inert))
-4. **`env_defaults` is a dead field.** Parsed into `ProjectSpec.env_defaults`, never read downstream. Do not use it. ([§6](#6-env-assembly-at-launch-time))
+3. **Variants are dispatched via `variant_name=...` on `run_project`.** The runner looks up `spec.variants[name]` and merges its env dict into overrides before launch; passing `overrides={...}` directly still works. ([§4](#4-running-a-variant))
 
 If you don't read anything else in this doc, read [§7 Correct playbook for running a project variant](#7-correct-playbook-for-running-a-project-variant).
 
@@ -92,35 +91,21 @@ Walks from `provision_project` MCP call all the way to the RunPod GraphQL / REST
 
 ---
 
-## 4. Known bug: `variants:` dict is inert
+## 4. Running a variant
 
-**Location**: `src/crucible/core/config.py:402-426` (ProjectSpec dataclass) and `src/crucible/fleet/` (grep for `variants` returns zero reads)
+**Location**: `src/crucible/mcp/tools.py:3496-3514` (variant resolution in `run_project`) and `src/crucible/fleet/project_runner.py:112-203` (`chain_project_variants`).
 
-**What's broken**: The `variants:` section inside a project yaml is parsed into `ProjectSpec.variants` but **never consumed by any fleet or runner code**. Neither `provision_project`, `bootstrap_project`, nor `run_project` read it. Grep:
-
-```bash
-grep -r "spec.variants\|\.variants\[" src/crucible/fleet/ src/crucible/runner/ src/crucible/mcp/
-```
-
-Zero hits.
-
-**What actually selects a variant** — at `mcp/tools.py:3533-3537`:
+Pass `variant_name` to `run_project` and the runner looks it up in `spec.variants`, merging that dict into overrides before launch (caller overrides still win). `chain_project_variants` runs an ordered list of variants on the same node.
 
 ```python
-variant_name = str(
-    overrides.get("CRUCIBLE_VARIANT_NAME")
-    or overrides.get("WANDB_RUN_NAME")
-    or launch_id
-)
+# Single variant
+run_project(project_name="code_wm", variant_name="phase5_frozen_target", overrides={"WM_LR": "5e-4"})
+
+# Sequence on one node
+run_project_chain(project_name="code_wm", variants=["warmup", "phase5_frozen_target"])
 ```
 
-It's literally "whatever the caller put in the `overrides` dict or the auto-generated launch id". The yaml `variants:` block is at best a human-readable template for that overrides dict.
-
-**Observable symptom**: you add a new variant like `phase5_frozen_target_15k_seed42` with `{WM_EMA_DECAY: "1.0", ...}` to the yaml, call `run_project(project_name="code_wm")`, and the training script runs with whatever env the `.env` file and `env_set` provide — NOT with `WM_EMA_DECAY=1.0`. The variant is ignored silently.
-
-**Fix (future work)**: either wire `run_project(variant_name=...)` to read `spec.variants[variant_name]` and merge its values into `overrides` before launch, OR add a loud schema warning when yaml contains `variants:` but the caller doesn't pass overrides.
-
-**Until then**: always inline the variant as overrides — see [§7](#7-correct-playbook-for-running-a-project-variant).
+Unknown variant names raise `FleetError` with the available set. Inlining the env dict directly in `overrides` still works for ad-hoc runs — see [§7](#7-correct-playbook-for-running-a-project-variant).
 
 ---
 
@@ -200,18 +185,15 @@ launch_overrides = {
 | `WM_LR` | `5e-4` | override_exports (caller) |
 | `WANDB_RUN_NAME` | `my-run` | override_exports (caller) |
 | `CRUCIBLE_REMOTE_NODE` | `code_wm-01` | override_exports (hardcoded metadata) |
-| `WM_EMA_DECAY` | *unset* (!) | Not anywhere — variants dict is inert |
-| `WM_STEPS` | *unset* (!) | `env_defaults` is dead code |
+| `WM_EMA_DECAY` | *unset* | Not in overrides, and no variant selected |
 
-The last two rows are the trap: setting `env_defaults: {WM_STEPS: "2000"}` in the yaml does nothing, and defining a `variants.phase5_foo: {WM_EMA_DECAY: "1.0"}` does nothing. The caller must pass them explicitly.
-
-**`env_defaults` is dead code**: parsed into `ProjectSpec.env_defaults`, never consumed anywhere. Do not use it.
+Values only land in the launch env if they appear in `env_forward`, `env_set`, `spec.variants[variant_name]` (when a variant is selected), or the caller's `overrides` dict.
 
 ---
 
 ## 7. Correct playbook for running a project variant
 
-**Because `variants:` is inert**, the only way to actually run a variant is to inline its env dict in the `run_project(overrides=...)` call. Here's the full canonical sequence for the CodeWM frozen-target ablation (2 seeds in parallel):
+Either pass `variant_name` (if the variant is declared in the yaml) or inline the env dict via `overrides`. Here's the full canonical sequence for the CodeWM frozen-target ablation (2 seeds in parallel) using inline overrides:
 
 ```python
 # 1. Provision (spot is fine — saves $)
@@ -307,11 +289,10 @@ Highest rank wins. This is the pod-provisioning + bootstrap config table; env-va
 
 Ten real traps, in rough order of "likely to bite you soon":
 
-1. **`variants:` does nothing.** Yaml variants are docs-only. Pass env overrides explicitly to `run_project(overrides={...})`. See [§4](#4-known-bug-variants-dict-is-inert).
-2. **`nodes.json` lies about `interruptible`.** Trust RunPod REST API `costPerHr` instead. See [§3](#3-known-bug-nodesjson-interruptible-echo).
-3. **Local spec silently shadows tap spec.** If both exist, edits to the tap never apply. Delete the local one or rename it.
-4. **`env_defaults` is dead code.** Parsed but never read. Don't use it — put values in `env_set` instead.
-5. **`env_set` and `env_forward` with the same key**: `env_set` wins (written last by `write_remote_env`). Semantically confusing — avoid.
+1. **`nodes.json` lies about `interruptible`.** Trust RunPod REST API `costPerHr` instead. See [§3](#3-known-bug-nodesjson-interruptible-echo).
+2. **Local spec silently shadows tap spec.** If both exist, edits to the tap never apply. Delete the local one or rename it.
+3. **Variant dispatch**: pass `variant_name=...` to `run_project` to apply `spec.variants[name]` before caller overrides; otherwise inline the env dict in `overrides`. See [§4](#4-running-a-variant).
+4. **`env_set` and `env_forward` with the same key**: `env_set` wins (written last by `write_remote_env`). Semantically confusing — avoid.
 6. **`RUNPOD_API_KEY` in `env_forward`**: rejected with a loud ValueError at `fleet/sync.py:355`. The denylist is a feature, not a bug, but it confuses first-time users.
 7. **Contract env (WANDB_*) mutates `spec.env_set` in place** at `mcp/tools.py:3531`. If you reuse a loaded spec across multiple `run_project` calls in the same process, subsequent calls see a mutated state. Always reload the spec.
 8. **RunPod DC scheduling stall**: pods can sit in `uptimeInSeconds=0` with `publicIp=""` for 10+ minutes in some data centers. There is no automatic detection. Destroy + reprovision after 3 min if `fleet_refresh` shows empty `ssh_host`.
@@ -334,10 +315,8 @@ Ten real traps, in rough order of "likely to bite you soon":
 ## Bugs to fix (tracked for follow-up)
 
 1. [Bug] `nodes.json` interruptible echo — `fleet/providers/runpod.py:625-627`. Prefer the input value over the API response echo. One-line fix.
-2. [Feature/Bug] `variants:` dict is inert. Either wire it into `run_project(variant_name=...)` or add a schema warning.
-3. [Feature] DC-stuck pod detection in `fleet_refresh` — timeout after N seconds of `uptimeInSeconds=0` and mark the pod as `failed_to_start` so agents auto-destroy instead of sitting.
-4. [Cleanup] `env_defaults` field is dead code. Either wire it up as a real default layer or remove it from the `ProjectSpec` dataclass.
-5. [Cleanup] `provider.defaults` merges into new node records only. Document the "reprovision to pick up changes" gotcha or fix the merge to also apply to existing records on `fleet_refresh`.
+2. [Feature] DC-stuck pod detection in `fleet_refresh` — timeout after N seconds of `uptimeInSeconds=0` and mark the pod as `failed_to_start` so agents auto-destroy instead of sitting.
+3. [Cleanup] `provider.defaults` merges into new node records only. Document the "reprovision to pick up changes" gotcha or fix the merge to also apply to existing records on `fleet_refresh`.
 
 ---
 

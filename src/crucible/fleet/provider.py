@@ -6,13 +6,6 @@ from typing import Any
 
 from crucible.core.types import NodeRecord
 
-# Node records use ``crucible.core.types.NodeRecord`` (a ``TypedDict`` with
-# ``total=False``). Agent 5 tightened the provider interface from
-# ``list[dict[str, Any]]`` to ``list[NodeRecord]``. Provider-specific keys
-# (``pod_id``, ``api_state``, etc.) are already part of ``NodeRecord``, so
-# existing call sites flow through cleanly. See
-# ``docs/cleanup/05-weak-types.md``.
-
 
 class FleetProvider(abc.ABC):
     """Interface every compute-provider backend must implement.

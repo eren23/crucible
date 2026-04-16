@@ -1,8 +1,4 @@
-"""Crucible training module — extracted from train_gpt.py.
-
-Contains the PyTorch training loop, hyperparameters, optimizers,
-data loading, validation, quantization, and TTT evaluation.
-"""
+"""PyTorch training loop, optimizers, data loading, validation, quantization, TTT eval."""
 from __future__ import annotations
 
 __all__ = [

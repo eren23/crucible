@@ -1,8 +1,6 @@
-"""PyTorch training backend — the main training loop entry point.
+"""PyTorch training backend — main training loop entry point.
 
-This module contains the full training loop extracted from the original
-train_gpt.py.  It can be invoked directly (``python torch_backend.py``)
-or via the crucible runner / MCP tools.
+Invoke directly (``python torch_backend.py``) or via the crucible runner / MCP tools.
 """
 from __future__ import annotations
 

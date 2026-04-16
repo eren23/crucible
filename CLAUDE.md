@@ -85,7 +85,7 @@ External training scripts interface with Crucible via:
 
 ## Reference docs (read BEFORE debugging config / fleet issues)
 
-- **`docs/crucible-config-hierarchy.md`** — definitive map of which config layer wins for `provision_project` / `bootstrap_project` / `run_project`. Documents the full precedence table (ranks 0–12), three real bugs that have already cost hours (`nodes.json` interruptible echo, inert `variants:` dict, dead `env_defaults` field), the correct playbook for running a project variant (you must inline the env dict in `run_project(overrides=...)` until the variants dict is wired up), and 10 common gotchas. **If you are about to edit a project spec yaml or debug a RunPod pod that "looks stuck", read §3 and §4 of that doc first.**
+- **`docs/crucible-config-hierarchy.md`** — definitive map of which config layer wins for `provision_project` / `bootstrap_project` / `run_project`. Documents the full precedence table (ranks 0–12), the `nodes.json` interruptible echo bug, the correct playbook for running a project variant (pass `variant_name` to `run_project` or inline env via `overrides`), and 10 common gotchas. **If you are about to edit a project spec yaml or debug a RunPod pod that "looks stuck", read §3 and §4 of that doc first.**
 
 ## Common Commands
 
