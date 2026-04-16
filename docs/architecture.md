@@ -20,9 +20,9 @@ src/crucible/
     specs/          YAML architecture specs (declarative definitions)
     composer.py     Declarative composition engine (YAML spec → nn.Module)
   researcher/     LLM-driven autonomous research loop, briefing
-  analysis/       Leaderboard, sensitivity, Pareto frontier
+  analysis/       Leaderboard, sensitivity, Pareto frontier (N-D)
   data/           Manifest-driven HuggingFace data pipeline
-  mcp/            MCP server (112 tools)
+  mcp/            MCP server (133 tools)
   api/            REST API server (FastAPI, 10 endpoints)
   tui/            Interactive terminal UI (Textual)
   cli/            CLI entry points
@@ -194,3 +194,22 @@ Track: "attention-variants"
 - New findings are filed under the active track
 - `track_list` shows all tracks with finding counts and last activity
 - Tracks live in the hub, so they persist across projects and machines
+
+## Harness Optimization
+
+Orthogonal to architecture search: hold the model fixed and evolve the
+scaffolding code around it (memory systems, retrieval strategies,
+agent control loops). The `HarnessOptimizer` in
+`src/crucible/researcher/harness_optimizer.py` drives a
+propose → validate → benchmark → Pareto frontier cycle over a
+`SearchTree`, with candidates stored as Python files on disk and
+multi-metric frontier tracking built into the tree.
+
+Domain specs (YAML contracts for the interface + metrics + constraints)
+ship as a `domain_specs` tap plugin type and live at
+`.crucible/domain_specs/{name}/domain_spec.yaml` or
+`~/.crucible-hub/plugins/domain_specs/{name}/`.
+
+See the [Harness Optimization Guide](harness-optimization) for the full
+workflow, MCP tools (`harness_init`, `harness_iterate`, `harness_frontier`,
+etc.), and the in-repo `meta-harness` tap.

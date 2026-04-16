@@ -65,9 +65,9 @@ src/crucible/
   training/      Training backends (torch, generic) — modality-agnostic
   models/        Model zoo — components, architectures, declarative composer
   researcher/    LLM-driven autonomous research loop
-  analysis/      Leaderboard, sensitivity, Pareto frontier
+  analysis/      Leaderboard, sensitivity, Pareto frontier (N-D)
   data/          Manifest-driven HuggingFace data pipeline
-  mcp/           MCP server (112 tools for Claude agents)
+  mcp/           MCP server (133 tools for Claude agents)
   tui/           Interactive terminal UI (Textual)
   cli/           CLI entry points
 ```
@@ -79,8 +79,9 @@ src/crucible/
 - [Getting Started](getting-started) — Installation, project setup, first experiment
 - [YOLO MCP Demo](yolo-mcp-demo) — Empty-dir external-project fine-tuning via MCP
 - [TUI Guide](tui) — Interactive design browser walkthrough
-- [MCP Tools Reference](mcp-tools) — All 112 tools with schemas
+- [MCP Tools Reference](mcp-tools) — All 133 tools with schemas
 - [Architecture](architecture) — System design and module overview
 - [Plugins](plugins) — How to write architecture plugins
 - [Modality Guide](modality-guide) — Training diffusion models, world models, and beyond
+- [Harness Optimization](harness-optimization) — Evolve memory systems / agent scaffolds via Pareto frontiers
 - [Roadmap](roadmap) — What's done, what's next

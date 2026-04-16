@@ -584,6 +584,48 @@ Branching experiment exploration. Instead of running all experiments equally, or
 
 ---
 
+## Harness Optimization (7 tools)
+
+Evolutionary optimization of task-specific harness code (memory systems,
+retrieval strategies, agent scaffolds) with N-dimensional Pareto frontier
+tracking. Inspired by Stanford IRIS Lab's meta-harness. See the
+[Harness Optimization Guide](harness-optimization) for the full
+walkthrough.
+
+| Tool | Description |
+|------|-------------|
+| `harness_init` | Initialize a HarnessOptimizer for a domain+tree pair |
+| `harness_propose` | Generate N candidate implementations via LLM |
+| `harness_validate` | Validate candidates (syntax, interface, constraints, duplicates) without dispatching |
+| `harness_iterate` | Run one full propose→validate→benchmark cycle |
+| `harness_frontier` | Get the current Pareto frontier snapshot |
+| `harness_evolution_log` | Retrieve per-iteration evolution history |
+| `tree_pareto` | Pareto frontier for any search tree (general utility) |
+
+### harness_init
+
+**Parameters:**
+- `domain_spec` (string, required) — Path, spec name, or
+  `.crucible/domain_specs/{name}/` directory.
+- `tree_name` (string, required) — Search tree to attach to (created on
+  first use).
+- `n_candidates` (int, optional) — Candidates per iteration (default 3).
+- `dry_run` (bool, optional) — Skip LLM calls; use fixture candidates.
+
+**Returns:** Tree summary + current frontier snapshot.
+
+### Workflow
+
+```
+1. harness_init(domain_spec="nlp_classification", tree_name="nlp_run1")
+2. harness_iterate()        # loops proposals; logs to evolution_log.jsonl
+3. harness_frontier()       # inspect winning trade-offs
+4. harness_evolution_log()  # review per-iteration history
+5. finding_promote(...)     # elevate winners to the hub
+```
+
+---
+
 ## Training Generalization (1 tool)
 
 | Tool | Description |

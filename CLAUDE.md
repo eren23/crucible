@@ -52,6 +52,9 @@ src/crucible/
 - `SearchTreeError` for tree search failures
 - `PluginError` for plugin registration / discovery / build failures
 - `TapError` for tap clone / sync / install / publish failures
+- `DomainSpecError` for harness domain spec loading / validation failures
+- `CandidateValidationError` for harness candidate validation failures
+- `HarnessOptimizerError` for harness optimizer orchestration failures
 - Let unexpected errors propagate — don't catch and swallow
 
 ### Testing
@@ -172,7 +175,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (130 total)
+### MCP Tools (133 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -227,6 +230,12 @@ All plugin types use a unified `PluginRegistry` with 3-tier precedence (builtin 
 `hub_package_info` — Get detailed package metadata and install status.
 
 Taps are git repos containing plugins with `plugin.yaml` manifests. Install copies to `~/.crucible-hub/plugins/` (auto-discovered). Publish commits to a tap's local clone; user pushes or opens PR.
+
+**Tier 12 — Harness Optimization (7 tools):**
+`harness_init`, `harness_propose`, `harness_validate`, `harness_iterate`, `harness_frontier`, `harness_evolution_log` — Meta-harness-style evolutionary loop over task-specific harness code (memory systems, agent scaffolds) with N-dimensional Pareto frontier tracking.
+`tree_pareto` — General-purpose Pareto frontier query for any search tree.
+
+Candidates are stored as Python files under `.crucible/search_trees/{tree}/candidates/{node_id}.py`; domain specs ship as a `domain_specs` tap plugin type. See `docs/harness-optimization.md` and `.crucible/taps/meta-harness/` for the workflow and bundled templates.
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 
@@ -303,6 +312,7 @@ All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-
 | Augmentations | `models/composer.py` | smear_gate, bigram_hash, trigram_hash |
 | Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
 | Data Sources | `core/data_sources.py` | huggingface, local_files, wandb_artifact |
+| Domain Specs | `researcher/domain_spec.py` | nlp_classification, agent_scaffold (tap) — YAML contracts for harness optimization |
 
 **Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.
 

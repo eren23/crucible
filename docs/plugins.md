@@ -165,6 +165,19 @@ MODEL_FAMILY=my_diffusion DATA_ADAPTER=my_data BATCH_SIZE=32 \
 See the [Modality Guide](modality-guide) for a full walkthrough with
 working examples (diffusion on MNIST, JEPA world model on bouncing balls).
 
+## Domain Spec Plugins (for Harness Optimization)
+
+`domain_specs` is a tap plugin type that ships YAML contracts for harness
+optimization runs. Each package contains a `domain_spec.yaml` defining the
+candidate interface, Pareto metrics, parameter constraints, and proposal
+guidance. Domain specs install as bundle directories under
+`~/.crucible-hub/plugins/domain_specs/{name}/` and are discovered by the
+`HarnessOptimizer` when you pass a bare name to `harness_init`.
+
+See the [Harness Optimization Guide](harness-optimization) for the full
+workflow and the in-repo `meta-harness` tap with NLP classification and
+agent scaffold templates.
+
 ## Important Notes
 
 - **Plugins sync to pods automatically** — `.crucible/architectures/` is included in rsync
