@@ -1,0 +1,4355 @@
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/analysis/__init__.py:2:1
+   |
+ 1 |   """Crucible analysis module: leaderboard, sensitivity, Pareto frontier, export."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | from crucible.analysis.results import (
+ 5 | |     load_results,
+ 6 | |     completed_results,
+ 7 | |     merged_results,
+ 8 | | )
+ 9 | | from crucible.analysis.leaderboard import (
+10 | |     leaderboard,
+11 | |     sensitivity_analysis,
+12 | |     pareto_frontier,
+13 | | )
+14 | | from crucible.analysis.export import (
+15 | |     export_top_configs,
+16 | |     print_rank,
+17 | |     generate_summary,
+18 | | )
+   | |_^
+19 |
+20 |   __all__ = [
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/analysis/export.py:2:1
+   |
+ 1 |   """Export experiment results: top configs, ranked tables, markdown summaries."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | from pathlib import Path
+ 5 | |
+ 6 | | from crucible.core.config import ProjectConfig
+ 7 | | from crucible.core.io import atomic_write_json
+ 8 | | from crucible.core.log import log_step, log_warn
+ 9 | | from crucible.core.types import ExperimentResult
+10 | |
+11 | | from crucible.analysis.results import completed_results
+12 | | from crucible.analysis.leaderboard import leaderboard, sensitivity_analysis
+   | |___________________________________________________________________________^
+13 |
+14 |   # ---------------------------------------------------------------------------
+   |
+help: Organize imports
+
+F541 [*] f-string without any placeholders
+   --> src/crucible/analysis/export.py:235:22
+    |
+233 |     sens = sensitivity_analysis(metric=metric, cfg=cfg)
+234 |     if sens:
+235 |         lines.append(f"\n### Sensitivity Analysis\n")
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+236 |         for key, pairs in sorted(sens.items()):
+237 |             distinct = {v for v, _ in pairs}
+    |
+help: Remove extraneous `f` prefix
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/analysis/leaderboard.py:2:1
+   |
+ 1 |   """Leaderboard ranking, sensitivity analysis, and Pareto frontier."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | from collections import defaultdict
+ 5 | | from typing import Any
+ 6 | |
+ 7 | | from crucible.core.config import ProjectConfig
+ 8 | | from crucible.core.log import log_info, log_warn
+ 9 | | from crucible.core.types import ExperimentResult
+10 | |
+11 | | from crucible.analysis.results import completed_results
+   | |_______________________________________________________^
+12 |
+13 |   # ---------------------------------------------------------------------------
+   |
+help: Organize imports
+
+B905 `zip()` without an explicit `strict=` parameter
+   --> src/crucible/analysis/leaderboard.py:214:22
+    |
+213 |     strictly_better_anywhere = False
+214 |     for av, bv, d in zip(a, b, directions):
+    |                      ^^^^^^^^^^^^^^^^^^^^^
+215 |         if d == "minimize":
+216 |             if av > bv:
+    |
+help: Add explicit value for parameter `strict=`
+
+B905 `zip()` without an explicit `strict=` parameter
+   --> src/crucible/analysis/leaderboard.py:304:58
+    |
+303 |     def _to_min(p: list[float]) -> list[float]:
+304 |         return [v if d == "minimize" else -v for v, d in zip(p, directions)]
+    |                                                          ^^^^^^^^^^^^^^^^^^
+305 |
+306 |     mins = [_to_min(p) for p in points]
+    |
+help: Add explicit value for parameter `strict=`
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/api/models.py:2:1
+  |
+1 |   """Pydantic response/request models for the Crucible API."""
+2 | / from __future__ import annotations
+3 | |
+4 | | from pydantic import BaseModel, Field
+5 | |
+6 | | from crucible import __version__
+  | |________________________________^
+  |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/api/routes.py:6:1
+   |
+ 4 |   analysis modules) to ensure data consistency across entry points.
+ 5 |   """
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | import time
+ 9 | | from typing import Any
+10 | |
+11 | | from fastapi import APIRouter
+12 | |
+13 | | from crucible.core.errors import CrucibleError
+14 | | from crucible.api.models import (
+15 | |     FindingCreate,
+16 | |     NoteCreate,
+17 | | )
+18 | | from crucible.core.config import ProjectConfig, load_config
+19 | | from crucible.runner.notes import NoteStore
+   | |___________________________________________^
+20 |
+21 |   router = APIRouter()
+   |
+help: Organize imports
+
+E501 Line too long (121 > 120)
+  --> src/crucible/cli/analyze_commands.py:37:121
+   |
+35 |                 sec = res.get(secondary, "N/A")
+36 |                 sec_str = f"{sec:.4f}" if isinstance(sec, (int, float)) else str(sec)
+37 |                 print(f"{i:>4}  {r.get('name', '?'):<40}  {pri_str:>8}  {sec_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
+   |                                                                                                                         ^
+38 |             else:
+39 |                 print(f"{i:>4}  {r.get('name', '?'):<40}  {pri_str:>8}  {r.get('model_bytes', 'N/A'):>10}")
+   |
+
+E501 Line too long (125 > 120)
+  --> src/crucible/cli/analyze_commands.py:55:121
+   |
+53 |             worst_val, worst_metric = pairs[-1]
+54 |             spread = worst_metric - best_metric
+55 |             print(f"  {key}: spread={spread:.4f}  best={best_val}({best_metric:.4f})  worst={worst_val}({worst_metric:.4f})")
+   |                                                                                                                         ^^^^^
+56 |
+57 |     elif cmd == "pareto":
+   |
+
+F541 [*] f-string without any placeholders
+  --> src/crucible/cli/hub_commands.py:84:11
+   |
+82 |     hub = _get_hub(args)
+83 |     summary = hub.sync()
+84 |     print(f"Hub sync complete:")
+   |           ^^^^^^^^^^^^^^^^^^^^^
+85 |     print(f"  Projects: {summary['projects']}")
+86 |     print(f"  Tracks:   {summary['tracks']}")
+   |
+help: Remove extraneous `f` prefix
+
+E501 Line too long (130 > 120)
+  --> src/crucible/cli/main.py:24:121
+   |
+22 |     parser = argparse.ArgumentParser(
+23 |         prog="crucible",
+24 |         description="Crucible — ML research platform for fleet orchestration, autonomous experimentation, and model development.",
+   |                                                                                                                         ^^^^^^^^^^
+25 |     )
+26 |     parser.add_argument("--version", action="version", version=f"crucible {__version__}")
+   |
+
+F401 [*] `typing.Any` imported but unused
+  --> src/crucible/cli/tap_commands.py:10:35
+   |
+ 8 | import argparse
+ 9 | import sys
+10 | from typing import TYPE_CHECKING, Any
+   |                                   ^^^
+11 |
+12 | from crucible.core.errors import CrucibleError
+   |
+help: Remove unused import: `typing.Any`
+
+E501 Line too long (133 > 120)
+  --> src/crucible/cli/tap_commands.py:38:121
+   |
+36 |     cmd = getattr(args, "tap_command", None)
+37 |     if cmd is None:
+38 |         print("Usage: crucible tap {add|remove|list|sync|search|install|uninstall|installed|publish|info|validate}", file=sys.stderr)
+   |                                                                                                                         ^^^^^^^^^^^^^
+39 |         sys.exit(1)
+   |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/cli/tap_commands.py:193:121
+    |
+191 |         return
+192 |     for p in packages:
+193 |         print(f"  {p['name']}  ({p['type']})  v{p.get('version', '?')}  [{p['tap']}]  installed: {p.get('installed_at', '?')}")
+    |                                                                                                                         ^^^^^^^
+    |
+
+UP032 [*] Use f-string instead of `format` call
+   --> src/crucible/core/config.py:585:12
+    |
+583 |   def generate_default_config() -> str:
+584 |       """Return a default crucible.yaml template as a string."""
+585 |       return """\
+    |  ____________^
+586 | | # Crucible project configuration
+587 | | name: my-project
+588 | | version: "{version}"
+589 | |
+590 | | # Compute provider
+591 | | provider:
+592 | |   type: runpod                           # "runpod" | "ssh"
+593 | |   ssh_key: ~/.ssh/id_ed25519_runpod
+594 | |   # image: runpod/pytorch:...            # container image (RunPod only)
+595 | |   # gpu_types: ["NVIDIA GeForce RTX 4090"]
+596 | |   # interruptible: true                  # false = secure/on-demand RunPod pods
+597 | |
+598 | | # Data pipeline
+599 | | data:
+600 | |   source: huggingface
+601 | |   repo_id: ""                            # HuggingFace dataset repo
+602 | |   local_root: ./data
+603 | |   manifest: manifest.json
+604 | |
+605 | | # Training backends
+606 | | training:
+607 | |   - backend: torch
+608 | |     script: train.py
+609 | |
+610 | | # Metrics configuration
+611 | | metrics:
+612 | |   primary: val_loss                        # metric to rank by
+613 | |   # secondary: ""                          # optional secondary display metric
+614 | |   # size: model_bytes                      # for Pareto frontier
+615 | |   # direction: minimize                    # "minimize" | "maximize"
+616 | |
+617 | | # Experiment presets
+618 | | presets:
+619 | |   smoke:
+620 | |     MAX_WALLCLOCK_SECONDS: "60"
+621 | |     ITERATIONS: "400"
+622 | |   proxy:
+623 | |     MAX_WALLCLOCK_SECONDS: "1800"
+624 | |     ITERATIONS: "6000"
+625 | |
+626 | | # Autonomous researcher
+627 | | researcher:
+628 | |   model: claude-sonnet-4-6-20250514
+629 | |   budget_hours: 10.0
+630 | |   program_file: program.md
+631 | |
+632 | | # Weights & Biases
+633 | | wandb:
+634 | |   required: true
+635 | |   project: ""                            # or set WANDB_PROJECT in env
+636 | |   entity: ""                             # optional team/entity
+637 | |   mode: online                           # "online" | "offline" | "disabled"
+638 | |
+639 | | # Experiment execution policy
+640 | | execution_policy:
+641 | |   require_remote: true
+642 | |   required_provider: runpod
+643 | |   allow_local_dev: false
+644 | |
+645 | | # Version store
+646 | | # store_dir: .crucible                    # version store directory
+647 | | # auto_commit_versions: false             # auto-commit versions to git
+648 | |
+649 | | # Hub integration
+650 | | # hub_dir: ~/.crucible-hub                 # cross-project knowledge store
+651 | | # active_track: ""                          # current research track
+652 | |
+653 | | # Sync exclusions
+654 | | sync_excludes:
+655 | |   - .git
+656 | |   - .venv
+657 | |   - __pycache__
+658 | |   - logs
+659 | |   - data/datasets
+660 | |
+661 | | # Output paths
+662 | | results_file: experiments.jsonl
+663 | | logs_dir: logs
+664 | | """.format(version=CRUCIBLE_VERSION)
+    | |____________________________________^
+    |
+help: Convert to f-string
+
+F401 [*] `typing.TYPE_CHECKING` imported but unused
+  --> src/crucible/core/data_sources.py:13:20
+   |
+11 | from datetime import datetime
+12 | from enum import Enum
+13 | from typing import TYPE_CHECKING, Any
+   |                    ^^^^^^^^^^^^^
+14 |
+15 | from crucible.core.config import DataConfig
+   |
+help: Remove unused import: `typing.TYPE_CHECKING`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/core/finding.py:6:1
+   |
+ 4 |   constraints, or rejected hypotheses that persist across experiments.
+ 5 |   """
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | import hashlib
+ 9 | | import re
+10 | | from typing import Any
+11 | |
+12 | | import yaml
+13 | |
+14 | | from crucible.core.log import utc_now_iso
+15 | | from crucible.core.types import Finding
+   | |_______________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/core/hub.py:29:1
+   |
+27 |         .git/
+28 |   """
+29 | / from __future__ import annotations
+30 | |
+31 | | import os
+32 | | import re
+33 | | import shutil
+34 | | import subprocess
+35 | | from pathlib import Path
+36 | | from typing import Any
+37 | |
+38 | | from crucible.core.errors import HubError
+39 | | from crucible.core.finding import (
+40 | |     FINDING_STATUSES,
+41 | |     can_promote,
+42 | |     make_finding_id,
+43 | |     validate_finding,
+44 | | )
+45 | | from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_jsonl, write_yaml
+46 | | from crucible.core.log import utc_now_iso
+   | |_________________________________________^
+   |
+help: Organize imports
+
+F401 [*] `crucible.core.finding.FINDING_STATUSES` imported but unused
+  --> src/crucible/core/hub.py:40:5
+   |
+38 | from crucible.core.errors import HubError
+39 | from crucible.core.finding import (
+40 |     FINDING_STATUSES,
+   |     ^^^^^^^^^^^^^^^^
+41 |     can_promote,
+42 |     make_finding_id,
+   |
+help: Remove unused import: `crucible.core.finding.FINDING_STATUSES`
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/core/hub.py:167:62
+    |
+166 |     @staticmethod
+167 |     def init(hub_dir: Path | None = None, name: str = "") -> "HubStore":
+    |                                                              ^^^^^^^^^^
+168 |         """Create hub directory, git init, write hub.yaml."""
+169 |         if hub_dir is None:
+    |
+help: Remove quotes
+
+UP017 [*] Use `datetime.UTC` alias
+ --> src/crucible/core/log.py:9:25
+  |
+8 | def utc_now_iso() -> str:
+9 |     return datetime.now(timezone.utc).isoformat()
+  |                         ^^^^^^^^^^^^
+  |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/core/log.py:13:25
+   |
+12 | def utc_stamp() -> str:
+13 |     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+   |                         ^^^^^^^^^^^^
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/core/log.py:17:23
+   |
+16 | def _print(prefix: str, msg: str, *, file: object = None) -> None:
+17 |     ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+   |                       ^^^^^^^^^^^^
+18 |     print(f"[{ts}] {prefix} {msg}", file=file or sys.stderr, flush=True)
+   |
+help: Convert to `datetime.UTC` alias
+
+UP035 [*] Import from `collections.abc` instead: `Iterable`
+  --> src/crucible/core/project_template.py:27:1
+   |
+25 | from dataclasses import dataclass
+26 | from pathlib import Path
+27 | from typing import Iterable
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 |
+29 | import yaml
+   |
+help: Import from `collections.abc`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/core/store.py:16:1
+   |
+14 |   Note: findings and notes are managed independently by HubStore and NoteStore.
+15 |   """
+16 | / from __future__ import annotations
+17 | |
+18 | | import hashlib
+19 | | import shutil
+20 | | import subprocess
+21 | | from pathlib import Path
+22 | | from typing import Any
+23 | |
+24 | | import yaml
+25 | |
+26 | | from crucible.core.errors import StoreError
+27 | | from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_yaml
+28 | | from crucible.core.log import utc_now_iso
+   | |_________________________________________^
+   |
+help: Organize imports
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+   --> src/crucible/core/tap.py:117:13
+    |
+115 |             path.resolve().relative_to(parent.resolve())
+116 |         except ValueError:
+117 |             raise TapError(f"{context} escapes allowed directory: {path}")
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+118 |
+119 |     # ------------------------------------------------------------------
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/core/types.py:2:1
+  |
+1 |   """Shared type definitions used across Crucible modules."""
+2 | / from __future__ import annotations
+3 | |
+4 | | from typing import Any, TypedDict
+  | |_________________________________^
+  |
+help: Organize imports
+
+E501 Line too long (125 > 120)
+  --> src/crucible/core/types.py:81:121
+   |
+79 |     result: dict[str, Any] | None  # metric keys depend on training script output
+80 |     model_bytes: int | None
+81 |     status: str  # launching | launched | running | completed | partial_recoverable | failed | timeout | killed | interrupted
+   |                                                                                                                         ^^^^^
+82 |     tags: list[str]
+83 |     error: str | None
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/data/manifest.py:8:1
+   |
+ 6 |   be used with the same download/sync machinery.
+ 7 |   """
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | import json
+11 | | from pathlib import Path
+12 | | from typing import Any
+13 | |
+14 | | from crucible.core.config import DataConfig
+15 | | from crucible.core.log import log_info, log_step
+   | |________________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/data/sync.py:8:1
+   |
+ 6 |   * ``probe_data_on_node`` -- check which shards already exist on a node.
+ 7 |   """
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | import subprocess
+11 | | from pathlib import Path
+12 | | from typing import Any
+13 | |
+14 | | from crucible.core.log import log_error, log_info, log_step, log_success, log_warn
+15 | | from crucible.core.types import NodeRecord
+   | |__________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/data_sources/__init__.py:2:1
+  |
+1 |   """Built-in data source plugins."""
+2 | / from __future__ import annotations
+3 | |
+4 | | from crucible.data_sources.huggingface import HuggingFaceDataSource
+5 | | from crucible.data_sources.wandb_artifact import WandBArtifactSource
+6 | | from crucible.data_sources.local_files import LocalFilesSource
+  | |______________________________________________________________^
+7 |
+8 |   __all__ = [
+  |
+help: Organize imports
+
+E501 Line too long (123 > 120)
+  --> src/crucible/data_sources/wandb_artifact.py:39:121
+   |
+37 |     def _get_local_artifact_path(self) -> Path:
+38 |         safe_name = self.artifact.replace(":", "--").replace("/", "--")
+39 |         return self.local_root / "wandb" / self._sanitize_path(self.entity) / self._sanitize_path(self.project) / safe_name
+   |                                                                                                                         ^^^
+40 |
+41 |     def status(self) -> DataStatusResult:
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/bootstrap.py:2:1
+   |
+ 1 |   """Node bootstrap: env setup, pip install, dataset download, git sync."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import concurrent.futures
+ 5 | | import json
+ 6 | | import shlex
+ 7 | | import shutil
+ 8 | | import threading
+ 9 | | import time
+10 | | import traceback
+11 | | from pathlib import Path
+12 | | from collections.abc import Callable
+13 | | from typing import TYPE_CHECKING, Any
+   | |_____________________________________^
+14 |
+15 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/bootstrap.py:18:1
+   |
+16 |       from crucible.core.config import ProjectConfig, ProjectSpec
+17 |
+18 | / from crucible.core.config import ProjectConfig, load_config
+19 | | from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
+20 | | from crucible.core.hub import HubStore
+21 | | from crucible.core.log import log_step, log_success, log_warn, utc_now_iso
+22 | | from crucible.core.types import NodeRecord
+23 | | from crucible.fleet.day_run import append_event
+24 | | from crucible.fleet.inventory import (
+25 | |     NODES_LOCK,
+26 | |     count_bootstrapped_ready,
+27 | |     load_nodes_if_exists,
+28 | |     load_nodes_snapshot,
+29 | |     merge_node_snapshots,
+30 | |     ready_state,
+31 | |     save_nodes,
+32 | |     upsert_node_record,
+33 | | )
+34 | | from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launcher_bundle
+35 | | from crucible.fleet.sync import (
+36 | |     checked_remote_exec,
+37 | |     local_git_sha,
+38 | |     rsync_base,
+39 | |     scp_to_node,
+40 | |     ssh_ok,
+41 | |     write_remote_env,
+42 | |     _run,
+43 | |     sync_env_file,
+44 | |     sync_repo,
+45 | |     sync_taps,
+46 | | )
+   | |_^
+47 |
+48 |   BOOTSTRAP_ATTEMPTS = 3
+   |
+help: Organize imports
+
+F541 [*] f-string without any placeholders
+   --> src/crucible/fleet/bootstrap.py:620:23
+    |
+618 |     try:
+619 |         # Uses pkill to find python training scripts in the workspace
+620 |         cleanup_cmd = f"pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+621 |         remote_exec(node, cleanup_cmd, check=False, timeout=15)
+622 |     except Exception as exc:
+    |
+help: Remove extraneous `f` prefix
+
+F821 Undefined name `remote_exec`
+   --> src/crucible/fleet/bootstrap.py:621:9
+    |
+619 |         # Uses pkill to find python training scripts in the workspace
+620 |         cleanup_cmd = f"pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
+621 |         remote_exec(node, cleanup_cmd, check=False, timeout=15)
+    |         ^^^^^^^^^^^
+622 |     except Exception as exc:
+623 |         log_warn(f"{name}: process cleanup failed (non-fatal): {exc}")
+    |
+
+B007 Loop control variable `i` not used within loop body
+   --> src/crucible/fleet/bootstrap.py:689:13
+    |
+687 |     if spec.install:
+688 |         log_step(f"{name}: installing {len(spec.install)} packages")
+689 |         for i, pkg in enumerate(spec.install):
+    |             ^
+690 |             safe_label = pkg.split("[")[0].split(">")[0].split("=")[0].replace("-", "_")
+691 |             bootstrap_step(
+    |
+help: Rename unused `i` to `_i`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/day_run.py:2:1
+   |
+ 1 |   """Day run directory management, events, summaries, leaderboard."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import json
+ 5 | | import threading
+ 6 | | from pathlib import Path
+ 7 | | from typing import Any
+ 8 | |
+ 9 | | from crucible.core.io import atomic_write_json, _json_ready
+10 | | from crucible.core.log import utc_now_iso, utc_stamp
+   | |____________________________________________________^
+11 |
+12 |   # Thread lock for event file appends
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/day_run.py:78:5
+   |
+76 |   ) -> None:
+77 |       """Update the day summary with the latest fleet progress."""
+78 | /     from crucible.fleet.inventory import summarize_nodes, count_bootstrapped_ready
+79 | |     from crucible.fleet.queue import summarize_queue, summarize_idle_capacity
+   | |_____________________________________________________________________________^
+80 |
+81 |       updates: dict[str, Any] = {}
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/monitor.py:2:1
+   |
+ 1 |   """Node status probing, render functions, live monitoring."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import json
+ 5 | | import shlex
+ 6 | | from datetime import datetime, timezone
+ 7 | | from pathlib import Path
+ 8 | | from typing import Any
+ 9 | |
+10 | | from crucible.core.types import NodeRecord
+11 | | from crucible.fleet.inventory import ready_state
+12 | | from crucible.fleet.sync import remote_exec
+   | |___________________________________________^
+   |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/fleet/monitor.py:69:26
+   |
+67 |     if ts is None:
+68 |         return None
+69 |     return (datetime.now(timezone.utc) - ts).total_seconds()
+   |                          ^^^^^^^^^^^^
+   |
+help: Convert to `datetime.UTC` alias
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/project_runner.py:7:1
+   |
+ 5 |   sync.py provides an additional layer of protection for credential forwarding.
+ 6 |   """
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import shlex
+10 | | import time
+11 | | from datetime import datetime, timezone
+12 | | from pathlib import Path
+13 | | from collections.abc import Callable
+14 | | from typing import TYPE_CHECKING, Any
+15 | |
+16 | | from crucible.core.errors import RunnerError
+17 | | from crucible.core.io import append_jsonl, _json_ready
+18 | | from crucible.core.log import log_info, log_step, log_success, log_warn
+19 | | from crucible.fleet.inventory import BAD_API_STATES
+20 | | from crucible.fleet.sync import remote_exec, rsync_base, _run
+   | |_____________________________________________________________^
+21 |
+22 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+   --> src/crucible/fleet/project_runner.py:97:9
+    |
+ 95 |           pid = int(pid_str)
+ 96 |       except ValueError:
+ 97 | /         raise RunnerError(
+ 98 | |             f"Could not parse PID from launch output on {name}: {pid_str!r}"
+ 99 | |         )
+    | |_________^
+100 |
+101 |       log_success(f"{name}: training launched with PID {pid}")
+    |
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/crucible/fleet/project_runner.py:108:36
+    |
+106 |         "project": spec.name,
+107 |         "wandb_run_name": effective_overrides.get("WANDB_RUN_NAME", run_id),
+108 |         "start_time": datetime.now(timezone.utc).isoformat(),
+    |                                    ^^^^^^^^^^^^
+109 |     }
+    |
+help: Convert to `datetime.UTC` alias
+
+E501 Line too long (124 > 120)
+   --> src/crucible/fleet/project_runner.py:297:121
+    |
+296 |     node_state = _node_state_label(node)
+297 |     if (not process_probe.get("reachable")) or node_state in BAD_API_STATES or node_state in {"unreachable", "ssh_timeout"}:
+    |                                                                                                                         ^^^^
+298 |         failure_class = node_state if node_state != "unknown" else "node_unreachable"
+299 |         return "interrupted", failure_class
+    |
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/crucible/fleet/project_runner.py:424:35
+    |
+422 |         "project": spec.name,
+423 |         "name": f"{spec.name}-{run_id}",
+424 |         "timestamp": datetime.now(timezone.utc).isoformat(),
+    |                                   ^^^^^^^^^^^^
+425 |         "node": name,
+426 |         "status": status,
+    |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/crucible/fleet/project_runner.py:435:42
+    |
+433 |         "remote_node": name,
+434 |         "remote_node_state": _node_state_label(node),
+435 |         "last_observed_at": datetime.now(timezone.utc).isoformat(),
+    |                                          ^^^^^^^^^^^^
+436 |         "contract_status": contract_status,
+437 |         "wandb": {
+    |
+help: Convert to `datetime.UTC` alias
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/provider_registry.py:16:1
+   |
+14 |       provider = build_provider("runpod", ssh_key="~/.ssh/id_ed25519", ...)
+15 |   """
+16 | / from __future__ import annotations
+17 | |
+18 | | from __future__ import annotations
+19 | |
+20 | | from collections.abc import Callable
+21 | | from typing import Any
+22 | |
+23 | | from crucible.core.plugin_registry import PluginRegistry
+   | |________________________________________________________^
+24 |
+25 |   PROVIDER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("fleet_provider")
+   |
+help: Organize imports
+
+F821 Undefined name `FleetProvider`
+  --> src/crucible/fleet/provider_registry.py:37:49
+   |
+37 | def build_provider(name: str, **kwargs: Any) -> FleetProvider:
+   |                                                 ^^^^^^^^^^^^^
+38 |     """Build a fleet provider by name."""
+39 |     from crucible.fleet.provider import FleetProvider  # noqa: F811 — lazy to avoid circular
+   |
+
+F401 [*] `crucible.fleet.provider.FleetProvider` imported but unused
+  --> src/crucible/fleet/provider_registry.py:39:41
+   |
+37 | def build_provider(name: str, **kwargs: Any) -> FleetProvider:
+38 |     """Build a fleet provider by name."""
+39 |     from crucible.fleet.provider import FleetProvider  # noqa: F811 — lazy to avoid circular
+   |                                         ^^^^^^^^^^^^^
+40 |
+41 |     factory = PROVIDER_REGISTRY.get(name)
+   |
+help: Remove unused import: `crucible.fleet.provider.FleetProvider`
+
+F821 Undefined name `FleetProvider`
+  --> src/crucible/fleet/provider_registry.py:76:6
+   |
+74 |     template_id: str = "",
+75 |     **kwargs: Any,
+76 | ) -> FleetProvider:
+   |      ^^^^^^^^^^^^^
+77 |     from crucible.fleet.provider import FleetProvider  # noqa: F811
+78 |     from crucible.fleet.providers.runpod import RunPodProvider
+   |
+
+F401 [*] `crucible.fleet.provider.FleetProvider` imported but unused
+  --> src/crucible/fleet/provider_registry.py:77:41
+   |
+75 |     **kwargs: Any,
+76 | ) -> FleetProvider:
+77 |     from crucible.fleet.provider import FleetProvider  # noqa: F811
+   |                                         ^^^^^^^^^^^^^
+78 |     from crucible.fleet.providers.runpod import RunPodProvider
+79 |     return RunPodProvider(
+   |
+help: Remove unused import: `crucible.fleet.provider.FleetProvider`
+
+F821 Undefined name `FleetProvider`
+  --> src/crucible/fleet/provider_registry.py:96:6
+   |
+94 |     defaults: dict[str, Any] | None = None,
+95 |     **kwargs: Any,
+96 | ) -> FleetProvider:
+   |      ^^^^^^^^^^^^^
+97 |     from crucible.fleet.provider import FleetProvider  # noqa: F811
+98 |     from crucible.fleet.providers.ssh import SSHProvider
+   |
+
+F401 [*] `crucible.fleet.provider.FleetProvider` imported but unused
+  --> src/crucible/fleet/provider_registry.py:97:41
+   |
+95 |     **kwargs: Any,
+96 | ) -> FleetProvider:
+97 |     from crucible.fleet.provider import FleetProvider  # noqa: F811
+   |                                         ^^^^^^^^^^^^^
+98 |     from crucible.fleet.providers.ssh import SSHProvider
+99 |     return SSHProvider(
+   |
+help: Remove unused import: `crucible.fleet.provider.FleetProvider`
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+   --> src/crucible/fleet/providers/runpod.py:579:13
+    |
+577 |         created = runpod_request("POST", "/pods", payload=payload)
+578 |         if not isinstance(created, dict):
+579 |             raise FleetError("Unexpected RunPod pod creation response: expected a dict.")
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+580 |         return created
+    |
+
+E501 Line too long (146 > 120)
+   --> src/crucible/fleet/providers/runpod.py:764:121
+    |
+762 | …
+763 | …
+764 | …ainer={eff_container_disk}GB, volume={eff_volume_gb}GB, gpus={eff_gpu_count})")
+    |                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+765 | …
+766 | …
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/queue.py:2:1
+   |
+ 1 |   """Experiment queue: enqueue, dispatch, reconcile, save, load."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import json
+ 5 | | import uuid
+ 6 | | from pathlib import Path
+ 7 | | from typing import Any
+ 8 | |
+ 9 | | from crucible.core.errors import ConfigError
+10 | | from crucible.core.io import read_jsonl, write_jsonl
+11 | | from crucible.core.log import utc_now_iso, utc_stamp
+12 | | from crucible.core.types import ExperimentConfig, ExperimentResult, NodeRecord, QueueItem
+   | |_________________________________________________________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/fleet/scheduler.py:2:1
+   |
+ 1 |   """Wave-based scheduling, dispatch assignments, early stopping, wave completion."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import re
+ 5 | | import shlex
+ 6 | | import time
+ 7 | | from datetime import datetime, timezone
+ 8 | | from pathlib import Path
+ 9 | | from collections.abc import Callable
+10 | | from typing import Any
+11 | |
+12 | | from crucible.core.errors import RunnerError
+13 | | from crucible.core.io import read_jsonl
+14 | | from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
+15 | | from crucible.core.types import ExperimentConfig, ExperimentResult, NodeRecord, QueueItem
+16 | | from crucible.fleet.bootstrap import bootstrap_node_worker
+17 | | from crucible.fleet.day_run import append_event, record_day_progress, write_day_leaderboard
+18 | | from crucible.fleet.inventory import (
+19 | |     BAD_API_STATES,
+20 | |     NODES_LOCK,
+21 | |     classify_health,
+22 | |     count_bootstrapped_ready,
+23 | |     load_nodes_snapshot,
+24 | |     ready_state,
+25 | |     save_nodes,
+26 | |     upsert_node_record,
+27 | | )
+28 | | from crucible.fleet.monitor import probe_node_status, render_monitor
+29 | | from crucible.fleet.queue import (
+30 | |     load_queue,
+31 | |     reconcile_queue_with_results,
+32 | |     results_by_id,
+33 | |     save_queue,
+34 | |     summarize_idle_capacity,
+35 | |     summarize_queue,
+36 | |     wave_result_rows,
+37 | |     wave_rows,
+38 | | )
+39 | | from crucible.fleet.sync import remote_exec
+   | |___________________________________________^
+40 |
+41 |   RECOVERABLE_LEASE_STATES = {"queued", "retryable", "running"}
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/fleet/scheduler.py:173:5
+    |
+171 | ) -> None:
+172 |     """Rsync logs and results from a remote node."""
+173 |     from crucible.fleet.sync import rsync_base, _run
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+174 |
+175 |     local_dir = fleet_runs_dir / node["name"]
+    |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/crucible/fleet/scheduler.py:234:51
+    |
+232 |                 try:
+233 |                     hb_time = datetime.fromisoformat(last_hb)
+234 |                     stale_seconds = (datetime.now(timezone.utc) - hb_time).total_seconds()
+    |                                                   ^^^^^^^^^^^^
+235 |                     if stale_seconds <= 600:
+236 |                         continue
+    |
+help: Convert to `datetime.UTC` alias
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/fleet/scheduler.py:492:5
+    |
+490 | ) -> list[NodeRecord]:
+491 |     """Refresh node records from provider API, classify health, and save."""
+492 |     from crucible.fleet.inventory import merge_node_snapshots, load_nodes_if_exists
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+493 |
+494 |     seed = load_nodes_snapshot(nodes_file) or nodes
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/fleet/sync.py:2:1
+  |
+1 |   """SSH/rsync helpers: ssh_base, rsync_base, remote_exec, sync_repo, sync_env_file."""
+2 | / from __future__ import annotations
+3 | |
+4 | | import shlex
+5 | | import subprocess
+6 | | from pathlib import Path
+7 | | from typing import Any
+8 | |
+9 | | from crucible.core.types import NodeRecord
+  | |__________________________________________^
+  |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+ --> src/crucible/fleet/sync.py:7:20
+  |
+5 | import subprocess
+6 | from pathlib import Path
+7 | from typing import Any
+  |                    ^^^
+8 |
+9 | from crucible.core.types import NodeRecord
+  |
+help: Remove unused import: `typing.Any`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/mcp/server.py:28:5
+   |
+27 |   if TYPE_CHECKING:
+28 | /     from collections.abc import Callable
+29 | |     from crucible.mcp.tracer import SessionTracer
+   | |_________________________________________________^
+30 |
+31 |   # Load .env files so secrets (RUNPOD_API_KEY, WANDB_API_KEY) are available to tools
+   |
+help: Organize imports
+
+E501 Line too long (122 > 120)
+  --> src/crucible/mcp/server.py:97:121
+   |
+97 | def _safe_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
+   |                                                                                                                         ^^
+98 |     """Call a tool handler and return (result, is_error, exception).
+   |
+
+UP041 [*] Replace aliased errors with `TimeoutError`
+   --> src/crucible/mcp/server.py:253:20
+    |
+251 |                 # done was set — exit cleanly
+252 |                 return
+253 |             except asyncio.TimeoutError:
+    |                    ^^^^^^^^^^^^^^^^^^^^
+254 |                 pass
+255 |             elapsed += _KEEPALIVE_INTERVAL
+    |
+help: Replace `asyncio.TimeoutError` with builtin `TimeoutError`
+
+E501 Line too long (125 > 120)
+   --> src/crucible/mcp/server.py:293:121
+    |
+291 |         description=(
+292 |             "Node inventory, health summary, current assignments, and optional live GPU/memory/disk metrics.\n\n"
+293 |             "REQUIRES: Nothing (reads local inventory). include_metrics=true requires SSH access to nodes (slower, 5-15s).\n"
+    |                                                                                                                         ^^^^^
+294 |             "RETURNS: {summary, nodes: [{name, state, gpu, ssh_host, env_ready, dataset_ready}], metrics?: [...]}\n"
+295 |             "NEXT: fleet_refresh to update stale nodes, bootstrap_nodes for unready, dispatch_experiments for idle."
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/mcp/server.py:302:121
+    |
+300 |                 "include_metrics": {
+301 |                     "type": "boolean",
+302 |                     "description": "If true, SSH to each node to collect live GPU util, memory, disk metrics. Slower (5-15s).",
+    |                                                                                                                         ^^^^^^^
+303 |                     "default": False,
+304 |                 },
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/mcp/server.py:315:121
+    |
+313 |             "REQUIRES: At least one completed experiment. Run collect_results first if experiments ran on fleet.\n"
+314 |             "RETURNS: {total_completed, primary_metric, top: [{rank, name, val_bpb, steps_completed, model_bytes}]}\n"
+315 |             "NEXT: get_experiment_result for details, design_compare_experiments for diffs, context_push_finding for insights."
+    |                                                                                                                         ^^^^^^^
+316 |         ),
+317 |         inputSchema={
+    |
+
+E501 Line too long (122 > 120)
+   --> src/crucible/mcp/server.py:364:121
+    |
+362 |         description=(
+363 |             "Get the result for a specific experiment run_id.\n\n"
+364 |             "REQUIRES: A run_id from enqueue_experiment or get_queue_status. Run collect_results for fleet experiments.\n"
+    |                                                                                                                         ^^
+365 |             "RETURNS: {found: bool, result: {name, config, result: {val_loss, val_bpb, steps_completed}, status}}\n"
+366 |             "NEXT: design_compare_experiments for side-by-side, note_add for observations, get_run_logs for training output."
+    |
+
+E501 Line too long (125 > 120)
+   --> src/crucible/mcp/server.py:366:121
+    |
+364 |             "REQUIRES: A run_id from enqueue_experiment or get_queue_status. Run collect_results for fleet experiments.\n"
+365 |             "RETURNS: {found: bool, result: {name, config, result: {val_loss, val_bpb, steps_completed}, status}}\n"
+366 |             "NEXT: design_compare_experiments for side-by-side, note_add for observations, get_run_logs for training output."
+    |                                                                                                                         ^^^^^
+367 |         ),
+368 |         inputSchema={
+    |
+
+E501 Line too long (122 > 120)
+   --> src/crucible/mcp/server.py:519:121
+    |
+517 |                 "name": {"type": "string", "description": "Volume name."},
+518 |                 "size_gb": {"type": "integer", "description": "Volume size in GB.", "default": 100},
+519 |                 "datacenter_id": {"type": "string", "description": "Datacenter ID (e.g. US-GA-1).", "default": "US-GA-1"},
+    |                                                                                                                         ^^
+520 |             },
+521 |             "required": ["name"],
+    |
+
+E501 Line too long (128 > 120)
+   --> src/crucible/mcp/server.py:641:121
+    |
+639 |             "type": "object",
+640 |             "properties": {
+641 |                 "train_shards": {"type": "integer", "description": "Number of data shards to download per node.", "default": 1},
+    |                                                                                                                         ^^^^^^^^
+642 |                 "skip_install": {"type": "boolean", "description": "Skip pip install step.", "default": False},
+643 |                 "skip_data": {"type": "boolean", "description": "Skip data download step.", "default": False},
+    |
+
+E501 Line too long (137 > 120)
+   --> src/crucible/mcp/server.py:644:121
+    |
+642 | …n": "Skip pip install step.", "default": False},
+643 | … "Skip data download step.", "default": False},
+644 | …": "string"}, "description": "Specific nodes to bootstrap. Empty = all."},
+    |                                                           ^^^^^^^^^^^^^^^^^
+645 | …
+646 | …
+    |
+
+E501 Line too long (121 > 120)
+   --> src/crucible/mcp/server.py:709:121
+    |
+707 |             "type": "object",
+708 |             "properties": {
+709 |                 "name_pattern": {"type": "string", "description": "Substring match on experiment names.", "default": ""},
+    |                                                                                                                         ^
+710 |                 "family": {"type": "string", "description": "Filter by MODEL_FAMILY config value.", "default": ""},
+711 |                 "tag": {"type": "string", "description": "Filter to experiments containing this tag.", "default": ""},
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/mcp/server.py:712:121
+    |
+710 | …     "family": {"type": "string", "description": "Filter by MODEL_FAMILY config value.", "default": ""},
+711 | …     "tag": {"type": "string", "description": "Filter to experiments containing this tag.", "default": ""},
+712 | …     "metric_below": {"type": "number", "description": "Only show experiments where primary metric is below this."},
+    |                                                                                                               ^^^^^^^
+713 | …     "metric_above": {"type": "number", "description": "Only show experiments where primary metric is above this."},
+714 | …     "config_filter": {"type": "object", "description": "Filter by exact config key=value.", "additionalProperties": {"type": "strin…
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/mcp/server.py:713:121
+    |
+711 | …     "tag": {"type": "string", "description": "Filter to experiments containing this tag.", "default": ""},
+712 | …     "metric_below": {"type": "number", "description": "Only show experiments where primary metric is below this."},
+713 | …     "metric_above": {"type": "number", "description": "Only show experiments where primary metric is above this."},
+    |                                                                                                               ^^^^^^^
+714 | …     "config_filter": {"type": "object", "description": "Filter by exact config key=value.", "additionalProperties": {"type": "strin…
+715 | …     "limit": {"type": "integer", "description": "Max results.", "default": 50},
+    |
+
+E501 Line too long (163 > 120)
+   --> src/crucible/mcp/server.py:714:121
+    |
+712 | … experiments where primary metric is below this."},
+713 | … experiments where primary metric is above this."},
+714 | …y exact config key=value.", "additionalProperties": {"type": "string"}, "default": {}},
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+715 | …"default": 50},
+716 | …, 'name', 'timestamp'.", "default": "metric"},
+    |
+
+E501 Line too long (122 > 120)
+   --> src/crucible/mcp/server.py:716:121
+    |
+714 | …         "config_filter": {"type": "object", "description": "Filter by exact config key=value.", "additionalProperties": {"type": "s…
+715 | …         "limit": {"type": "integer", "description": "Max results.", "default": 50},
+716 | …         "sort_by": {"type": "string", "description": "Sort: 'metric', 'name', 'timestamp'.", "default": "metric"},
+    |                                                                                                                   ^^
+717 | …     },
+718 | …     "additionalProperties": False,
+    |
+
+E501 Line too long (123 > 120)
+   --> src/crucible/mcp/server.py:726:121
+    |
+724 |             "Side-by-side comparison of 2-5 experiments: config diffs and metric differences.\n\n"
+725 |             "REQUIRES: 2-5 experiment names from browse or leaderboard.\n"
+726 |             "RETURNS: {experiments, config_diff: {key: {exp1: val, exp2: val}}, metrics: {exp: {val_loss, model_bytes}}}\n"
+    |                                                                                                                         ^^^
+727 |             "NEXT: context_push_finding to record insights, design_generate_hypotheses to explore further."
+728 |         ),
+    |
+
+E501 Line too long (160 > 120)
+   --> src/crucible/mcp/server.py:732:121
+    |
+730 | …
+731 | …
+732 | …tring"}, "description": "Experiment names to compare.", "minItems": 2, "maxItems": 5},
+    |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+733 | …
+734 | …
+    |
+
+E501 Line too long (132 > 120)
+   --> src/crucible/mcp/server.py:743:121
+    |
+741 |             "Generate LLM-driven hypotheses from current results via Claude (config.researcher.model).\n\n"
+742 |             "REQUIRES: ANTHROPIC_API_KEY set. Completed experiments improve quality.\n"
+743 |             "RETURNS: {hypotheses: [{name, hypothesis, config, expected_impact, confidence, family, rationale}], total_generated}\n"
+    |                                                                                                                         ^^^^^^^^^^^^
+744 |             "NEXT: design_batch_from_hypotheses to convert to configs, then design_enqueue_batch."
+745 |         ),
+    |
+
+E501 Line too long (131 > 120)
+   --> src/crucible/mcp/server.py:749:121
+    |
+747 |             "type": "object",
+748 |             "properties": {
+749 |                 "extra_context": {"type": "string", "description": "Additional context for hypothesis generation.", "default": ""},
+    |                                                                                                                         ^^^^^^^^^^^
+750 |                 "max_hypotheses": {"type": "integer", "description": "Maximum hypotheses to return.", "default": 5},
+751 |                 "focus_family": {"type": "string", "description": "Model family to focus on.", "default": ""},
+    |
+
+E501 Line too long (155 > 120)
+   --> src/crucible/mcp/server.py:851:121
+    |
+849 | …
+850 | …g or observation to record."},
+851 | … belief, observation, constraint, rejected_hypothesis.", "default": "observation"},
+    |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+852 | …: "string"}, "description": "Experiment names supporting this finding.", "default": []},
+853 | …nce in this finding (0-1).", "default": 0.7},
+    |
+
+E501 Line too long (160 > 120)
+   --> src/crucible/mcp/server.py:852:121
+    |
+850 | …or observation to record."},
+851 | …elief, observation, constraint, rejected_hypothesis.", "default": "observation"},
+852 | …"string"}, "description": "Experiment names supporting this finding.", "default": []},
+    |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+853 | …e in this finding (0-1).", "default": 0.7},
+854 | …
+    |
+
+E501 Line too long (126 > 120)
+   --> src/crucible/mcp/server.py:891:121
+    |
+889 |             "properties": {
+890 |                 "name": {"type": "string", "description": "Design name (slug-style, no spaces)."},
+891 |                 "config": {"type": "object", "description": "Env var overrides.", "additionalProperties": {"type": "string"}},
+    |                                                                                                                         ^^^^^^
+892 |                 "description": {"type": "string", "description": "What this experiment tests.", "default": ""},
+893 |                 "hypothesis": {"type": "string", "description": "Expected outcome.", "default": ""},
+    |
+
+E501 Line too long (142 > 120)
+   --> src/crucible/mcp/server.py:899:121
+    |
+897 | …ng"}, "default": []},
+898 | …hy this design exists.", "default": ""},
+899 | …gn status: draft, ready, running, completed, archived.", "default": "draft"},
+    |                                                         ^^^^^^^^^^^^^^^^^^^^^^
+900 | …: "Name of design this was forked from."},
+901 | …sion summary.", "default": ""},
+    |
+
+E501 Line too long (142 > 120)
+    --> src/crucible/mcp/server.py:1014:121
+     |
+1012 | …xperiment run_id to attach the note to."},
+1013 | …n note body."},
+1014 | …he note was created: pre-run, mid-run, post-run, analysis.", "default": ""},
+     |                                                        ^^^^^^^^^^^^^^^^^^^^^^
+1015 | …g"}, "description": "Tags for categorization.", "default": []},
+1016 | …onfidence in any claims made (0-1)."},
+     |
+
+E501 Line too long (129 > 120)
+    --> src/crucible/mcp/server.py:1015:121
+     |
+1013 | …     "text": {"type": "string", "description": "Markdown note body."},
+1014 | …     "stage": {"type": "string", "description": "When the note was created: pre-run, mid-run, post-run, analysis.", "default": ""},
+1015 | …     "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization.", "default": []},
+     |                                                                                                               ^^^^^^^^^
+1016 | …     "confidence": {"type": "number", "description": "Confidence in any claims made (0-1)."},
+1017 | …     "created_by": {"type": "string", "description": "Identity of note creator.", "default": "mcp-agent"},
+     |
+
+E501 Line too long (133 > 120)
+    --> src/crucible/mcp/server.py:1035:121
+     |
+1033 |             "properties": {
+1034 |                 "run_id": {"type": "string", "description": "The experiment run_id."},
+1035 |                 "stage": {"type": "string", "description": "Filter by stage (pre-run, mid-run, post-run, analysis).", "default": ""},
+     |                                                                                                                         ^^^^^^^^^^^^^
+1036 |             },
+1037 |             "required": ["run_id"],
+     |
+
+E501 Line too long (132 > 120)
+    --> src/crucible/mcp/server.py:1053:121
+     |
+1051 |             "properties": {
+1052 |                 "query": {"type": "string", "description": "Text search across note metadata.", "default": ""},
+1053 |                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter to notes containing all these tags."},
+     |                                                                                                                         ^^^^^^^^^^^^
+1054 |                 "stage": {"type": "string", "description": "Filter by stage.", "default": ""},
+1055 |                 "run_id": {"type": "string", "description": "Filter by run_id.", "default": ""},
+     |
+
+E501 Line too long (124 > 120)
+    --> src/crucible/mcp/server.py:1162:121
+     |
+1160 |                 "name": {"type": "string", "description": "Track name (human-readable, will be slugified)."},
+1161 |                 "description": {"type": "string", "description": "What this track is about.", "default": ""},
+1162 |                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for the track.", "default": []},
+     |                                                                                                                         ^^^^
+1163 |             },
+1164 |             "required": ["name"],
+     |
+
+E501 Line too long (121 > 120)
+    --> src/crucible/mcp/server.py:1208:121
+     |
+1206 |                 "scope": {"type": "string", "description": "Scope: 'track' or 'global'.", "default": "global"},
+1207 |                 "track": {"type": "string", "description": "Track name (required when scope='track')."},
+1208 |                 "status": {"type": "string", "description": "Filter by status: active, superseded, archived, promoted."},
+     |                                                                                                                         ^
+1209 |                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter to findings with any of these tags."},
+1210 |                 "limit": {"type": "integer", "description": "Max findings to return.", "default": 50},
+     |
+
+E501 Line too long (132 > 120)
+    --> src/crucible/mcp/server.py:1209:121
+     |
+1207 |                 "track": {"type": "string", "description": "Track name (required when scope='track')."},
+1208 |                 "status": {"type": "string", "description": "Filter by status: active, superseded, archived, promoted."},
+1209 |                 "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter to findings with any of these tags."},
+     |                                                                                                                         ^^^^^^^^^^^^
+1210 |                 "limit": {"type": "integer", "description": "Max findings to return.", "default": 50},
+1211 |             },
+     |
+
+E501 Line too long (121 > 120)
+    --> src/crucible/mcp/server.py:1250:121
+     |
+1248 |             "type": "object",
+1249 |             "properties": {
+1250 |                 "track": {"type": "string", "description": "Track to brief on. Empty uses active track.", "default": ""},
+     |                                                                                                                         ^
+1251 |             },
+1252 |             "additionalProperties": False,
+     |
+
+E501 Line too long (134 > 120)
+    --> src/crucible/mcp/server.py:1267:121
+     |
+1265 | …
+1266 | …he experiment run_id to annotate."},
+1267 | …ion": "Index of the finding in the current findings list (0-indexed)."},
+     |                                                            ^^^^^^^^^^^^^^
+1268 | …
+1269 | …
+     |
+
+E501 Line too long (137 > 120)
+    --> src/crucible/mcp/server.py:1282:121
+     |
+1280 | …
+1281 | …ource, kind}]} if detailed=true.\n"
+1282 | …el_get_config_schema for parameters, get_architecture_guide for workflow."
+     |                                                           ^^^^^^^^^^^^^^^^^
+1283 | …
+1284 | …
+     |
+
+E501 Line too long (133 > 120)
+    --> src/crucible/mcp/server.py:1287:121
+     |
+1285 |             "type": "object",
+1286 |             "properties": {
+1287 |                 "detailed": {"type": "boolean", "description": "If true, include source metadata for each family", "default": False},
+     |                                                                                                                         ^^^^^^^^^^^^^
+1288 |             },
+1289 |             "additionalProperties": False,
+     |
+
+E501 Line too long (143 > 120)
+    --> src/crucible/mcp/server.py:1340:121
+     |
+1338 | …
+1339 | …
+1340 | …iment config dict to validate.", "additionalProperties": {"type": "string"}},
+     |                                                        ^^^^^^^^^^^^^^^^^^^^^^^
+1341 | …
+1342 | …
+     |
+
+E501 Line too long (124 > 120)
+    --> src/crucible/mcp/server.py:1350:121
+     |
+1348 |         description=(
+1349 |             "Write and register a new architecture family at runtime as a Python plugin.\n\n"
+1350 |             "REQUIRES: Python code that calls register_model(name, factory). Use model_generate_template for boilerplate.\n"
+     |                                                                                                                         ^^^^
+1351 |             "RETURNS: {status: 'registered', scope, family, families: [all]}\n"
+1352 |             "NEXT: model_validate_config to verify, enqueue_experiment to test."
+     |
+
+E501 Line too long (125 > 120)
+    --> src/crucible/mcp/server.py:1358:121
+     |
+1356 | …     "properties": {
+1357 | …         "name": {"type": "string", "description": "Family name (snake_case)."},
+1358 | …         "code": {"type": "string", "description": "Full Python source that defines and registers the architecture."},
+     |                                                                                                                   ^^^^^
+1359 | …         "scope": {"type": "string", "description": "Where to store: 'local' (project) or 'global' (hub)", "default": "local", "enu…
+1360 | …     },
+     |
+
+E501 Line too long (163 > 120)
+    --> src/crucible/mcp/server.py:1359:121
+     |
+1357 | …e_case)."},
+1358 | …e that defines and registers the architecture."},
+1359 | …'local' (project) or 'global' (hub)", "default": "local", "enum": ["local", "global"]},
+     |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1360 | …
+1361 | …
+     |
+
+E501 Line too long (126 > 120)
+    --> src/crucible/mcp/server.py:1389:121
+     |
+1387 |             "REQUIRES: A name for the new family. Optional base architecture to derive from.\n"
+1388 |             "RETURNS: {name, code: str}\n"
+1389 |             "NEXT: Edit the code, then model_add_architecture to register. Or model_fetch_architecture to read existing code."
+     |                                                                                                                         ^^^^^^
+1390 |         ),
+1391 |         inputSchema={
+     |
+
+E501 Line too long (122 > 120)
+    --> src/crucible/mcp/server.py:1425:121
+     |
+1423 |             "type": "object",
+1424 |             "properties": {
+1425 |                 "name": {"type": "string", "description": "Plugin family name (must exist in .crucible/architectures/)."},
+     |                                                                                                                         ^^
+1426 |             },
+1427 |             "required": ["name"],
+     |
+
+E501 Line too long (125 > 120)
+    --> src/crucible/mcp/server.py:1462:121
+     |
+1460 |             "type": "object",
+1461 |             "properties": {
+1462 |                 "name": {"type": "string", "description": "Architecture family name (valid Python identifier, snake_case)."},
+     |                                                                                                                         ^^^^^
+1463 |                 "spec": {
+1464 |                     "type": "object",
+     |
+
+E501 Line too long (125 > 120)
+    --> src/crucible/mcp/server.py:1465:121
+     |
+1463 |                 "spec": {
+1464 |                     "type": "object",
+1465 |                     "description": "Architecture spec dict with block, stack, embedding, etc. See baseline.yaml for format.",
+     |                                                                                                                         ^^^^^
+1466 |                     "properties": {
+1467 |                         "version": {"type": "integer", "default": 1},
+     |
+
+E501 Line too long (137 > 120)
+    --> src/crucible/mcp/server.py:1471:121
+     |
+1469 | …     "embedding": {"type": "object", "description": "Embedding layer configuration."},
+1470 | …     "block": {"type": "object", "description": "Block type and parameters (type, dim, params)."},
+1471 | …     "stack": {"type": "object", "description": "Stack wiring pattern and layer config (pattern, num_layers, etc.)."},
+     |                                                                                                       ^^^^^^^^^^^^^^^^^
+1472 | …     "transform": {"type": "object", "description": "Optional pre/post stack transforms."},
+1473 | …     "init": {"type": "object", "description": "Optional initialization config (e.g. ortho)."},
+     |
+
+E501 Line too long (134 > 120)
+    --> src/crucible/mcp/server.py:1474:121
+     |
+1472 | …             "transform": {"type": "object", "description": "Optional pre/post stack transforms."},
+1473 | …             "init": {"type": "object", "description": "Optional initialization config (e.g. ortho)."},
+1474 | …             "augmentations": {"type": "object", "description": "Optional augmentations (smear_gate, bigram_hash, etc.)."},
+     |                                                                                                               ^^^^^^^^^^^^^^
+1475 | …         },
+1476 | …     },
+     |
+
+E501 Line too long (164 > 120)
+    --> src/crucible/mcp/server.py:1477:121
+     |
+1475 | …
+1476 | …
+1477 | …local' (project) or 'global' (hub).", "default": "local", "enum": ["local", "global"]},
+     |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1478 | …
+1479 | …
+     |
+
+E501 Line too long (133 > 120)
+    --> src/crucible/mcp/server.py:1496:121
+     |
+1494 |                 "name": {"type": "string", "description": "New architecture family name (valid Python identifier)."},
+1495 |                 "base": {"type": "string", "description": "Existing family name to fork from (must have a YAML spec)."},
+1496 |                 "overrides": {"type": "object", "description": "Dict of overrides to deep-merge into the base spec.", "default": {}},
+     |                                                                                                                         ^^^^^^^^^^^^^
+1497 |             },
+1498 |             "required": ["name", "base"],
+     |
+
+E501 Line too long (125 > 120)
+    --> src/crucible/mcp/server.py:1551:121
+     |
+1549 |         name="model_get_spec",
+1550 |         description=(
+1551 |             "Get the YAML spec for a model family. Returns null if code-defined (use model_fetch_architecture for code).\n\n"
+     |                                                                                                                         ^^^^^
+1552 |             "REQUIRES: Family name from model_list_families.\n"
+1553 |             "RETURNS: {family, spec: dict|null}\n"
+     |
+
+E501 Line too long (127 > 120)
+    --> src/crucible/mcp/server.py:1623:121
+     |
+1621 |             "type": "object",
+1622 |             "properties": {
+1623 |                 "preset_name": {"type": "string", "description": "Return only this preset. Empty returns all.", "default": ""},
+     |                                                                                                                         ^^^^^^^
+1624 |             },
+1625 |             "additionalProperties": False,
+     |
+
+E501 Line too long (137 > 120)
+    --> src/crucible/mcp/server.py:1633:121
+     |
+1631 | … pod config, env vars, launcher, and metrics.\n\n"
+1632 | …s/.\n"
+1633 | … pod: {gpu_type, ...}, env_set, env_forward, metrics, install, timeout}\n"
+     |                                                           ^^^^^^^^^^^^^^^^^
+1634 | …ct to launch training."
+1635 | …
+     |
+
+E501 Line too long (136 > 120)
+    --> src/crucible/mcp/server.py:1692:121
+     |
+1690 | …
+1691 | …
+1692 | … use declarative composition vs Python plugins, with full workflows.\n\n"
+     |                                                           ^^^^^^^^^^^^^^^^
+1693 | …
+1694 | …
+     |
+
+E501 Line too long (127 > 120)
+    --> src/crucible/mcp/server.py:1695:121
+     |
+1693 |             "REQUIRES: Nothing.\n"
+1694 |             "RETURNS: {decision_tree, workflows, tips}\n"
+1695 |             "NEXT: model_list_families to see what exists, model_list_stack_patterns + model_list_block_types for composition."
+     |                                                                                                                         ^^^^^^^
+1696 |         ),
+1697 |         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+     |
+
+E501 Line too long (214 > 120)
+    --> src/crucible/mcp/server.py:1704:121
+     |
+1702 | …
+1703 | …
+1704 | … name, optional roots list. RETURNS: tree name, root_node_ids. NEXT: tree_expand_node or tree_enqueue_pending.",
+     |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1705 | …
+1706 | …
+     |
+
+E501 Line too long (171 > 120)
+    --> src/crucible/mcp/server.py:1726:121
+     |
+1724 | …
+1725 | …
+1726 | …ction policy: agent_directed, ucb1, greedy, epsilon_greedy.", "default": "agent_directed"},
+     |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1727 | …icy: agent_directed, threshold.", "default": "agent_directed"},
+1728 | …ecific config (e.g. ucb_c for ucb1).", "default": {}},
+     |
+
+E501 Line too long (143 > 120)
+    --> src/crucible/mcp/server.py:1727:121
+     |
+1725 | …
+1726 | …n": "Node selection policy: agent_directed, ucb1, greedy, epsilon_greedy.", "default": "agent_directed"},
+1727 | …: "Pruning policy: agent_directed, threshold.", "default": "agent_directed"},
+     |                                                        ^^^^^^^^^^^^^^^^^^^^^^^
+1728 | …n": "Policy-specific config (e.g. ucb_c for ucb1).", "default": {}},
+1729 | …: "Pruning policy config (e.g. metric_threshold).", "default": {}},
+     |
+
+E501 Line too long (134 > 120)
+    --> src/crucible/mcp/server.py:1728:121
+     |
+1726 | …     "expansion_policy": {"type": "string", "description": "Node selection policy: agent_directed, ucb1, greedy, epsilon_greedy.", …
+1727 | …     "pruning_policy": {"type": "string", "description": "Pruning policy: agent_directed, threshold.", "default": "agent_directed"},
+1728 | …     "expansion_config": {"type": "object", "description": "Policy-specific config (e.g. ucb_c for ucb1).", "default": {}},
+     |                                                                                                               ^^^^^^^^^^^^^^
+1729 | …     "pruning_config": {"type": "object", "description": "Pruning policy config (e.g. metric_threshold).", "default": {}},
+1730 | …     "primary_metric": {"type": "string", "description": "Metric to optimize.", "default": "val_bpb"},
+     |
+
+E501 Line too long (133 > 120)
+    --> src/crucible/mcp/server.py:1729:121
+     |
+1727 | …     "pruning_policy": {"type": "string", "description": "Pruning policy: agent_directed, threshold.", "default": "agent_directed"},
+1728 | …     "expansion_config": {"type": "object", "description": "Policy-specific config (e.g. ucb_c for ucb1).", "default": {}},
+1729 | …     "pruning_config": {"type": "object", "description": "Pruning policy config (e.g. metric_threshold).", "default": {}},
+     |                                                                                                               ^^^^^^^^^^^^^
+1730 | …     "primary_metric": {"type": "string", "description": "Metric to optimize.", "default": "val_bpb"},
+1731 | …     "metric_direction": {"type": "string", "description": "minimize or maximize.", "default": "minimize"},
+     |
+
+E501 Line too long (209 > 120)
+    --> src/crucible/mcp/server.py:1742:121
+     |
+1740 | …
+1741 | …
+1742 | …ES: name. RETURNS: summary, ascii_tree, best_path. NEXT: tree_expand_node, tree_prune, tree_enqueue_pending.",
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1743 | …
+1744 | …
+     |
+
+E501 Line too long (206 > 120)
+    --> src/crucible/mcp/server.py:1755:121
+     |
+1753 | …
+1754 | …
+1755 | …ld overrides. REQUIRES: name, parent_node_id, children. RETURNS: new_node_ids. NEXT: tree_enqueue_pending.",
+     |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1756 | …
+1757 | …
+     |
+
+E501 Line too long (189 > 120)
+    --> src/crucible/mcp/server.py:1785:121
+     |
+1783 | …
+1784 | …
+1785 | …me, node_id, ANTHROPIC_API_KEY. RETURNS: new_node_ids with hypotheses. NEXT: tree_enqueue_pending.",
+     |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1786 | …
+1787 | …
+     |
+
+E501 Line too long (124 > 120)
+    --> src/crucible/mcp/server.py:1792:121
+     |
+1790 |                 "node_id": {"type": "string", "description": "Node ID to auto-expand."},
+1791 |                 "n_children": {"type": "integer", "description": "Number of children to generate.", "default": 3},
+1792 |                 "extra_context": {"type": "string", "description": "Additional context for LLM generation.", "default": ""},
+     |                                                                                                                         ^^^^
+1793 |             },
+1794 |             "required": ["name", "node_id"],
+     |
+
+E501 Line too long (136 > 120)
+    --> src/crucible/mcp/server.py:1800:121
+     |
+1798 | …
+1799 | …
+1800 | …h tree. REQUIRES: name, node_id. RETURNS: pruned count. NEXT: tree_get.",
+     |                                                           ^^^^^^^^^^^^^^^^
+1801 | …
+1802 | …
+     |
+
+E501 Line too long (132 > 120)
+    --> src/crucible/mcp/server.py:1807:121
+     |
+1805 |                 "node_id": {"type": "string", "description": "Node ID to prune."},
+1806 |                 "reason": {"type": "string", "description": "Why this node/branch is being pruned.", "default": ""},
+1807 |                 "prune_branch": {"type": "boolean", "description": "If true, recursively prune all descendants.", "default": False},
+     |                                                                                                                         ^^^^^^^^^^^^
+1808 |             },
+1809 |             "required": ["name", "node_id"],
+     |
+
+E501 Line too long (151 > 120)
+    --> src/crucible/mcp/server.py:1815:121
+     |
+1813 | …
+1814 | …
+1815 | …ecution. REQUIRES: name. RETURNS: enqueued run_ids. NEXT: dispatch_experiments.",
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1816 | …
+1817 | …
+     |
+
+E501 Line too long (192 > 120)
+    --> src/crucible/mcp/server.py:1834:121
+     |
+1832 | …
+1833 | …
+1834 | … and metrics. REQUIRES: name. RETURNS: synced nodes with metrics. NEXT: tree_get, tree_expand_node.",
+     |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1835 | …
+1836 | …
+     |
+
+E501 Line too long (121 > 120)
+    --> src/crucible/mcp/server.py:1854:121
+     |
+1852 |     Tool(
+1853 |         name="config_get_modalities",
+1854 |         description="List available training backends with their modality tags, data adapters, and training objectives.",
+     |                                                                                                                         ^
+1855 |         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+1856 |     ),
+     |
+
+E501 Line too long (441 > 120)
+    --> src/crucible/mcp/server.py:1862:121
+     |
+1860 | …
+1861 | …
+1862 | … in env_set. Best practice: use the same WANDB_PROJECT for related experiments (e.g., architecture variants) so results appear in one leaderboard.\n\nREQUIRES: Nothing.\nRETURNS: {projects: [{name, repo, train, metrics_primary}]}\nNEXT: config_get_project to inspect a spec, provision_project or bootstrap_project to launch.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1863 | …
+1864 | …
+     |
+
+E501 Line too long (354 > 120)
+    --> src/crucible/mcp/server.py:1867:121
+     |
+1865 | …
+1866 | …
+1867 | …oject spec.\n\nREQUIRES: RUNPOD_API_KEY, project spec in .crucible/projects/. Use config_get_project to inspect pod config first.\nRETURNS: {created, new_nodes: [{name, node_id}]}\nNEXT: fleet_refresh (wait ~60s), then bootstrap_project.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1868 | …
+1869 | …
+     |
+
+E501 Line too long (328 > 120)
+    --> src/crucible/mcp/server.py:1880:121
+     |
+1878 | …
+1879 | …
+1880 | …nv vars, run setup commands. Long-running (2-10 min).\n\nREQUIRES: Nodes with SSH (run fleet_refresh after provision_project).\nRETURNS: {total, bootstrapped, nodes: [{name, state, project}]}\nNEXT: run_project.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1881 | …
+1882 | …
+     |
+
+E501 Line too long (124 > 120)
+    --> src/crucible/mcp/server.py:1885:121
+     |
+1883 |             "properties": {
+1884 |                 "project_name": {"type": "string", "description": "Name of the project spec."},
+1885 |                 "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes. Empty = all."},
+     |                                                                                                                         ^^^^
+1886 |             },
+1887 |             "required": ["project_name"],
+     |
+
+E501 Line too long (122 > 120)
+    --> src/crucible/mcp/server.py:1898:121
+     |
+1896 | …     "VARIANTS: If the project spec has a `variants:` dict, pass `variant=<name>` to apply "
+1897 | …     "that variant's env-var overrides. Caller's `overrides` dict still wins over variant values, "
+1898 | …     "so you can tweak individual knobs (e.g. `variant='phase5_contrast_15k_high', overrides={'WM_SEED': '43'}`). "
+     |                                                                                                                   ^^
+1899 | …     "Passing an unknown variant name is a loud error.\n\n"
+1900 | …     "NOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass …
+     |
+
+E501 Line too long (167 > 120)
+    --> src/crucible/mcp/server.py:1900:121
+     |
+1898 | …_15k_high', overrides={'WM_SEED': '43'}`). "
+1899 | …
+1900 | …periments across different specs into one W&B project, pass WANDB_PROJECT in overrides. "
+     |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1901 | …uishes individual runs.\n\n"
+1902 | …
+     |
+
+E501 Line too long (130 > 120)
+    --> src/crucible/mcp/server.py:1910:121
+     |
+1908 | …     "properties": {
+1909 | …         "project_name": {"type": "string", "description": "Name of the project spec."},
+1910 | …         "node_names": {"type": "array", "items": {"type": "string"}, "description": "Specific nodes. Empty = all ready."},
+     |                                                                                                                   ^^^^^^^^^^
+1911 | …         "overrides": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Env var overrides for this run…
+1912 | …         "variant": {"type": "string", "description": "Name of a variant in spec.variants. Applies the variant's env dict before th…
+     |
+
+E501 Line too long (195 > 120)
+    --> src/crucible/mcp/server.py:1911:121
+     |
+1909 | …"},
+1910 | …"Specific nodes. Empty = all ready."},
+1911 | …"description": "Env var overrides for this run. Wins over variant values if the same key is in both."},
+     |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1912 | …ants. Applies the variant's env dict before the caller's overrides."},
+1913 | …
+     |
+
+E501 Line too long (162 > 120)
+    --> src/crucible/mcp/server.py:1912:121
+     |
+1910 | … "description": "Specific nodes. Empty = all ready."},
+1911 | …pe": "string"}, "description": "Env var overrides for this run. Wins over variant values if the same key is in both."},
+1912 | …ant in spec.variants. Applies the variant's env dict before the caller's overrides."},
+     |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1913 | …
+1914 | …
+     |
+
+E501 Line too long (398 > 120)
+    --> src/crucible/mcp/server.py:1955:121
+     |
+1953 | …
+1954 | …
+1955 | …fetch WandB data, and persist terminal status.\n\nFetches W&B metrics from the project specified in the spec's env_set.WANDB_PROJECT.\n\nREQUIRES: run_project has been called.\nRETURNS: {run_id|launch_id, status|summary, metrics|runs, log_tail}\nNEXT: get_leaderboard if completed.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1956 | …
+1957 | …
+     |
+
+E501 Line too long (131 > 120)
+    --> src/crucible/mcp/server.py:1960:121
+     |
+1958 |             "properties": {
+1959 |                 "run_id": {"type": "string", "description": "Per-node run ID returned by run_project."},
+1960 |                 "launch_id": {"type": "string", "description": "Batch launch ID returned by run_project for multi-node launches."},
+     |                                                                                                                         ^^^^^^^^^^^
+1961 |             },
+1962 |             "additionalProperties": False,
+     |
+
+E501 Line too long (493 > 120)
+    --> src/crucible/mcp/server.py:1967:121
+     |
+1965 | …
+1966 | …
+1967 | …ifecycle events.\n\nREQUIRES: run_project has been called. Use run_id from run_project response.\nRETURNS: {run_id, status, failure_class?, remote_node_state?, events:[{ts, event, detail}]}\nNEXT: collect_project_results when status is terminal (completed/failed/timeout), get_fleet_status(include_metrics=true) for broader fleet state, or get_run_logs for debugging failures.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1968 | …
+1969 | …
+     |
+
+E501 Line too long (129 > 120)
+    --> src/crucible/mcp/server.py:1972:121
+     |
+1970 |             "properties": {
+1971 |                 "run_id": {"type": "string", "description": "Per-node run ID returned by run_project."},
+1972 |                 "event_limit": {"type": "integer", "description": "How many recent lifecycle events to include.", "default": 10},
+     |                                                                                                                         ^^^^^^^^^
+1973 |             },
+1974 |             "required": ["run_id"],
+     |
+
+E501 Line too long (127 > 120)
+    --> src/crucible/mcp/server.py:1995:121
+     |
+1993 |                 "title": {"type": "string", "description": "Human-readable title."},
+1994 |                 "goal": {"type": "string", "description": "What this session aimed to achieve."},
+1995 |                 "project_spec": {"type": "string", "description": "Name of the project spec used (from .crucible/projects/)."},
+     |                                                                                                                         ^^^^^^^
+1996 |                 "environment": {"type": "object", "description": "Runtime environment: gpu, torch version, python, provider, etc."},
+1997 |                 "steps": {
+     |
+
+E501 Line too long (132 > 120)
+    --> src/crucible/mcp/server.py:1996:121
+     |
+1994 |                 "goal": {"type": "string", "description": "What this session aimed to achieve."},
+1995 |                 "project_spec": {"type": "string", "description": "Name of the project spec used (from .crucible/projects/)."},
+1996 |                 "environment": {"type": "object", "description": "Runtime environment: gpu, torch version, python, provider, etc."},
+     |                                                                                                                         ^^^^^^^^^^^^
+1997 |                 "steps": {
+1998 |                     "type": "array",
+     |
+
+E501 Line too long (175 > 120)
+    --> src/crucible/mcp/server.py:2138:121
+     |
+2136 | …
+2137 | …
+2138 | …URNS: {name, url, added_at}\nNEXT: hub_tap_sync to pull latest, hub_search to find plugins.",
+     |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2139 | …
+2140 | …
+     |
+
+E501 Line too long (125 > 120)
+    --> src/crucible/mcp/server.py:2161:121
+     |
+2159 |     Tool(
+2160 |         name="hub_tap_list",
+2161 |         description="List all configured taps.\n\nREQUIRES: nothing.\nRETURNS: {taps: [{name, url, added_at, last_synced}]}",
+     |                                                                                                                         ^^^^^
+2162 |         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+2163 |     ),
+     |
+
+E501 Line too long (174 > 120)
+    --> src/crucible/mcp/server.py:2166:121
+     |
+2164 | …
+2165 | …
+2166 | …nal name).\nRETURNS: {synced: [...], errors: [...]}\nNEXT: hub_search to find new plugins.",
+     |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2167 | …
+2168 | …
+     |
+
+E501 Line too long (250 > 120)
+    --> src/crucible/mcp/server.py:2175:121
+     |
+2173 | …
+2174 | …
+2175 | …al query, type).\nRETURNS: {results: [{name, type, version, description, author, tap}]}\nNEXT: hub_install to install a found plugin.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2176 | …
+2177 | …
+     |
+
+E501 Line too long (286 > 120)
+    --> src/crucible/mcp/server.py:2187:121
+     |
+2185 | …
+2186 | …
+2187 | …me. Hub initialized. At least one tap added.\nRETURNS: {status, name, type, version, tap, path}\nNEXT: optimizer_list_available (or similar) to verify the plugin loaded.",
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2188 | …
+2189 | …
+     |
+
+E501 Line too long (164 > 120)
+    --> src/crucible/mcp/server.py:2210:121
+     |
+2208 | …
+2209 | …
+2210 | …tional type filter).\nRETURNS: {packages: [{name, type, version, tap, installed_at}]}",
+     |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2211 | …
+2212 | …
+     |
+
+E501 Line too long (174 > 120)
+    --> src/crucible/mcp/server.py:2219:121
+     |
+2217 | …
+2218 | …
+2219 | …p repo; user pushes manually.\n\nREQUIRES: name, type, tap.\nRETURNS: {status, path, note}",
+     |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2220 | …
+2221 | …
+     |
+
+E501 Line too long (174 > 120)
+    --> src/crucible/mcp/server.py:2233:121
+     |
+2231 | …
+2232 | …
+2233 | …ES: tap name.\nRETURNS: {status, tap}\nNEXT: hub_submit_pr to open a PR if this is a fork.",
+     |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2234 | …
+2235 | …
+     |
+
+E501 Line too long (158 > 120)
+    --> src/crucible/mcp/server.py:2262:121
+     |
+2260 | …
+2261 | …
+2262 | …and install status.\n\nREQUIRES: name.\nRETURNS: full manifest + {installed: bool}",
+     |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2263 | …
+2264 | …
+     |
+
+E501 Line too long (162 > 120)
+    --> src/crucible/mcp/server.py:2422:121
+     |
+2420 | …DAG state tracked locally). "
+2421 | …sual DAG.\n\n"
+2422 | …-only). Optional: spiderchat_url, project_name. Token via SPIDERCHAT_TOKEN env var.\n"
+     |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2423 | …'connected'|'local-only'}\n"
+2424 | …
+     |
+
+E501 Line too long (126 > 120)
+    --> src/crucible/mcp/server.py:2429:121
+     |
+2427 | …     "type": "object",
+2428 | …     "properties": {
+2429 | …         "flow_id": {"type": "string", "description": "Spider Chat flow ID. Omit for local-only mode.", "default": ""},
+     |                                                                                                                   ^^^^^^
+2430 | …         "project_name": {"type": "string", "description": "Human-readable project name.", "default": ""},
+2431 | …         "spiderchat_url": {"type": "string", "description": "Spider Chat backend URL. Token read from SPIDERCHAT_TOKEN env var.", …
+     |
+
+E501 Line too long (153 > 120)
+    --> src/crucible/mcp/server.py:2431:121
+     |
+2429 | …at flow ID. Omit for local-only mode.", "default": ""},
+2430 | …n-readable project name.", "default": ""},
+2431 | …ider Chat backend URL. Token read from SPIDERCHAT_TOKEN env var.", "default": ""},
+     |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2432 | …
+2433 | …
+     |
+
+E501 Line too long (128 > 120)
+    --> src/crucible/mcp/server.py:2440:121
+     |
+2438 |         description=(
+2439 |             "Bidirectional sync between Crucible search tree and Spider Chat canvas (if available). "
+2440 |             "Tracks DAG state locally always. If Spider Chat is connected, also pushes nodes to canvas and pulls manual nodes. "
+     |                                                                                                                         ^^^^^^^^
+2441 |             "Works fully without Spider Chat.\n\n"
+2442 |             "REQUIRES: research_dag_init completed, optional tree_name.\n"
+     |
+
+E501 Line too long (128 > 120)
+    --> src/crucible/mcp/server.py:2449:121
+     |
+2447 |             "type": "object",
+2448 |             "properties": {
+2449 |                 "tree_name": {"type": "string", "description": "Crucible search tree to sync. Omit to sync without tree data."},
+     |                                                                                                                         ^^^^^^^^
+2450 |                 "flow_id": {"type": "string", "description": "Override flow ID (uses init default if omitted)."},
+2451 |             },
+     |
+
+E501 Line too long (137 > 120)
+    --> src/crucible/mcp/server.py:2470:121
+     |
+2468 | …     "hypothesis": {"type": "string", "description": "Hypothesis text."},
+2469 | …     "rationale": {"type": "string", "description": "Why this experiment."},
+2470 | …     "config": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Experiment config (env vars)."},
+     |                                                                                                               ^^^^^^^^^^^^^^^^^
+2471 | …     "status": {"type": "string", "description": "Experiment status.", "default": "pending"},
+2472 | …     "result": {"type": "object", "description": "Result dict if completed."},
+     |
+
+E501 Line too long (136 > 120)
+    --> src/crucible/mcp/server.py:2474:121
+     |
+2472 | …     "result": {"type": "object", "description": "Result dict if completed."},
+2473 | …     "result_metric": {"type": "number", "description": "Primary metric value."},
+2474 | …     "parent_canvas_ids": {"type": "array", "items": {"type": "string"}, "description": "Parent canvas node IDs for edges."},
+     |                                                                                                               ^^^^^^^^^^^^^^^^
+2475 | …     "flow_id": {"type": "string", "description": "Override flow ID."},
+2476 | …     "primary_metric": {"type": "string", "default": "val_bpb"},
+     |
+
+E501 Line too long (123 > 120)
+    --> src/crucible/mcp/server.py:2579:121
+     |
+2577 |                 "tree_name": {"type": "string", "description": "Search tree name (created on first use)."},
+2578 |                 "n_candidates": {"type": "integer", "description": "Candidates proposed per iteration.", "default": 3},
+2579 |                 "dry_run": {"type": "boolean", "description": "Skip LLM calls; use fixture candidates.", "default": False},
+     |                                                                                                                         ^^^
+2580 |             },
+2581 |             "required": ["domain_spec", "tree_name"],
+     |
+
+E501 Line too long (122 > 120)
+    --> src/crucible/mcp/server.py:2649:121
+     |
+2647 |             "Return the current Pareto frontier snapshot for a harness tree.\n\n"
+2648 |             "REQUIRES: tree_name (optimizer init is optional; reads directly from disk if absent).\n"
+2649 |             "RETURNS: {status, frontier_node_ids, frontier_size, dominated_count, metrics, best_per_metric, hypervolume?}"
+     |                                                                                                                         ^^
+2650 |         ),
+2651 |         inputSchema={
+     |
+
+E501 Line too long (122 > 120)
+    --> src/crucible/mcp/server.py:2677:121
+     |
+2675 |             "Return the Pareto frontier for any search tree (general-purpose; not harness-specific).\n\n"
+2676 |             "REQUIRES: name of an existing tree under .crucible/search_trees/.\n"
+2677 |             "RETURNS: {status, frontier_node_ids, frontier_size, dominated_count, metrics, best_per_metric, hypervolume?}"
+     |                                                                                                                         ^^
+2678 |         ),
+2679 |         inputSchema={
+     |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/mcp/tools.py:2:1
+   |
+ 1 |   """MCP tool implementations for Crucible fleet operations."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | import json
+ 5 | | import os
+ 6 | | import re
+ 7 | | import time
+ 8 | | from pathlib import Path
+ 9 | | from collections.abc import Callable
+10 | | from typing import TYPE_CHECKING, Any
+11 | | from uuid import uuid4
+12 | |
+13 | | from crucible.core.config import ProjectConfig, load_config
+14 | | from crucible.core.errors import CrucibleError
+   | |______________________________________________^
+15 |
+16 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+
+E501 Line too long (172 > 120)
+   --> src/crucible/mcp/tools.py:607:121
+    |
+605 | …
+606 | …
+607 | …fresh first (wait ~60s after provision_nodes).", "total": 0, "bootstrapped": 0, "nodes": []}
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+608 | …
+609 | …
+    |
+
+E501 Line too long (138 > 120)
+   --> src/crucible/mcp/tools.py:629:121
+    |
+627 | …
+628 | …
+629 | …, "env_ready": n.get("env_ready"), "dataset_ready": n.get("dataset_ready")}
+    |                                                           ^^^^^^^^^^^^^^^^^^
+630 | …
+631 | …
+    |
+
+E501 Line too long (163 > 120)
+   --> src/crucible/mcp/tools.py:653:121
+    |
+651 | …
+652 | …
+653 | …es first (after provision_nodes + fleet_refresh).", "dispatched": 0, "assignments": []}
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+654 | …
+655 | …
+    |
+
+E501 Line too long (152 > 120)
+   --> src/crucible/mcp/tools.py:681:121
+    |
+679 | …g.nodes_file)
+680 | …
+681 | …s + fleet_refresh first.", "collected": False, "total_results": 0, "completed": 0}
+    |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+682 | …
+683 | …
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/mcp/tools.py:683:9
+    |
+681 |               return {"error": "No fleet nodes found. Run provision_nodes + fleet_refresh first.", "collected": False, "total_results":…
+682 |
+683 | /         from crucible.fleet.manager import FleetManager
+684 | |         from crucible.analysis.results import merged_results
+685 | |         from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
+    | |_____________________________________________________________________________________________^
+686 |
+687 |           fm = FleetManager(config)
+    |
+help: Organize imports
+
+B905 `zip()` without an explicit `strict=` parameter
+   --> src/crucible/mcp/tools.py:857:41
+    |
+855 |             values = [exp.get("config", {}).get(key, "<not set>") for exp in experiments]
+856 |             if len(set(values)) > 1:
+857 |                 config_diff[key] = dict(zip(names, values))
+    |                                         ^^^^^^^^^^^^^^^^^^
+858 |
+859 |         # Metric comparison
+    |
+help: Add explicit value for parameter `strict=`
+
+E501 Line too long (150 > 120)
+    --> src/crucible/mcp/tools.py:1101:121
+     |
+1099 | …
+1100 | …
+1101 | …case letters, numbers, hyphens, underscores. Must start with letter or number."}
+     |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1102 | …
+1103 | …
+     |
+
+E501 Line too long (128 > 120)
+    --> src/crucible/mcp/tools.py:1499:121
+     |
+1497 |         if ok:
+1498 |             return {"status": "annotated", "run_id": run_id, "annotation_type": annotation_type, "wandb_url": wandb_url}
+1499 |         return {"error": f"Failed to annotate W&B run for {run_id}. wandb may not be installed or the run may be inaccessible."}
+     |                                                                                                                         ^^^^^^^^
+1500 |     except CrucibleError as exc:
+1501 |         return {"error": f"[{type(exc).__name__}] {exc}"}
+     |
+
+E501 Line too long (142 > 120)
+    --> src/crucible/mcp/tools.py:1697:121
+     |
+1695 | …
+1696 | …
+1697 | …ence', 0):.2f} below threshold {min_conf:.2f} for {from_scope}→{to_scope}."}
+     |                                                        ^^^^^^^^^^^^^^^^^^^^^^
+1698 | …
+1699 | …, config)
+     |
+
+E501 Line too long (143 > 120)
+    --> src/crucible/mcp/tools.py:1710:121
+     |
+1709 | …
+1710 | …dence', 0):.2f} below threshold {min_conf:.2f} for {from_scope}→{to_scope}."}
+     |                                                        ^^^^^^^^^^^^^^^^^^^^^^^
+1711 | …
+1712 | …
+     |
+
+E501 Line too long (136 > 120)
+    --> src/crucible/mcp/tools.py:2394:121
+     |
+2392 | …
+2393 | …r pass through all blocks.", "params": []},
+2394 | …coder-decoder with learned skip connections.", "params": ["num_layers"]},
+     |                                                           ^^^^^^^^^^^^^^^^
+2395 | … over shared blocks with step scales.", "params": ["logical_steps", "unique_blocks"]},
+2396 | …uential with step scales for PrefixMemoryBlock layers.", "params": ["num_layers"]},
+     |
+
+E501 Line too long (149 > 120)
+    --> src/crucible/mcp/tools.py:2395:121
+     |
+2393 | … through all blocks.", "params": []},
+2394 | …decoder with learned skip connections.", "params": ["num_layers"]},
+2395 | …shared blocks with step scales.", "params": ["logical_steps", "unique_blocks"]},
+     |                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2396 | …l with step scales for PrefixMemoryBlock layers.", "params": ["num_layers"]},
+2397 | …
+     |
+
+E501 Line too long (146 > 120)
+    --> src/crucible/mcp/tools.py:2396:121
+     |
+2394 | …-decoder with learned skip connections.", "params": ["num_layers"]},
+2395 | … shared blocks with step scales.", "params": ["logical_steps", "unique_blocks"]},
+2396 | …al with step scales for PrefixMemoryBlock layers.", "params": ["num_layers"]},
+     |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2397 | …
+     |
+
+E501 Line too long (130 > 120)
+    --> src/crucible/mcp/tools.py:2418:121
+     |
+2416 | …
+2417 | …
+2418 | …dard transformer block with multi-head attention, MLP, and RMSNorm."},
+     |                                                              ^^^^^^^^^^
+2419 | …Prefix memory block with state compression for recurrent-style architectures."},
+2420 | …
+     |
+
+E501 Line too long (140 > 120)
+    --> src/crucible/mcp/tools.py:2419:121
+     |
+2417 | …
+2418 | …transformer block with multi-head attention, MLP, and RMSNorm."},
+2419 | …x memory block with state compression for recurrent-style architectures."},
+     |                                                         ^^^^^^^^^^^^^^^^^^^^
+2420 | …
+     |
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:2432:9
+     |
+2431 |       try:
+2432 | /         from crucible.models.composer import ArchitectureSpec, SpecResolver, ComposedArchitecture
+2433 | |         import types
+     | |____________________^
+2434 |
+2435 |           parsed = ArchitectureSpec.from_dict(spec)
+     |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:2618:5
+     |
+2616 |   def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
+2617 |       """Mark experiments as failed if assigned to nodes that no longer exist."""
+2618 | /     from crucible.fleet.queue import load_queue, save_queue
+2619 | |     from crucible.fleet.inventory import load_nodes
+     | |___________________________________________________^
+2620 |
+2621 |       config = _get_config()
+     |
+help: Organize imports
+
+E501 Line too long (146 > 120)
+    --> src/crucible/mcp/tools.py:2721:121
+     |
+2719 | …ode), None)
+2720 | …
+2721 | …de '{assigned_node}' not reachable (no SSH host). Try collect_results first."}
+     |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2722 | …
+2723 | …
+     |
+
+E501 Line too long (146 > 120)
+    --> src/crucible/mcp/tools.py:2733:121
+     |
+2731 | …
+2732 | …
+2733 | …gs not found on node '{assigned_node}'. Experiment may not have started yet."}
+     |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+2734 | …
+2735 | …
+     |
+
+E501 Line too long (134 > 120)
+    --> src/crucible/mcp/tools.py:2746:121
+     |
+2744 | …
+2745 | …
+2746 | …SSH probe failed: {exc}. Try collect_results to download logs locally."}
+     |                                                            ^^^^^^^^^^^^^^
+     |
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:3314:5
+     |
+3312 |     runs_path = _project_runs_path()
+3313 |     runs_path.parent.mkdir(parents=True, exist_ok=True)
+3314 |     from crucible.core.io import append_jsonl, _json_ready
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3315 |     payload = {"run_id": run_id, "updated_at": utc_now_iso(), **_json_ready(data)}
+3316 |     record = payload
+     |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:3365:5
+     |
+3363 |         **fields,
+3364 |     }
+3365 |     from crucible.core.io import append_jsonl, _json_ready
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3366 |     append_jsonl(path, _json_ready(payload))
+     |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:3597:9
+     |
+3595 |       config = _get_config()
+3596 |       try:
+3597 | /         from crucible.core.config import load_project_spec
+3598 | |         from crucible.core.hub import HubStore
+3599 | |         from crucible.fleet.project_runner import launch_project
+3600 | |         from crucible.fleet.project_launchers import launcher_runtime_entry, resolve_launcher_bundle
+3601 | |         from crucible.fleet.inventory import load_nodes_if_exists
+     | |_________________________________________________________________^
+3602 |
+3603 |           project_name = args["project_name"]
+     |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:4095:5
+     |
+4093 |       NEXT: recipe_list to see all recipes, recipe_get to retrieve one.
+4094 |       """
+4095 | /     import yaml
+4096 | |     from crucible.core.errors import RecipeError
+     | |________________________________________________^
+4097 |
+4098 |       config = _get_config()
+     |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:4201:5
+     |
+4199 |       NEXT: Follow the steps to reproduce.
+4200 |       """
+4201 | /     import yaml
+4202 | |     from crucible.core.errors import RecipeError
+     | |________________________________________________^
+4203 |
+4204 |       config = _get_config()
+     |
+help: Organize imports
+
+E501 Line too long (170 > 120)
+    --> src/crucible/mcp/tools.py:4477:121
+     |
+4476 | …
+4477 | … manual instructions).\n\nREQUIRES: tap name.\nRETURNS: {status, pr_url | instructions}"""
+     |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4478 | …
+4479 | …
+     |
+
+I001 [*] Import block is un-sorted or un-formatted
+    --> src/crucible/mcp/tools.py:4564:9
+     |
+4562 |     """List registered data sources."""
+4563 |     try:
+4564 |         from crucible.core.data_sources import list_data_sources, describe_data_source
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+4565 |
+4566 |         sources = []
+     |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/mcp/tracer.py:18:54
+   |
+17 |     def __init__(self, trace_dir: Path, session_id: str | None = None):
+18 |         self.session_id = session_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+   |                                                      ^^^^^^^^^^^^
+19 |         self.trace_dir = trace_dir
+20 |         self.trace_dir.mkdir(parents=True, exist_ok=True)
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/mcp/tracer.py:24:41
+   |
+22 |         self.meta_path = self.trace_dir / f"{self.session_id}.meta.yaml"
+23 |         self._seq = 0
+24 |         self._started_at = datetime.now(timezone.utc).isoformat()
+   |                                         ^^^^^^^^^^^^
+25 |         self._tool_counts: dict[str, int] = {}
+26 |         self._identifiers: dict[str, set[str]] = {}
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/mcp/tracer.py:45:32
+   |
+44 |         entry = {
+45 |             "ts": datetime.now(timezone.utc).isoformat(),
+   |                                ^^^^^^^^^^^^
+46 |             "seq": self._seq,
+47 |             "tool": tool,
+   |
+help: Convert to `datetime.UTC` alias
+
+UP017 [*] Use `datetime.UTC` alias
+  --> src/crucible/mcp/tracer.py:67:38
+   |
+65 |             "trace_version": 2,
+66 |             "started_at": self._started_at,
+67 |             "ended_at": datetime.now(timezone.utc).isoformat(),
+   |                                      ^^^^^^^^^^^^
+68 |             "tool_calls": self._seq,
+69 |             "tool_counts": dict(sorted(self._tool_counts.items(), key=lambda x: -x[1])),
+   |
+help: Convert to `datetime.UTC` alias
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/models/__init__.py:1:1
+  |
+1 | / from __future__ import annotations
+2 | |
+3 | | from crucible.models.registry import build_model, get_family_schema, list_families, register_model, register_schema
+4 | | from crucible.models.base import CrucibleModel, TiedEmbeddingLM
+5 | |
+6 | | # Force architecture modules to self-register when the package is imported.
+7 | | import crucible.models.architectures  # noqa: F401
+  | |____________________________________^
+8 |
+9 |   __all__ = [
+  |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> src/crucible/models/architectures/__init__.py:9:1
+   |
+ 7 | # --- Builtins (source="builtin") ---
+ 8 | _reg._CURRENT_REGISTER_SOURCE = "builtin"
+ 9 | import crucible.models.architectures.baseline  # noqa: F401
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 | import crucible.models.architectures.looped  # noqa: F401
+11 | import crucible.models.architectures.convloop  # noqa: F401
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/architectures/__init__.py:9:1
+   |
+ 7 |   # --- Builtins (source="builtin") ---
+ 8 |   _reg._CURRENT_REGISTER_SOURCE = "builtin"
+ 9 | / import crucible.models.architectures.baseline  # noqa: F401
+10 | | import crucible.models.architectures.looped  # noqa: F401
+11 | | import crucible.models.architectures.convloop  # noqa: F401
+12 | | import crucible.models.architectures.prefix_memory  # noqa: F401
+   | |__________________________________________________^
+13 |
+14 |   # --- Builtin YAML specs (source="builtin", opt-in via config) ---
+   |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> src/crucible/models/architectures/__init__.py:10:1
+   |
+ 8 | _reg._CURRENT_REGISTER_SOURCE = "builtin"
+ 9 | import crucible.models.architectures.baseline  # noqa: F401
+10 | import crucible.models.architectures.looped  # noqa: F401
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+11 | import crucible.models.architectures.convloop  # noqa: F401
+12 | import crucible.models.architectures.prefix_memory  # noqa: F401
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/models/architectures/__init__.py:11:1
+   |
+ 9 | import crucible.models.architectures.baseline  # noqa: F401
+10 | import crucible.models.architectures.looped  # noqa: F401
+11 | import crucible.models.architectures.convloop  # noqa: F401
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+12 | import crucible.models.architectures.prefix_memory  # noqa: F401
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/models/architectures/__init__.py:12:1
+   |
+10 | import crucible.models.architectures.looped  # noqa: F401
+11 | import crucible.models.architectures.convloop  # noqa: F401
+12 | import crucible.models.architectures.prefix_memory  # noqa: F401
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+13 |
+14 | # --- Builtin YAML specs (source="builtin", opt-in via config) ---
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/architectures/baseline.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | import math
+ 4 | | from typing import Any
+ 5 | |
+ 6 | | import torch
+ 7 | | from torch import Tensor, nn
+ 8 | |
+ 9 | | from crucible.models.base import TiedEmbeddingLM
+10 | | from crucible.models.registry import register_model, register_schema
+11 | | from crucible.models.components.attention import Block, _parse_block_pattern
+12 | | from crucible.models.components.gate import SmearGate
+13 | | from crucible.models.components.hash_embed import BigramHash, TrigramHash
+14 | | from crucible.models.components.merge import TokenMerger
+   | |________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (142 > 120)
+  --> src/crucible/models/architectures/baseline.py:53:121
+   |
+51 | …
+52 | …
+53 | …ied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
+   |                                                         ^^^^^^^^^^^^^^^^^^^^^^
+54 | …
+55 | …ayers
+   |
+
+E501 Line too long (139 > 120)
+  --> src/crucible/models/architectures/baseline.py:56:121
+   |
+54 | …
+55 | …_layers
+56 | …m_encoder_layers, self.num_decoder_layers), model_dim, dtype=torch.float32))
+   |                                                           ^^^^^^^^^^^^^^^^^^^
+57 | …f block_pattern else [0] * num_layers
+58 | …
+   |
+
+E501 Line too long (169 > 120)
+  --> src/crucible/models/architectures/baseline.py:75:121
+   |
+73 | …
+74 | …
+75 | …buckets, embed_dim=bigram_hash_embed_dim, model_dim=model_dim) if use_bigram_hash else None
+   |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+76 | …sh_buckets, embed_dim=bigram_hash_embed_dim, model_dim=model_dim) if use_trigram_hash else None
+77 | …
+   |
+
+E501 Line too long (173 > 120)
+  --> src/crucible/models/architectures/baseline.py:76:121
+   |
+74 | …
+75 | …ckets, embed_dim=bigram_hash_embed_dim, model_dim=model_dim) if use_bigram_hash else None
+76 | …_buckets, embed_dim=bigram_hash_embed_dim, model_dim=model_dim) if use_trigram_hash else None
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+77 | …
+78 | …
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/architectures/convloop.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from typing import Any
+ 4 | |
+ 5 | | import torch
+ 6 | | from torch import Tensor, nn
+ 7 | |
+ 8 | | from crucible.models.base import TiedEmbeddingLM
+ 9 | | from crucible.models.registry import register_model
+10 | | from crucible.models.components.attention import Block
+11 | | from crucible.models.components.conv import FeatureConvBottleneck
+12 | | from crucible.models.components.linear import CastedLinear
+   | |__________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (142 > 120)
+  --> src/crucible/models/architectures/convloop.py:37:121
+   |
+35 | …
+36 | …
+37 | …ied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
+   |                                                         ^^^^^^^^^^^^^^^^^^^^^^
+38 | …)
+39 | …e)
+   |
+
+E501 Line too long (147 > 120)
+  --> src/crucible/models/architectures/convloop.py:41:121
+   |
+39 | …
+40 | …
+41 | …_base, qk_gain_init, attention_variant, residual_variant, activation=activation)
+   |                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+42 | …
+43 | …
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/architectures/looped.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from typing import Any
+ 4 | |
+ 5 | | import torch
+ 6 | | from torch import Tensor, nn
+ 7 | |
+ 8 | | from crucible.models.base import TiedEmbeddingLM
+ 9 | | from crucible.models.registry import register_model
+10 | | from crucible.models.components.attention import Block
+   | |______________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (142 > 120)
+  --> src/crucible/models/architectures/looped.py:34:121
+   |
+32 | …
+33 | …
+34 | …ied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
+   |                                                         ^^^^^^^^^^^^^^^^^^^^^^
+35 | …
+36 | …
+   |
+
+E501 Line too long (148 > 120)
+  --> src/crucible/models/architectures/looped.py:37:121
+   |
+35 | …
+36 | …
+37 | …_base, qk_gain_init, attention_variant, residual_variant, activation=activation)
+   |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+38 | …
+39 | …
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/architectures/prefix_memory.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from typing import Any
+ 4 | |
+ 5 | | import torch
+ 6 | | from torch import Tensor, nn
+ 7 | |
+ 8 | | from crucible.models.base import TiedEmbeddingLM
+ 9 | | from crucible.models.registry import register_model
+10 | | from crucible.models.components.memory import PrefixMemoryBlock
+   | |_______________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (142 > 120)
+  --> src/crucible/models/architectures/prefix_memory.py:29:121
+   |
+27 | …
+28 | …
+29 | …ied_embed_init_std, logit_softcap, embed_bottleneck_dim, spectral_embed_init)
+   |                                                         ^^^^^^^^^^^^^^^^^^^^^^
+30 | …
+31 | …idual_variant, activation=activation)
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/base.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | import math
+ 4 | | from abc import ABC, abstractmethod
+ 5 | |
+ 6 | | import torch
+ 7 | | import torch.nn.functional as F
+ 8 | | from torch import Tensor, nn
+ 9 | |
+10 | | from crucible.models.components.norm import RMSNorm
+11 | | from crucible.models.components.linear import CastedLinear
+   | |__________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (123 > 120)
+  --> src/crucible/models/base.py:77:121
+   |
+75 |         if embed_bottleneck_dim > 0:
+76 |             if embed_bottleneck_dim >= model_dim:
+77 |                 raise ValueError(f"EMBED_BOTTLENECK_DIM={embed_bottleneck_dim} must be smaller than MODEL_DIM={model_dim}")
+   |                                                                                                                         ^^^
+78 |             self.embed_low = nn.Embedding(vocab_size, embed_bottleneck_dim)
+79 |             self.embed_proj = CastedLinear(embed_bottleneck_dim, model_dim, bias=False)
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/components/__init__.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | from crucible.models.components.norm import RMSNorm
+ 4 | | from crucible.models.components.linear import CastedLinear
+ 5 | | from crucible.models.components.rotary import Rotary, apply_rotary_emb
+ 6 | | from crucible.models.components.attention import CausalSelfAttention, Block
+ 7 | | from crucible.models.components.mlp import MLP
+ 8 | | from crucible.models.components.gate import SmearGate
+ 9 | | from crucible.models.components.hash_embed import BigramHash, TrigramHash
+10 | | from crucible.models.components.conv import DepthwiseConv1D, FeatureConvBottleneck
+11 | | from crucible.models.components.merge import TokenMerger
+12 | | from crucible.models.components.memory import CausalPrefixMemory, PrefixMemoryBlock
+13 | | from crucible.models.components.lora import BatchedLinearLoRA, BatchedTTTLoRA
+14 | | from crucible.models.components.moe import MoELayer
+   | |___________________________________________________^
+15 |
+16 |   __all__ = [
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/components/attention.py:1:1
+   |
+ 1 | / from __future__ import annotations
+ 2 | |
+ 3 | | import torch
+ 4 | | import torch.nn.functional as F
+ 5 | | from torch import Tensor, nn
+ 6 | |
+ 7 | | from crucible.models.components.linear import CastedLinear
+ 8 | | from crucible.models.components.norm import RMSNorm
+ 9 | | from crucible.models.components.rotary import Rotary, apply_rotary_emb
+10 | | from crucible.models.components.mlp import MLP
+11 | | from crucible.models.components.moe import MoELayer
+12 | | from crucible.models.components.conv import DepthwiseConv1D
+   | |___________________________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (149 > 120)
+  --> src/crucible/models/components/attention.py:93:121
+   |
+91 | …
+92 | …dow:
+93 | …indowed_causal_mask(seqlen, self.attention_window, x.device), enable_gqa=use_gqa)
+   |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+94 | …_window:
+95 | …
+   |
+
+E501 Line too long (125 > 120)
+   --> src/crucible/models/components/attention.py:102:121
+    |
+100 |                 k_full, v_full = k, v
+101 |             win = _windowed_causal_mask(seqlen, self.multiscale_window, x.device)
+102 |             y_local = F.scaled_dot_product_attention(q[:, :n_local], k_full[:, :n_local], v_full[:, :n_local], attn_mask=win)
+    |                                                                                                                         ^^^^^
+103 |             y_global = F.scaled_dot_product_attention(q[:, n_local:], k_full[:, n_local:], v_full[:, n_local:], is_causal=True)
+104 |             y = torch.cat([y_local, y_global], dim=1)
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/models/components/attention.py:103:121
+    |
+101 |             win = _windowed_causal_mask(seqlen, self.multiscale_window, x.device)
+102 |             y_local = F.scaled_dot_product_attention(q[:, :n_local], k_full[:, :n_local], v_full[:, :n_local], attn_mask=win)
+103 |             y_global = F.scaled_dot_product_attention(q[:, n_local:], k_full[:, n_local:], v_full[:, n_local:], is_causal=True)
+    |                                                                                                                         ^^^^^^^
+104 |             y = torch.cat([y_local, y_global], dim=1)
+105 |         else:
+    |
+
+E501 Line too long (150 > 120)
+   --> src/crucible/models/components/attention.py:141:121
+    |
+139 | …
+140 | …
+141 | … rope_base, qk_gain_init, attention_variant, multiscale_window, attention_window)
+    |                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+142 | …
+143 | …_k=moe_top_k, mlp_mult=mlp_mult, activation=activation)
+    |
+
+E501 Line too long (124 > 120)
+   --> src/crucible/models/components/attention.py:143:121
+    |
+141 | …     self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init, attention_variant, multiscale_window, at…
+142 | …     if use_moe:
+143 | …         self.mlp = MoELayer(dim, num_experts=moe_num_experts, top_k=moe_top_k, mlp_mult=mlp_mult, activation=activation)
+    |                                                                                                                       ^^^^
+144 | …     else:
+145 | …         self.mlp = MLP(dim, mlp_mult, activation=activation)
+    |
+
+E501 Line too long (174 > 120)
+  --> src/crucible/models/components/conv.py:41:121
+   |
+39 | …
+40 | …
+41 | …(dtype=x.dtype)[None, None, :] * pooled + self.right.to(dtype=x.dtype)[None, None, :] * right
+   |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/models/components/memory.py:1:1
+  |
+1 | / from __future__ import annotations
+2 | |
+3 | | import torch
+4 | | import torch.nn.functional as F
+5 | | from torch import Tensor, nn
+6 | |
+7 | | from crucible.models.components.linear import CastedLinear
+8 | | from crucible.models.components.norm import RMSNorm
+9 | | from crucible.models.components.mlp import MLP
+  | |______________________________________________^
+  |
+help: Organize imports
+
+E501 Line too long (129 > 120)
+  --> src/crucible/models/components/memory.py:26:121
+   |
+25 | class PrefixMemoryBlock(nn.Module):
+26 |     def __init__(self, dim: int, state_dim: int, mlp_mult: int, residual_variant: str = "standard", activation: str = "relu_sq"):
+   |                                                                                                                         ^^^^^^^^^
+27 |         super().__init__()
+28 |         if residual_variant not in {"standard", "gated"}:
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> src/crucible/models/components/mlp.py:1:1
+  |
+1 | / from __future__ import annotations
+2 | |
+3 | | import torch
+4 | | import torch.nn.functional as F
+5 | | from torch import Tensor, nn
+6 | |
+7 | | from crucible.models.components.linear import CastedLinear
+  | |__________________________________________________________^
+  |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/models/composer.py:7:1
+   |
+ 5 |   requiring Python code.
+ 6 |   """
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import copy
+10 | | import re
+11 | | from dataclasses import dataclass, field
+12 | | from pathlib import Path
+13 | | from typing import Any, Callable
+14 | |
+15 | | from crucible.core.errors import ComposerError
+   | |______________________________________________^
+   |
+help: Organize imports
+
+UP035 [*] Import from `collections.abc` instead: `Callable`
+  --> src/crucible/models/composer.py:13:1
+   |
+11 | from dataclasses import dataclass, field
+12 | from pathlib import Path
+13 | from typing import Any, Callable
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+14 |
+15 | from crucible.core.errors import ComposerError
+   |
+help: Import from `collections.abc`
+
+E501 Line too long (129 > 120)
+   --> src/crucible/models/composer.py:184:121
+    |
+182 |             transform=_resolve_value(copy.deepcopy(self.spec.transform), variables) if self.spec.transform else None,
+183 |             init=_resolve_value(copy.deepcopy(self.spec.init), variables) if self.spec.init else None,
+184 |             augmentations=_resolve_value(copy.deepcopy(self.spec.augmentations), variables) if self.spec.augmentations else None,
+    |                                                                                                                         ^^^^^^^^^
+185 |         )
+    |
+
+E402 Module level import not at top of file
+   --> src/crucible/models/composer.py:192:1
+    |
+190 | # ---------------------------------------------------------------------------
+191 |
+192 | from crucible.core.plugin_registry import PluginRegistry
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+193 |
+194 | BLOCK_TYPE_REGISTRY = PluginRegistry("block_type")
+    |
+
+E501 Line too long (158 > 120)
+   --> src/crucible/models/composer.py:273:121
+    |
+271 | …
+272 | …
+273 | … resolved.stack else resolved.stack.get("num_layers", getattr(args, "num_layers", 9))
+    |                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+274 | …
+275 | …
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/models/composer.py:398:5
+    |
+396 |       and ``CrucibleModel`` composers can share it.
+397 |       """
+398 | /     from torch import nn
+399 | |     from crucible.models.components.attention import _parse_block_pattern
+    | |_________________________________________________________________________^
+400 |
+401 |       block_cfg = resolved_spec.block
+    |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/models/composer.py:494:5
+    |
+492 |   def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
+493 |       """Build a composed model from a resolved spec + args namespace."""
+494 | /     import math
+495 | |     import torch
+496 | |     from torch import nn
+497 | |
+498 | |     from crucible.models.base import TiedEmbeddingLM
+    | |____________________________________________________^
+499 |
+500 |       _ensure_block_types()
+    |
+help: Organize imports
+
+E501 Line too long (122 > 120)
+   --> src/crucible/models/composer.py:665:121
+    |
+664 |         def _apply_ortho_init(self, num_layers: int) -> None:
+665 |             skip_patterns = ('tok_emb', 'embed_low', 'embed_proj', 'lm_head', 'bigram_hash', 'trigram_hash', 'smear_gate')
+    |                                                                                                                         ^^
+666 |             for name, p in self.named_parameters():
+667 |                 if p.ndim == 2 and p.numel() > 256 and not any(pat in name for pat in skip_patterns):
+    |
+
+UP035 [*] Import from `collections.abc` instead: `Callable`
+ --> src/crucible/models/registry.py:4:1
+  |
+3 | from pathlib import Path
+4 | from typing import Any, Callable
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+5 |
+6 | _REGISTRY: dict[str, Callable[..., Any]] = {}
+  |
+help: Import from `collections.abc`
+
+E501 Line too long (132 > 120)
+  --> src/crucible/models/registry.py:92:121
+   |
+90 |             import crucible.models.architectures  # noqa: F401 — triggers registration
+91 |         except ImportError:
+92 |             return [{"name": n, "source": "builtin"} for n in sorted(["baseline", "looped", "convloop", "memory", "prefix_memory"])]
+   |                                                                                                                         ^^^^^^^^^^^^
+93 |     return sorted(
+94 |         [{"name": name, "source": _REGISTRY_META.get(name, {}).get("source", "unknown")} for name in _REGISTRY],
+   |
+
+F401 [*] `crucible.core.log.utc_now_iso` imported but unused
+  --> src/crucible/research_dag/bridge.py:21:31
+   |
+20 | from crucible.core.errors import ResearchDAGError
+21 | from crucible.core.log import utc_now_iso
+   |                               ^^^^^^^^^^^
+22 | from crucible.research_dag.dag_state import DAGState
+23 | from crucible.research_dag.node_format import (
+   |
+help: Remove unused import: `crucible.core.log.utc_now_iso`
+
+F401 [*] `crucible.research_dag.node_format.format_review_content` imported but unused
+  --> src/crucible/research_dag/bridge.py:27:5
+   |
+25 |     format_experiment_content,
+26 |     format_finding_content,
+27 |     format_review_content,
+   |     ^^^^^^^^^^^^^^^^^^^^^
+28 | )
+   |
+help: Remove unused import: `crucible.research_dag.node_format.format_review_content`
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> src/crucible/research_dag/bridge.py:426:9
+    |
+424 |       def _http_request(self, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
+425 |           """Make HTTP request to Spider Chat backend. Raises on failure."""
+426 | /         import urllib.parse
+427 | |         import urllib.request
+428 | |         import urllib.error
+    | |___________________________^
+429 |
+430 |           # Validate URL is well-formed to prevent injection
+    |
+help: Organize imports
+
+E501 Line too long (122 > 120)
+   --> src/crucible/research_dag/bridge.py:528:121
+    |
+527 |         try:
+528 |             self._http_request("PATCH", f"/api/flows/{self._safe_path_id(flow_id)}/nodes/{self._safe_path_id(node_id)}", {
+    |                                                                                                                         ^^
+529 |                 "data": update_data,
+530 |             })
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/researcher/analysis.py:127:121
+    |
+125 |         sens = sensitivity_analysis(results, cfg=config)
+126 |         structured["top_experiments"] = [
+127 |             {"name": r["name"], "metric": r.get("result", {}).get(config.metrics.primary), "model_bytes": r.get("model_bytes")}
+    |                                                                                                                         ^^^^^^^
+128 |             for r in top
+129 |         ]
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/researcher/briefing.py:8:1
+   |
+ 6 |   simply omitted or given safe defaults.
+ 7 |   """
+ 8 | / from __future__ import annotations
+ 9 | |
+10 | | from typing import Any
+11 | |
+12 | | from crucible.core.config import ProjectConfig
+13 | | from crucible.core.log import log_warn
+   | |______________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (125 > 120)
+   --> src/crucible/researcher/briefing.py:302:121
+    |
+300 |             metric_val = entry.get("metric")
+301 |             metric_str = f"{metric_val:.4f}" if isinstance(metric_val, (int, float)) else str(metric_val)
+302 |             lines.append(f"{i}. **{entry.get('name', '?')}** {primary}={metric_str} ({entry.get('model_bytes', '?')} bytes)")
+    |                                                                                                                         ^^^^^
+303 |         lines.append("")
+304 |     else:
+    |
+
+UP037 [*] Remove quotes from type annotation
+  --> src/crucible/researcher/harness_optimizer.py:58:14
+   |
+56 |         tree_dir: Path | None = None,
+57 |         n_candidates: int = 3,
+58 |         llm: "LLMClient | None" = None,
+   |              ^^^^^^^^^^^^^^^^^^
+59 |         dry_run: bool = False,
+60 |     ) -> None:
+   |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/researcher/harness_optimizer.py:105:22
+    |
+104 |     @property
+105 |     def llm(self) -> "LLMClient":
+    |                      ^^^^^^^^^^^
+106 |         if self._llm is None:
+107 |             from crucible.researcher.llm_client import AnthropicClient
+    |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/researcher/hypothesis.py:100:31
+    |
+100 | def _build_tree_context(tree: "SearchTree", node_id: str) -> str:
+    |                               ^^^^^^^^^^^^
+101 |     """Build LLM context from a node's position in the search tree.
+    |
+help: Remove quotes
+
+E501 Line too long (131 > 120)
+   --> src/crucible/researcher/hypothesis.py:127:121
+    |
+125 |         lines.append("## Ancestry Path (root -> current)")
+126 |         for anc in ancestry:
+127 |             metric_str = f" {summary['primary_metric']}={anc['result_metric']:.4f}" if anc.get("result_metric") is not None else ""
+    |                                                                                                                         ^^^^^^^^^^^
+128 |             lines.append(
+129 |                 f"  depth={anc['depth']} {anc['experiment_name']}{metric_str} "
+    |
+
+E501 Line too long (133 > 120)
+   --> src/crucible/researcher/hypothesis.py:157:121
+    |
+155 |         lines.append("## Sibling Results")
+156 |         for sib in completed_siblings:
+157 |             metric_str = f"{summary['primary_metric']}={sib['result_metric']:.4f}" if sib.get("result_metric") is not None else "N/A"
+    |                                                                                                                         ^^^^^^^^^^^^^
+158 |             lines.append(f"  {sib['experiment_name']}: {metric_str}")
+159 |             if sib.get("hypothesis"):
+    |
+
+E501 Line too long (139 > 120)
+   --> src/crucible/researcher/hypothesis.py:168:121
+    |
+166 | …
+167 | …
+168 | …['result_metric']:.4f}" if bp_node.get("result_metric") is not None else ""
+    |                                                          ^^^^^^^^^^^^^^^^^^^
+169 | …_str}")
+170 | …
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/researcher/hypothesis.py:210:11
+    |
+209 | def generate_tree_hypotheses(
+210 |     tree: "SearchTree",
+    |           ^^^^^^^^^^^^
+211 |     node_id: str,
+212 |     llm: LLMClient,
+    |
+help: Remove quotes
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/researcher/literature.py:12:1
+   |
+10 |   captures papers that use different terminology for the same concept.
+11 |   """
+12 | / from __future__ import annotations
+13 | |
+14 | | import json
+15 | | import os
+16 | | import re
+17 | | import time
+18 | | import urllib.error
+19 | | import urllib.request
+20 | | from typing import Any
+21 | |
+22 | | from crucible.core.log import log_info, log_warn
+   | |________________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/researcher/llm_client.py:5:1
+   |
+ 3 |   Claude-first with a clean Protocol interface for future expansion.
+ 4 |   """
+ 5 | / from __future__ import annotations
+ 6 | |
+ 7 | | import json
+ 8 | | import os
+ 9 | | import re
+10 | | from typing import TYPE_CHECKING, Any, Protocol
+   | |_______________________________________________^
+   |
+help: Organize imports
+
+UP037 [*] Remove quotes from type annotation
+  --> src/crucible/researcher/search_tree.py:61:10
+   |
+59 |         metrics: list[dict[str, str]] | None = None,
+60 |         candidate_store_dir: str | None = None,
+61 |     ) -> "SearchTree":
+   |          ^^^^^^^^^^^^
+62 |         """Create a new search tree on disk.
+   |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/researcher/search_tree.py:139:38
+    |
+138 |     @classmethod
+139 |     def load(cls, tree_dir: Path) -> "SearchTree":
+    |                                      ^^^^^^^^^^^^
+140 |         """Load an existing search tree from disk."""
+141 |         tree_dir = Path(tree_dir)
+    |
+help: Remove quotes
+
+B023 Function definition does not bind loop variable `minimize`
+   --> src/crucible/researcher/search_tree.py:504:50
+    |
+502 |                     parent_metric = self._get_parent_metric(nd)
+503 |                     if parent_metric is not None:
+504 |                         return -parent_metric if minimize else parent_metric
+    |                                                  ^^^^^^^^
+505 |                     return nd.get("priority_score", 0)
+    |
+
+B905 `zip()` without an explicit `strict=` parameter
+   --> src/crucible/researcher/search_tree.py:693:32
+    |
+692 |         best_per_metric: dict[str, Any] = {}
+693 |         for name, direction in zip(names, directions):
+    |                                ^^^^^^^^^^^^^^^^^^^^^^
+694 |             best_node_id = None
+695 |             best_val: float | None = None
+    |
+help: Add explicit value for parameter `strict=`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/__init__.py:2:1
+   |
+ 1 |   """Crucible runner: execute experiments with streaming output, status tracking, and OOM retry."""
+ 2 | / from __future__ import annotations
+ 3 | |
+ 4 | | from crucible.runner.experiment import run_experiment
+ 5 | | from crucible.runner.output_parser import OutputParser, parse_output, classify_failure
+ 6 | | from crucible.runner.presets import get_preset, list_presets, PRESET_DEFAULTS
+ 7 | | from crucible.runner.tracker import RunTracker
+ 8 | | from crucible.runner.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
+   | |______________________________________________________________________________________^
+ 9 |
+10 |   __all__ = [
+   |
+help: Organize imports
+
+F401 [*] `typing.Any` imported but unused
+  --> src/crucible/runner/design.py:8:35
+   |
+ 6 | from __future__ import annotations
+ 7 |
+ 8 | from typing import TYPE_CHECKING, Any
+   |                                   ^^^
+ 9 |
+10 | from crucible.core.types import ExperimentConfig, ExperimentDesign, VersionMeta
+   |
+help: Remove unused import: `typing.Any`
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/experiment.py:18:1
+   |
+16 |     - OUTPUT: Stdout lines matching known patterns carry metrics
+17 |   """
+18 | / from __future__ import annotations
+19 | |
+20 | | import os
+21 | | import selectors
+22 | | import subprocess
+23 | | import sys
+24 | | import time
+25 | | from datetime import datetime, timezone
+26 | | from pathlib import Path
+27 | | from typing import Any
+28 | |
+29 | | from crucible.core.errors import RunnerError
+30 | | from crucible.core.io import append_jsonl, read_jsonl
+31 | | from crucible.core.config import ProjectConfig, load_config
+32 | | from crucible.core.experiment_contract import contract_metadata
+33 | | from crucible.core.types import ExperimentResult
+34 | | from crucible.runner.output_parser import (
+35 | |     OutputParser,
+36 | |     classify_failure,
+37 | |     steps_seen as _steps_seen_default,
+38 | |     tail,
+39 | | )
+40 | | from crucible.runner.presets import get_preset
+41 | | from crucible.runner.tracker import RunTracker
+42 | | from crucible.runner.wandb_logger import WandbLogger
+   | |____________________________________________________^
+   |
+help: Organize imports
+
+UP017 [*] Use `datetime.UTC` alias
+   --> src/crucible/runner/experiment.py:204:30
+    |
+202 |     # -- Resolve experiment identity --
+203 |     exp_id = experiment_id or f"exp_{int(time.time())}"
+204 |     timestamp = datetime.now(timezone.utc).isoformat()
+    |                              ^^^^^^^^^^^^
+205 |
+206 |     # -- Resolve script and python --
+    |
+help: Convert to `datetime.UTC` alias
+
+E501 Line too long (121 > 120)
+   --> src/crucible/runner/experiment.py:278:121
+    |
+276 |     if env.get("CRUCIBLE_ENFORCE_CONTRACT") == "1" and not wandb_logger.enabled:
+277 |         raise RunnerError(
+278 |             f"RunPod+W&B contract required, but W&B initialization failed: {wandb_logger.error or 'WANDB_PROJECT unset'}"
+    |                                                                                                                         ^
+279 |         )
+280 |     if wandb_logger.enabled:
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/notes.py:7:1
+   |
+ 5 |       .crucible/notes.jsonl                          -- append-only search index
+ 6 |   """
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import re
+10 | | from pathlib import Path
+11 | | from typing import Any
+12 | |
+13 | | import yaml
+14 | |
+15 | | from crucible.core.errors import RunnerError
+16 | | from crucible.core.io import append_jsonl, read_jsonl
+17 | | from crucible.core.log import utc_now_iso, utc_stamp
+18 | | from crucible.core.types import ExperimentNote
+   | |______________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/output_parser.py:17:1
+   |
+15 |     - Train time:         train_time:<n>ms
+16 |   """
+17 | / from __future__ import annotations
+18 | |
+19 | | import re
+20 | | import signal
+21 | | from dataclasses import dataclass, field
+22 | | from typing import Any
+   | |______________________^
+   |
+help: Organize imports
+
+UP037 [*] Remove quotes from type annotation
+  --> src/crucible/runner/output_parser.py:97:69
+   |
+96 |     @classmethod
+97 |     def from_config(cls, patterns: dict[str, str] | None = None) -> "OutputParser":
+   |                                                                     ^^^^^^^^^^^^^^
+98 |         """Build a parser, optionally overriding regex strings from config."""
+99 |         if not patterns:
+   |
+help: Remove quotes
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/tracker.py:11:1
+   |
+ 9 |   MCP server) can safely poll it without partial reads.
+10 |   """
+11 | / from __future__ import annotations
+12 | |
+13 | | import json
+14 | | import os
+15 | | import socket
+16 | | import sys
+17 | | from pathlib import Path
+18 | | from typing import Any
+19 | |
+20 | | from crucible.core.io import atomic_write_json, _json_ready
+21 | | from crucible.core.log import utc_now_iso
+22 | | from crucible.runner.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
+   | |______________________________________________________________________________________^
+   |
+help: Organize imports
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/runner/wandb_logger.py:16:1
+   |
+14 |     WANDB_MODE      - "online" | "offline" | "disabled"
+15 |   """
+16 | / from __future__ import annotations
+17 | |
+18 | | import json
+19 | | import os
+20 | | from pathlib import Path
+21 | | from collections.abc import Mapping
+22 | | from typing import Any, TYPE_CHECKING
+23 | |
+24 | | from crucible.core.io import _json_ready, read_jsonl
+   | |____________________________________________________^
+25 |
+26 |   if TYPE_CHECKING:
+   |
+help: Organize imports
+
+UP037 [*] Remove quotes from type annotation
+  --> src/crucible/runner/wandb_logger.py:58:18
+   |
+56 |         config: dict[str, Any],
+57 |         backend: str,
+58 |         tracker: "RunTracker | None" = None,
+   |                  ^^^^^^^^^^^^^^^^^^^
+59 |         job_type: str | None = None,
+60 |         tags: list[str] | None = None,
+   |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+  --> src/crucible/runner/wandb_logger.py:62:10
+   |
+60 |         tags: list[str] | None = None,
+61 |         env: Mapping[str, str] | None = None,
+62 |     ) -> "WandbLogger":
+   |          ^^^^^^^^^^^^^
+63 |         """Create a WandbLogger, initialising a W&B run if configured.
+   |
+help: Remove quotes
+
+F401 `wandb` imported but unused; consider using `importlib.util.find_spec` to test for availability
+   --> src/crucible/runner/wandb_logger.py:280:16
+    |
+278 |     """
+279 |     try:
+280 |         import wandb
+    |                ^^^^^
+281 |     except ImportError:
+282 |         return {}
+    |
+help: Remove unused import: `wandb`
+
+B024 `TrainingCallback` is an abstract base class, but it has no abstract methods or properties
+  --> src/crucible/training/callbacks.py:29:7
+   |
+27 | # ---------------------------------------------------------------------------
+28 |
+29 | class TrainingCallback(ABC):
+   |       ^^^^^^^^^^^^^^^^
+30 |     """Lifecycle hook for the training loop.
+   |
+
+B027 `TrainingCallback.on_model_ready` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:38:5
+   |
+36 |       priority: int = 100
+37 |
+38 | /     def on_model_ready(self, state: dict[str, Any]) -> None:
+39 | |         """Called after model creation but BEFORE torch.compile.
+40 | |
+41 | |         This is the correct hook for registering forward pre-hooks
+42 | |         (e.g. QAT fake quantization, activation collection) that must
+43 | |         be visible to the compiled graph.
+44 | |         """
+   | |___________^
+45 |
+46 |       def on_train_begin(self, state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_train_begin` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:46:5
+   |
+44 |           """
+45 |
+46 | /     def on_train_begin(self, state: dict[str, Any]) -> None:
+47 | |         """Called once before the training loop starts (AFTER torch.compile)."""
+   | |________________________________________________________________________________^
+48 |
+49 |       def on_step_begin(self, step: int, state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_step_begin` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:49:5
+   |
+47 |           """Called once before the training loop starts (AFTER torch.compile)."""
+48 |
+49 | /     def on_step_begin(self, step: int, state: dict[str, Any]) -> None:
+50 | |         """Called at the start of each training step."""
+   | |________________________________________________________^
+51 |
+52 |       def on_after_backward(self, step: int, state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_after_backward` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:52:5
+   |
+50 |           """Called at the start of each training step."""
+51 |
+52 | /     def on_after_backward(self, step: int, state: dict[str, Any]) -> None:
+53 | |         """Called after loss.backward() but BEFORE optimizer.step().
+54 | |
+55 | |         This is the correct hook for gradient clipping/manipulation.
+56 | |         """
+   | |___________^
+57 |
+58 |       def on_step_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_step_end` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:58:5
+   |
+56 |           """
+57 |
+58 | /     def on_step_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+59 | |         """Called after each training step (forward + backward + optimize)."""
+   | |______________________________________________________________________________^
+60 |
+61 |       def on_validation_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_validation_end` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:61:5
+   |
+59 |           """Called after each training step (forward + backward + optimize)."""
+60 |
+61 | /     def on_validation_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+62 | |         """Called after a validation pass."""
+   | |_____________________________________________^
+63 |
+64 |       def on_train_end(self, state: dict[str, Any]) -> None:
+   |
+
+B027 `TrainingCallback.on_train_end` is an empty method in an abstract base class, but has no abstract decorator
+  --> src/crucible/training/callbacks.py:64:5
+   |
+62 |           """Called after a validation pass."""
+63 |
+64 | /     def on_train_end(self, state: dict[str, Any]) -> None:
+65 | |         """Called once after the training loop finishes."""
+   | |___________________________________________________________^
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/training/compression_utils.py:6:1
+   |
+ 4 |   operate on ``nn.Module`` instances without assuming architecture details.
+ 5 |   """
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | from typing import Iterator
+ 9 | |
+10 | | import torch
+11 | | import torch.nn as nn
+12 | | from torch import Tensor
+   | |________________________^
+   |
+help: Organize imports
+
+UP035 [*] Import from `collections.abc` instead: `Iterator`
+  --> src/crucible/training/compression_utils.py:8:1
+   |
+ 6 | from __future__ import annotations
+ 7 |
+ 8 | from typing import Iterator
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 9 |
+10 | import torch
+   |
+help: Import from `collections.abc`
+
+E402 Module level import not at top of file
+   --> src/crucible/training/data_adapters.py:247:1
+    |
+245 | # ---------------------------------------------------------------------------
+246 |
+247 | from crucible.core.plugin_registry import PluginRegistry
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+248 |
+249 | _ADAPTER_REGISTRY = PluginRegistry[type["DataAdapter"]]("data_adapter")
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/data_adapters.py:250:39
+    |
+249 | _ADAPTER_REGISTRY = PluginRegistry[type["DataAdapter"]]("data_adapter")
+250 | DATA_ADAPTER_REGISTRY: dict[str, type["DataAdapter"]] = _ADAPTER_REGISTRY._registry  # convenience alias
+    |                                       ^^^^^^^^^^^^^
+    |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/data_adapters.py:253:48
+    |
+253 | def register_data_adapter(name: str, cls: type["DataAdapter"], *, source: str = "builtin") -> None:
+    |                                                ^^^^^^^^^^^^^
+254 |     """Register a data adapter class under *name*.
+    |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/data_adapters.py:261:53
+    |
+261 | def build_data_adapter(name: str, **kwargs: Any) -> "DataAdapter":
+    |                                                     ^^^^^^^^^^^^^
+262 |     """Instantiate a registered data adapter by name."""
+263 |     cls = _ADAPTER_REGISTRY.get(name)
+    |
+help: Remove quotes
+
+E501 Line too long (136 > 120)
+   --> src/crucible/training/generic_backend.py:254:121
+    |
+252 | …
+253 | …
+254 | …and mv.numel() == 1 else (mv.mean().item() if hasattr(mv, 'mean') else mv)
+    |                                                            ^^^^^^^^^^^^^^^^
+255 | …rue)
+256 | …
+    |
+
+E501 Line too long (129 > 120)
+  --> src/crucible/training/muon.py:30:121
+   |
+29 | class Muon(torch.optim.Optimizer):
+30 |     def __init__(self, params, lr: float, momentum: float, backend_steps: int, nesterov: bool = True, weight_decay: float = 0.0):
+   |                                                                                                                         ^^^^^^^^^
+31 |         super().__init__(
+32 |             params,
+   |
+
+E402 Module level import not at top of file
+   --> src/crucible/training/objectives.py:206:1
+    |
+204 | # ---------------------------------------------------------------------------
+205 |
+206 | from crucible.core.plugin_registry import PluginRegistry
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+207 |
+208 | _OBJECTIVE_REGISTRY = PluginRegistry[type["TrainingObjective"]]("objective")
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/objectives.py:209:36
+    |
+208 | _OBJECTIVE_REGISTRY = PluginRegistry[type["TrainingObjective"]]("objective")
+209 | OBJECTIVE_REGISTRY: dict[str, type["TrainingObjective"]] = _OBJECTIVE_REGISTRY._registry  # convenience alias
+    |                                    ^^^^^^^^^^^^^^^^^^^
+    |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/objectives.py:212:45
+    |
+212 | def register_objective(name: str, cls: type["TrainingObjective"], *, source: str = "builtin") -> None:
+    |                                             ^^^^^^^^^^^^^^^^^^^
+213 |     """Register an objective class under *name*.
+    |
+help: Remove quotes
+
+UP037 [*] Remove quotes from type annotation
+   --> src/crucible/training/objectives.py:220:50
+    |
+220 | def build_objective(name: str, **kwargs: Any) -> "TrainingObjective":
+    |                                                  ^^^^^^^^^^^^^^^^^^^
+221 |     """Instantiate a registered objective by name."""
+222 |     cls = _OBJECTIVE_REGISTRY.get(name)
+    |
+help: Remove quotes
+
+E501 Line too long (129 > 120)
+   --> src/crucible/training/quantization.py:110:121
+    |
+108 |     clip_abs = float(torch.quantile(t32.abs().flatten(), INT8_CLIP_Q).item()) if t32.numel() else 0.0
+109 |     scale = torch.tensor(clip_abs / max_range if clip_abs > 0 else 1.0, dtype=torch.float32)
+110 |     q = torch.clamp(torch.round(torch.clamp(t32, -clip_abs, clip_abs) / scale), min_range, max_range).to(torch.int8).contiguous()
+    |                                                                                                                         ^^^^^^^^^
+111 |     return q, scale
+    |
+
+E501 Line too long (131 > 120)
+   --> src/crucible/training/quantization.py:143:121
+    |
+141 |     qmeta: dict[str, dict[str, object]] = {}
+142 |     stats = dict.fromkeys(
+143 |         ("param_count", "num_tensors", "num_float_tensors", "num_nonfloat_tensors", "baseline_tensor_bytes", "int8_payload_bytes"),
+    |                                                                                                                         ^^^^^^^^^^^
+144 |         0,
+145 |     )
+    |
+
+E501 Line too long (131 > 120)
+   --> src/crucible/training/quantization.py:232:121
+    |
+230 |     qmeta: dict[str, dict[str, object]] = {}
+231 |     stats = dict.fromkeys(
+232 |         ("param_count", "num_tensors", "num_float_tensors", "num_nonfloat_tensors", "baseline_tensor_bytes", "int8_payload_bytes"),
+    |                                                                                                                         ^^^^^^^^^^^
+233 |         0,
+234 |     )
+    |
+
+E501 Line too long (133 > 120)
+  --> src/crucible/training/schedulers.py:85:121
+   |
+85 | def _cosine_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> Any:
+   |                                                                                                                         ^^^^^^^^^^^^^
+86 |     """Cosine decay with optional linear warmup."""
+87 |     import torch
+   |
+
+E501 Line too long (138 > 120)
+   --> src/crucible/training/schedulers.py:104:121
+    |
+104 | …t = 0, warmup_steps: int = 0, num_restarts: int = 1, **kwargs: Any) -> Any:
+    |                                                           ^^^^^^^^^^^^^^^^^^
+105 | …
+106 | …
+    |
+
+E501 Line too long (133 > 120)
+   --> src/crucible/training/schedulers.py:112:121
+    |
+112 | def _linear_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> Any:
+    |                                                                                                                         ^^^^^^^^^^^^^
+113 |     """Linear decay with optional warmup."""
+114 |     import torch
+    |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:17:1
+   |
+15 |     sys.path.insert(0, _src)
+16 |
+17 | import copy
+   | ^^^^^^^^^^^
+18 | import io
+19 | import math
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/training/torch_backend.py:17:1
+   |
+15 |       sys.path.insert(0, _src)
+16 |
+17 | / import copy
+18 | | import io
+19 | | import math
+20 | | import os
+21 | | import random
+22 | | import signal
+23 | | import subprocess
+24 | | import time
+25 | |
+26 | | import numpy as np
+27 | | import sentencepiece as spm
+28 | | import torch
+29 | | import torch.distributed as dist
+30 | | from torch import Tensor, nn
+31 | | from torch.nn.parallel import DistributedDataParallel as DDP
+32 | |
+33 | | # Crucible training modules (siblings)
+34 | | from crucible.training.hyperparams import Hyperparameters
+35 | | from crucible.training.muon import zeropower_via_newtonschulz5
+36 | | from crucible.training.data_loader import DistributedTokenLoader
+37 | | from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
+38 | | from crucible.training.quantization import (
+39 | |     CONTROL_TENSOR_NAME_PATTERNS,
+40 | |     quantize_state_dict,
+41 | |     dequantize_state_dict,
+42 | |     compress_blob,
+43 | |     decompress_blob,
+44 | |     fake_int6_quant,
+45 | | )
+46 | | from crucible.training.ttt_eval import ttt_lora_evaluate
+47 | |
+48 | | # Crucible model layer
+49 | | from crucible.models.registry import build_model
+50 | | from crucible.models.components.linear import CastedLinear
+51 | |
+52 | | # Crucible runner utilities
+53 | | from crucible.runner.tracker import RunTracker
+54 | | from crucible.runner.wandb_logger import WandbLogger
+55 | | from crucible.runner.fingerprint import code_fingerprint
+56 | | from crucible.core.io import collect_public_attrs
+   | |_________________________________________________^
+57 |
+58 |   try:
+   |
+help: Organize imports
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:18:1
+   |
+17 | import copy
+18 | import io
+   | ^^^^^^^^^
+19 | import math
+20 | import os
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:19:1
+   |
+17 | import copy
+18 | import io
+19 | import math
+   | ^^^^^^^^^^^
+20 | import os
+21 | import random
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:20:1
+   |
+18 | import io
+19 | import math
+20 | import os
+   | ^^^^^^^^^
+21 | import random
+22 | import signal
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:21:1
+   |
+19 | import math
+20 | import os
+21 | import random
+   | ^^^^^^^^^^^^^
+22 | import signal
+23 | import subprocess
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:22:1
+   |
+20 | import os
+21 | import random
+22 | import signal
+   | ^^^^^^^^^^^^^
+23 | import subprocess
+24 | import time
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:23:1
+   |
+21 | import random
+22 | import signal
+23 | import subprocess
+   | ^^^^^^^^^^^^^^^^^
+24 | import time
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:24:1
+   |
+22 | import signal
+23 | import subprocess
+24 | import time
+   | ^^^^^^^^^^^
+25 |
+26 | import numpy as np
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:26:1
+   |
+24 | import time
+25 |
+26 | import numpy as np
+   | ^^^^^^^^^^^^^^^^^^
+27 | import sentencepiece as spm
+28 | import torch
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:27:1
+   |
+26 | import numpy as np
+27 | import sentencepiece as spm
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+28 | import torch
+29 | import torch.distributed as dist
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:28:1
+   |
+26 | import numpy as np
+27 | import sentencepiece as spm
+28 | import torch
+   | ^^^^^^^^^^^^
+29 | import torch.distributed as dist
+30 | from torch import Tensor, nn
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:29:1
+   |
+27 | import sentencepiece as spm
+28 | import torch
+29 | import torch.distributed as dist
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+30 | from torch import Tensor, nn
+31 | from torch.nn.parallel import DistributedDataParallel as DDP
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:30:1
+   |
+28 | import torch
+29 | import torch.distributed as dist
+30 | from torch import Tensor, nn
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+31 | from torch.nn.parallel import DistributedDataParallel as DDP
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:31:1
+   |
+29 | import torch.distributed as dist
+30 | from torch import Tensor, nn
+31 | from torch.nn.parallel import DistributedDataParallel as DDP
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+32 |
+33 | # Crucible training modules (siblings)
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:34:1
+   |
+33 | # Crucible training modules (siblings)
+34 | from crucible.training.hyperparams import Hyperparameters
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+35 | from crucible.training.muon import zeropower_via_newtonschulz5
+36 | from crucible.training.data_loader import DistributedTokenLoader
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:35:1
+   |
+33 | # Crucible training modules (siblings)
+34 | from crucible.training.hyperparams import Hyperparameters
+35 | from crucible.training.muon import zeropower_via_newtonschulz5
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+36 | from crucible.training.data_loader import DistributedTokenLoader
+37 | from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:36:1
+   |
+34 | from crucible.training.hyperparams import Hyperparameters
+35 | from crucible.training.muon import zeropower_via_newtonschulz5
+36 | from crucible.training.data_loader import DistributedTokenLoader
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+37 | from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
+38 | from crucible.training.quantization import (
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:37:1
+   |
+35 | from crucible.training.muon import zeropower_via_newtonschulz5
+36 | from crucible.training.data_loader import DistributedTokenLoader
+37 | from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+38 | from crucible.training.quantization import (
+39 |     CONTROL_TENSOR_NAME_PATTERNS,
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:38:1
+   |
+36 |   from crucible.training.data_loader import DistributedTokenLoader
+37 |   from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
+38 | / from crucible.training.quantization import (
+39 | |     CONTROL_TENSOR_NAME_PATTERNS,
+40 | |     quantize_state_dict,
+41 | |     dequantize_state_dict,
+42 | |     compress_blob,
+43 | |     decompress_blob,
+44 | |     fake_int6_quant,
+45 | | )
+   | |_^
+46 |   from crucible.training.ttt_eval import ttt_lora_evaluate
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:46:1
+   |
+44 |     fake_int6_quant,
+45 | )
+46 | from crucible.training.ttt_eval import ttt_lora_evaluate
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+47 |
+48 | # Crucible model layer
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:49:1
+   |
+48 | # Crucible model layer
+49 | from crucible.models.registry import build_model
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+50 | from crucible.models.components.linear import CastedLinear
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:50:1
+   |
+48 | # Crucible model layer
+49 | from crucible.models.registry import build_model
+50 | from crucible.models.components.linear import CastedLinear
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+51 |
+52 | # Crucible runner utilities
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:53:1
+   |
+52 | # Crucible runner utilities
+53 | from crucible.runner.tracker import RunTracker
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+54 | from crucible.runner.wandb_logger import WandbLogger
+55 | from crucible.runner.fingerprint import code_fingerprint
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:54:1
+   |
+52 | # Crucible runner utilities
+53 | from crucible.runner.tracker import RunTracker
+54 | from crucible.runner.wandb_logger import WandbLogger
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+55 | from crucible.runner.fingerprint import code_fingerprint
+56 | from crucible.core.io import collect_public_attrs
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:55:1
+   |
+53 | from crucible.runner.tracker import RunTracker
+54 | from crucible.runner.wandb_logger import WandbLogger
+55 | from crucible.runner.fingerprint import code_fingerprint
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+56 | from crucible.core.io import collect_public_attrs
+   |
+
+E402 Module level import not at top of file
+  --> src/crucible/training/torch_backend.py:56:1
+   |
+54 | from crucible.runner.wandb_logger import WandbLogger
+55 | from crucible.runner.fingerprint import code_fingerprint
+56 | from crucible.core.io import collect_public_attrs
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+57 |
+58 | try:
+   |
+
+E501 Line too long (133 > 120)
+  --> src/crucible/training/torch_backend.py:73:121
+   |
+71 |     with torch.no_grad():
+72 |         for name, param in module.named_parameters():
+73 |             if (param.ndim < 2 or any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)) and param.dtype != torch.float32:
+   |                                                                                                                         ^^^^^^^^^^^^^
+74 |                 param.data = param.data.float()
+   |
+
+E501 Line too long (124 > 120)
+   --> src/crucible/training/torch_backend.py:166:121
+    |
+164 |         if run_preset:
+165 |             run_tags.append(run_preset)
+166 |         tracker = RunTracker(args.run_id, out_dir="logs", project_root=Path(__file__).resolve().parent.parent.parent.parent)
+    |                                                                                                                         ^^^^
+167 |         tracker.write_manifest(
+168 |             backend="torch",
+    |
+
+UP022 Prefer `capture_output` over sending `stdout` and `stderr` to `PIPE`
+   --> src/crucible/training/torch_backend.py:204:9
+    |
+202 |     log0(f"Running PyTorch {torch.__version__}", console=False)
+203 |     log0(
+204 |         subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False).stdout,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+205 |         console=False,
+206 |     )
+    |
+help: Replace with `capture_output` keyword argument
+
+E501 Line too long (127 > 120)
+   --> src/crucible/training/torch_backend.py:276:121
+    |
+275 |     compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
+276 |     model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else compiled_model
+    |                                                                                                                         ^^^^^^^
+277 |
+278 |     # Optimizer split:
+    |
+
+E501 Line too long (136 > 120)
+   --> src/crucible/training/torch_backend.py:429:121
+    |
+427 | …
+428 | …wn_iters, 0)
+429 | …mdown_iters, 1), 0.0) if warmdown_start <= step < args.iterations else 1.0
+    |                                                            ^^^^^^^^^^^^^^^^
+430 | …
+431 | …
+    |
+
+E501 Line too long (127 > 120)
+   --> src/crucible/training/torch_backend.py:612:121
+    |
+610 |             log0(
+611 |                 f"step:{step}/{args.iterations} train_loss:{train_loss.item():.4f} "
+612 |                 f"train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms / step:.2f}ms tok_s:{tok_s:.0f}"
+    |                                                                                                                         ^^^^^^^
+613 |             )
+614 |             if tracker is not None:
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/training/ttt_eval.py:6:1
+   |
+ 4 |   test time.  This is an optional evaluation mode gated by TTT_ENABLED.
+ 5 |   """
+ 6 | / from __future__ import annotations
+ 7 | |
+ 8 | | import glob
+ 9 | | import math
+10 | | from pathlib import Path
+11 | |
+12 | | import torch
+13 | | import torch.distributed as dist
+14 | | from torch import Tensor, nn
+15 | |
+16 | | from crucible.training.data_loader import load_data_shard
+17 | |
+18 | | # BatchedTTTLoRA lives in crucible.models.components.lora
+19 | | from crucible.models.components.lora import BatchedTTTLoRA
+   | |__________________________________________________________^
+   |
+help: Organize imports
+
+E702 Multiple statements on one line (semicolon)
+  --> src/crucible/training/ttt_eval.py:77:45
+   |
+75 |                     s = cur_opt.state.get(p)
+76 |                     if s:
+77 |                         s['exp_avg'].zero_(); s['exp_avg_sq'].zero_(); s['step'].fill_(0)
+   |                                             ^
+78 |         else:
+79 |             cur_lora = BatchedTTTLoRA(bsz, base_model, lora_rank).to(device)
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/crucible/training/ttt_eval.py:77:70
+   |
+75 |                     s = cur_opt.state.get(p)
+76 |                     if s:
+77 |                         s['exp_avg'].zero_(); s['exp_avg_sq'].zero_(); s['step'].fill_(0)
+   |                                                                      ^
+78 |         else:
+79 |             cur_lora = BatchedTTTLoRA(bsz, base_model, lora_rank).to(device)
+   |
+
+E501 Line too long (125 > 120)
+  --> src/crucible/training/ttt_eval.py:80:121
+   |
+78 |         else:
+79 |             cur_lora = BatchedTTTLoRA(bsz, base_model, lora_rank).to(device)
+80 |             cur_opt = torch.optim.Adam(cur_lora.parameters(), lr=args.ttt_lora_lr, betas=(args.beta1, args.beta2), eps=1e-10)
+   |                                                                                                                         ^^^^^
+81 |         pred_lens = [dl - 1 for _, dl in batch]
+82 |         num_chunks = [(pl + chunk_size - 1) // chunk_size for pl in pred_lens]
+   |
+
+E702 Multiple statements on one line (semicolon)
+  --> src/crucible/training/ttt_eval.py:94:44
+   |
+92 |             for b in range(bsz):
+93 |                 if not active[b]:
+94 |                     doc_info.append((0, 0)); continue
+   |                                            ^
+95 |                 ds, dl = batch[b]
+96 |                 ws, wl, co, cl = _chunk_window(ci, pred_lens[b], num_chunks[b], chunk_size, ttt_seq)
+   |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/crucible/training/ttt_eval.py:98:39
+    |
+ 96 |                 ws, wl, co, cl = _chunk_window(ci, pred_lens[b], num_chunks[b], chunk_size, ttt_seq)
+ 97 |                 chunk = all_tokens[ds + ws: ds + ws + wl + 1].to(dtype=torch.int64, device=device)
+ 98 |                 x[b, :wl] = chunk[:-1]; y[b, :wl] = chunk[1:]
+    |                                       ^
+ 99 |                 doc_info.append((co, cl))
+100 |             if needs_train:
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/crucible/training/ttt_eval.py:115:42
+    |
+113 |                     tok_bytes = base_bytes_lut[tgt].to(torch.float64)
+114 |                     tok_bytes += has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]
+115 |                     loss_sum += lbl.sum(); byte_sum += tok_bytes.sum(); token_count += cl
+    |                                          ^
+116 |             if needs_train:
+117 |                 mask = torch.tensor([float(ci < num_chunks[b] - 1) for b in range(bsz)], device=device)
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/crucible/training/ttt_eval.py:115:71
+    |
+113 |                     tok_bytes = base_bytes_lut[tgt].to(torch.float64)
+114 |                     tok_bytes += has_leading_space_lut[tgt] & ~is_boundary_token_lut[prev]
+115 |                     loss_sum += lbl.sum(); byte_sum += tok_bytes.sum(); token_count += cl
+    |                                                                       ^
+116 |             if needs_train:
+117 |                 mask = torch.tensor([float(ci < num_chunks[b] - 1) for b in range(bsz)], device=device)
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/crucible/training/ttt_eval.py:119:36
+    |
+117 |                 mask = torch.tensor([float(ci < num_chunks[b] - 1) for b in range(bsz)], device=device)
+118 |                 per_doc = ptl[:, chunk_offset:chunk_offset + chunk_size].mean(dim=-1)
+119 |                 cur_opt.zero_grad(); (per_doc * mask).sum().backward(); cur_opt.step()
+    |                                    ^
+120 |
+121 |     if dist.is_available() and dist.is_initialized():
+    |
+
+E702 Multiple statements on one line (semicolon)
+   --> src/crucible/training/ttt_eval.py:119:71
+    |
+117 |                 mask = torch.tensor([float(ci < num_chunks[b] - 1) for b in range(bsz)], device=device)
+118 |                 per_doc = ptl[:, chunk_offset:chunk_offset + chunk_size].mean(dim=-1)
+119 |                 cur_opt.zero_grad(); (per_doc * mask).sum().backward(); cur_opt.step()
+    |                                                                       ^
+120 |
+121 |     if dist.is_available() and dist.is_initialized():
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+  --> src/crucible/tui/app.py:7:1
+   |
+ 5 |            PYTHONPATH=src python -m crucible.tui.app --screenshots docs/images
+ 6 |   """
+ 7 | / from __future__ import annotations
+ 8 | |
+ 9 | | import sys
+10 | | from pathlib import Path
+11 | | from typing import Any
+12 | |
+13 | | from textual.app import App, ComposeResult
+14 | | from textual.binding import Binding
+15 | | from textual.containers import Horizontal, Vertical, VerticalScroll
+16 | | from textual.reactive import reactive
+17 | | from textual.screen import ModalScreen
+18 | | from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+19 | |
+20 | | from crucible.core.config import load_config
+21 | | from crucible.core.store import VersionStore
+   | |____________________________________________^
+   |
+help: Organize imports
+
+E501 Line too long (122 > 120)
+   --> src/crucible/tui/app.py:139:121
+    |
+137 |         text = f"""\
+138 | [bold cyan]{content['name']}[/bold cyan]  [dim]v{meta['version']}[/dim]
+139 | [{status_color}]{status}[/{status_color}]  \u2502  {content.get('base_preset', '?')}  \u2502  {content.get('family', '?')}
+    |                                                                                                                         ^^
+140 | {SEPARATOR}
+141 | [bold]Hypothesis[/bold]
+    |
+
+invalid-syntax: Cannot use an escape sequence (backslash) in f-strings on Python 3.11 (syntax was added in Python 3.12)
+   --> src/crucible/tui/app.py:142:36
+    |
+140 | {SEPARATOR}
+141 | [bold]Hypothesis[/bold]
+142 |   {content.get('hypothesis', '[dim]\u2014[/dim]')}
+    |                                    ^
+143 | {SEPARATOR}
+144 | [bold]Config[/bold]
+    |
+
+invalid-syntax: Cannot use an escape sequence (backslash) in f-strings on Python 3.11 (syntax was added in Python 3.12)
+   --> src/crucible/tui/app.py:148:35
+    |
+146 | {SEPARATOR}
+147 | [bold]Rationale[/bold]
+148 |   {content.get('rationale', '[dim]\u2014[/dim]')}
+    |                                   ^
+149 | {SEPARATOR}
+150 | {tags_str}
+    |
+
+Found 344 errors.
+[*] 111 fixable with the `--fix` option (5 hidden fixes can be enabled with the `--unsafe-fixes` option).
