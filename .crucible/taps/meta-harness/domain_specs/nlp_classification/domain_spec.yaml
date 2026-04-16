@@ -1,0 +1,61 @@
+name: nlp_classification
+description: >
+  Evolutionary optimization of text-classification memory systems. The base
+  LLM is held fixed; candidates vary in how they manage in-context examples,
+  retrieval strategies, and prompt construction.
+
+interface:
+  class_name: MemorySystem
+  required_methods:
+    - name: predict
+      signature: "predict(self, example: dict) -> Any"
+      description: Return a label prediction for a single example dict.
+    - name: learn_from_batch
+      signature: "learn_from_batch(self, batch_results: list[dict]) -> None"
+      description: Update internal state from a batch of past predictions.
+
+metrics:
+  - name: accuracy
+    direction: maximize
+    description: Fraction of correct predictions on the eval set.
+  - name: tokens_per_example
+    direction: minimize
+    description: Average prompt length across the eval set.
+  - name: latency_ms
+    direction: minimize
+    description: Average per-example prediction latency in ms.
+
+constraints:
+  TEMPERATURE:
+    type: float
+    min: 0.0
+    max: 2.0
+  MAX_EXAMPLES:
+    type: int
+    min: 0
+    max: 256
+
+proposal_guidance: |
+  Favor diverse retrieval strategies over trivial prompt tweaks. Consider:
+    - Fixed-size example banks vs. dynamic top-k similarity retrieval.
+    - Cluster-based representative examples to reduce token footprint.
+    - Online learning that promotes examples leading to correct predictions.
+  Keep candidates self-contained (no external network calls beyond the
+  base LLM). Always subclass MemorySystem and implement every required method.
+
+baselines:
+  - name: no_memory
+    path: baselines/no_memory.py
+    description: Stateless baseline; ignores past examples.
+  - name: fewshot_memory
+    path: baselines/fewshot_memory.py
+    description: Maintains a fixed-size rolling window of past examples.
+
+evaluation:
+  runner: harness_runner
+  launch_script: "~/.crucible-hub/plugins/launchers/harness_runner/harness_runner.py"
+  timeout_seconds: 600
+  tier: harness
+  backend: harness
+  datasets:
+    - synthetic_binary

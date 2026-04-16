@@ -1,0 +1,7 @@
+name: harness_runner
+type: launchers
+version: 0.1.0
+description: Remote launcher for MemorySystem harness evaluation loop
+author: crucible
+tags: [meta-harness, harness-optimization, memory-system]
+dependencies: []

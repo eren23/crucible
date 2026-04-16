@@ -2557,6 +2557,132 @@ TOOLS: list[Tool] = [
             },
         },
     ),
+    # ── Harness Optimization tools ─────────────────────────────────
+    Tool(
+        name="harness_init",
+        description=(
+            "Initialize a HarnessOptimizer for meta-harness-style evolutionary loops. "
+            "Candidates are Python source files; metrics are tracked on an N-dimensional Pareto frontier.\n\n"
+            "REQUIRES: domain_spec (path, name, or directory) and tree_name.\n"
+            "RETURNS: {status, tree_name, domain_spec, metrics, tree_summary, frontier}\n"
+            "NEXT: harness_propose, harness_iterate, harness_frontier"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "domain_spec": {
+                    "type": "string",
+                    "description": "Absolute path, project-relative path, or bare name under .crucible/domain_specs/",
+                },
+                "tree_name": {"type": "string", "description": "Search tree name (created on first use)."},
+                "n_candidates": {"type": "integer", "description": "Candidates proposed per iteration.", "default": 3},
+                "dry_run": {"type": "boolean", "description": "Skip LLM calls; use fixture candidates.", "default": False},
+            },
+            "required": ["domain_spec", "tree_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_propose",
+        description=(
+            "Generate candidate harness implementations via the LLM proposer.\n\n"
+            "REQUIRES: harness_init called for tree_name.\n"
+            "RETURNS: {status, candidates: [{name, hypothesis, code, rationale, config}], count}\n"
+            "NEXT: harness_validate or harness_iterate"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tree_name": {"type": "string"},
+                "n": {"type": "integer", "description": "Override n_candidates for this call."},
+            },
+            "required": ["tree_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_validate",
+        description=(
+            "Validate candidate source code against the domain spec without dispatching.\n\n"
+            "REQUIRES: harness_init called, candidates list with 'code' field each.\n"
+            "RETURNS: {status, candidates (annotated with validation), valid_count, rejected_count}\n"
+            "NEXT: harness_iterate"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tree_name": {"type": "string"},
+                "candidates": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of candidate dicts with 'code' (required) and optional 'config'.",
+                },
+            },
+            "required": ["tree_name", "candidates"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_iterate",
+        description=(
+            "Run one full propose→validate→benchmark cycle and append to the evolution log.\n\n"
+            "REQUIRES: harness_init called.\n"
+            "RETURNS: {status, iteration, proposed, validated, benchmarked_node_ids, frontier_summary, log_record}\n"
+            "NEXT: harness_frontier, harness_evolution_log, or another harness_iterate"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tree_name": {"type": "string"},
+                "cost": {"type": "object", "description": "Optional {tokens, compute_hours, ...} for the log."},
+                "notes": {"type": "string", "description": "Free-form notes for this iteration."},
+            },
+            "required": ["tree_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_frontier",
+        description=(
+            "Return the current Pareto frontier snapshot for a harness tree.\n\n"
+            "REQUIRES: tree_name (optimizer init is optional; reads directly from disk if absent).\n"
+            "RETURNS: {status, frontier_node_ids, frontier_size, dominated_count, metrics, best_per_metric, hypervolume?}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"tree_name": {"type": "string"}},
+            "required": ["tree_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_evolution_log",
+        description=(
+            "Return all iteration records from evolution_log.jsonl.\n\n"
+            "REQUIRES: tree_name with a log file on disk.\n"
+            "RETURNS: {status, records: [...], count}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"tree_name": {"type": "string"}},
+            "required": ["tree_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="tree_pareto",
+        description=(
+            "Return the Pareto frontier for any search tree (general-purpose; not harness-specific).\n\n"
+            "REQUIRES: name of an existing tree under .crucible/search_trees/.\n"
+            "RETURNS: {status, frontier_node_ids, frontier_size, dominated_count, metrics, best_per_metric, hypervolume?}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 

@@ -1,0 +1,7 @@
+name: harness_eval
+type: evaluations
+version: 0.1.0
+description: Multi-metric harness evaluation + MemorySystem base class
+author: crucible
+tags: [meta-harness, harness-optimization, evaluation]
+dependencies: []

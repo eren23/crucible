@@ -1,0 +1,7 @@
+name: agent_scaffold
+type: domain_specs
+version: 0.1.0
+description: Agent scaffold optimization (tool-use, terminal-style tasks)
+author: crucible
+tags: [meta-harness, domain-spec, agents, tool-use]
+dependencies: []

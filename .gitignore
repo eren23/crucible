@@ -83,6 +83,12 @@ final_model.*
 /.crucible/plugins/launchers/elastic_lewm_upstream/*
 !/.crucible/plugins/launchers/elastic_lewm_upstream/elastic_lewm_upstream.py
 
+# Meta-harness tap (committed; used by harness optimization feature)
+!/.crucible/taps/
+/.crucible/taps/*
+!/.crucible/taps/meta-harness/
+!/.crucible/taps/meta-harness/**
+
 # mcp
 .mcp.json
 

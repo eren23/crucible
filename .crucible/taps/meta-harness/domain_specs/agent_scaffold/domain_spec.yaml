@@ -1,0 +1,63 @@
+name: agent_scaffold
+description: >
+  Evolve agent scaffolds — the loop around a fixed LLM that handles
+  planning, tool selection, and error recovery. Candidates implement
+  a task solver interface; frontier tracks pass rate, token cost, and
+  turn count.
+
+interface:
+  class_name: AgentScaffold
+  required_methods:
+    - name: initialize
+      signature: "initialize(self, task_description: str) -> None"
+      description: Initialize scaffold state for a new task.
+    - name: act
+      signature: "act(self, observation: dict) -> dict"
+      description: Produce the next action given an observation.
+    - name: is_done
+      signature: "is_done(self) -> bool"
+      description: Whether the scaffold believes the task is complete.
+
+metrics:
+  - name: pass_rate
+    direction: maximize
+    description: Fraction of tasks the scaffold completes successfully.
+  - name: avg_tokens
+    direction: minimize
+    description: Average tokens consumed per task.
+  - name: avg_turns
+    direction: minimize
+    description: Average dialogue turns per task.
+
+constraints:
+  MAX_TURNS:
+    type: int
+    min: 1
+    max: 64
+  TEMPERATURE:
+    type: float
+    min: 0.0
+    max: 2.0
+
+proposal_guidance: |
+  Agent scaffolds should focus on:
+    - Plan-then-act vs. reactive strategies.
+    - Tool selection heuristics and error-recovery loops.
+    - Concise prompts that avoid re-stating full history every turn.
+  Avoid copying the base agent verbatim — propose structural changes to
+  the control flow. Keep state in the AgentScaffold instance, not module
+  globals, so re-instantiation per task is clean.
+
+baselines:
+  - name: basic_agent
+    path: baselines/basic_agent.py
+    description: Minimal reactive agent without explicit planning.
+
+evaluation:
+  runner: harness_runner
+  launch_script: "~/.crucible-hub/plugins/launchers/harness_runner/harness_runner.py"
+  timeout_seconds: 900
+  tier: harness
+  backend: harness
+  datasets:
+    - synthetic_tasks

@@ -4901,6 +4901,182 @@ def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[unexpected] {exc}"}
 
 
+# ---------------------------------------------------------------------------
+# Harness optimizer tools (meta-harness-style evolutionary loop)
+# ---------------------------------------------------------------------------
+
+
+_HARNESS_OPTIMIZERS: dict[str, Any] = {}
+
+
+def _get_harness_optimizer(tree_name: str):
+    """Return a cached HarnessOptimizer for *tree_name*, or None if missing."""
+    return _HARNESS_OPTIMIZERS.get(tree_name)
+
+
+def harness_init(args: dict[str, Any]) -> dict[str, Any]:
+    """Initialize a HarnessOptimizer for a domain+tree pair.
+
+    REQUIRES: ``domain_spec`` (path or name) and ``tree_name`` args.
+    RETURNS: Tree summary + current frontier snapshot.
+    NEXT: harness_propose, harness_iterate, harness_frontier.
+    """
+    config = _get_config()
+    try:
+        from crucible.researcher.harness_optimizer import HarnessOptimizer
+
+        spec_ref = args.get("domain_spec")
+        tree_name = args["tree_name"]
+        if not spec_ref:
+            return {"error": "[ValueError] domain_spec is required"}
+
+        # Allow either an absolute path, a project-relative path, or a bare
+        # name that resolves under `.crucible/domain_specs/{name}`.
+        from pathlib import Path
+
+        candidate = Path(spec_ref)
+        if not candidate.is_absolute():
+            project_rel = config.project_root / spec_ref
+            if project_rel.exists():
+                candidate = project_rel
+            else:
+                candidate = config.project_root / ".crucible" / "domain_specs" / spec_ref
+        opt = HarnessOptimizer(
+            config,
+            domain_spec=candidate,
+            tree_name=tree_name,
+            n_candidates=args.get("n_candidates", 3),
+            dry_run=args.get("dry_run", False),
+        )
+        _HARNESS_OPTIMIZERS[tree_name] = opt
+        return {
+            "status": "ok",
+            "tree_name": tree_name,
+            "domain_spec": opt.spec.name,
+            "metrics": list(opt.spec.metrics),
+            "tree_summary": opt.tree.get_tree_summary(),
+            "frontier": opt.frontier(),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def harness_propose(args: dict[str, Any]) -> dict[str, Any]:
+    """Generate candidate implementations for a harness optimization run.
+
+    REQUIRES: harness_init previously called for ``tree_name``.
+    RETURNS: List of candidate dicts (not yet validated or dispatched).
+    NEXT: harness_validate, harness_iterate.
+    """
+    try:
+        opt = _get_harness_optimizer(args["tree_name"])
+        if opt is None:
+            return {"error": "[StateError] call harness_init first"}
+        cands = opt.propose_candidates(args.get("n"))
+        return {"status": "ok", "candidates": cands, "count": len(cands)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
+    """Validate candidates against the domain spec without dispatching.
+
+    REQUIRES: harness_init called, ``candidates`` list with ``code`` fields.
+    RETURNS: Annotated candidates (each with ``validation`` and ``valid``).
+    """
+    try:
+        opt = _get_harness_optimizer(args["tree_name"])
+        if opt is None:
+            return {"error": "[StateError] call harness_init first"}
+        candidates = list(args.get("candidates") or [])
+        kept = opt.validate_candidates(candidates)
+        return {
+            "status": "ok",
+            "candidates": candidates,
+            "valid_count": len(kept),
+            "rejected_count": len(candidates) - len(kept),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
+    """Run one full propose→validate→benchmark cycle and log it.
+
+    REQUIRES: harness_init called.
+    RETURNS: Iteration summary (counts, frontier snapshot, log record).
+    NEXT: harness_frontier, harness_evolution_log.
+    """
+    try:
+        opt = _get_harness_optimizer(args["tree_name"])
+        if opt is None:
+            return {"error": "[StateError] call harness_init first"}
+        summary = opt.run_iteration(
+            cost=args.get("cost"),
+            notes=args.get("notes", ""),
+        )
+        return {"status": "ok", **summary}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def harness_frontier(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the current Pareto frontier snapshot for a harness tree."""
+    try:
+        opt = _get_harness_optimizer(args["tree_name"])
+        if opt is None:
+            # Allow reading without an initialized optimizer.
+            from crucible.researcher.search_tree import SearchTree
+
+            config = _get_config()
+            tree_dir = _get_tree_dir(config, args["tree_name"])
+            tree = SearchTree.load(tree_dir)
+            return {"status": "ok", **tree.frontier_summary()}
+        return {"status": "ok", **opt.frontier()}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def harness_evolution_log(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the evolution log for a harness tree."""
+    try:
+        from crucible.researcher.evolution_log import read_log
+
+        config = _get_config()
+        tree_dir = _get_tree_dir(config, args["tree_name"])
+        records = read_log(tree_dir)
+        return {"status": "ok", "records": records, "count": len(records)}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
+def tree_pareto(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the Pareto frontier for any search tree (not harness-specific)."""
+    try:
+        from crucible.researcher.search_tree import SearchTree
+
+        config = _get_config()
+        tree_dir = _get_tree_dir(config, args["name"])
+        tree = SearchTree.load(tree_dir)
+        return {"status": "ok", **tree.frontier_summary()}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except Exception as exc:
+        return {"error": f"[unexpected] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Fleet status & lifecycle
     "get_fleet_status": get_fleet_status,
@@ -5053,4 +5229,12 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_dag_push_node": research_dag_push_node,
     "research_dag_pull_manual": research_dag_pull_manual,
     "research_dag_status": research_dag_status,
+    # Harness optimizer tools (meta-harness-style evolution)
+    "harness_init": harness_init,
+    "harness_propose": harness_propose,
+    "harness_validate": harness_validate,
+    "harness_iterate": harness_iterate,
+    "harness_frontier": harness_frontier,
+    "harness_evolution_log": harness_evolution_log,
+    "tree_pareto": tree_pareto,
 }

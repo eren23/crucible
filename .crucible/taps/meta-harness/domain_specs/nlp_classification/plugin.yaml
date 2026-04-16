@@ -1,0 +1,7 @@
+name: nlp_classification
+type: domain_specs
+version: 0.1.0
+description: Text classification harness optimization domain (meta-harness-style)
+author: crucible
+tags: [meta-harness, domain-spec, nlp, classification]
+dependencies: []
