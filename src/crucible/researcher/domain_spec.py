@@ -84,6 +84,7 @@ class DomainSpec:
 _REQUIRED_TOP_LEVEL = ("name", "interface", "metrics")
 
 
+# Any: ``metrics`` comes from ``yaml.safe_load``; validators inspect shape.
 def _validate_metrics(metrics: Any, source: Path | None) -> list[dict[str, str]]:
     if not isinstance(metrics, list) or not metrics:
         raise DomainSpecError(
@@ -106,6 +107,7 @@ def _validate_metrics(metrics: Any, source: Path | None) -> list[dict[str, str]]
     return cleaned
 
 
+# Any: ``interface`` comes from ``yaml.safe_load``; validators inspect shape.
 def _validate_interface(interface: Any, source: Path | None) -> dict[str, Any]:
     if not isinstance(interface, dict):
         raise DomainSpecError(f"interface must be a mapping (source: {source})")
@@ -127,6 +129,7 @@ def _validate_interface(interface: Any, source: Path | None) -> dict[str, Any]:
     return dict(interface)
 
 
+# Any: ``constraints`` comes from ``yaml.safe_load``; validators inspect shape.
 def _validate_constraints(
     constraints: Any, source: Path | None
 ) -> dict[str, dict[str, Any]]:

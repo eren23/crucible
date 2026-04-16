@@ -384,7 +384,7 @@ def bootstrap_node(
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> NodeRecord:
     """Full bootstrap sequence for a single node.
 
     1. rsync the project
@@ -772,7 +772,7 @@ def bootstrap_node_worker(
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> NodeRecord:
     """Bootstrap a node with automatic retries."""
     last_exc: BaseException | None = None
     for attempt in range(1, BOOTSTRAP_ATTEMPTS + 1):
@@ -819,8 +819,8 @@ def start_bootstrap_supervisor(
     min_ready_to_start: int,
     bootstrap_workers: int,
     replacement_budget: int,
-    replace_fn: Callable[..., list[dict[str, Any]]] | None = None,
-    refresh_fn: Callable[..., list[dict[str, Any]]] | None = None,
+    replace_fn: Callable[[str], NodeRecord] | None = None,
+    refresh_fn: Callable[[list[NodeRecord]], list[NodeRecord]] | None = None,
     data_download_cmd: str | None = None,
     data_source_name: str | None = None,
     data_source_config: dict[str, Any] | None = None,

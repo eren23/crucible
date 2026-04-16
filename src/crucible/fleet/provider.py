@@ -4,13 +4,14 @@ from __future__ import annotations
 import abc
 from typing import Any
 
-# Node records conform to ``crucible.core.types.NodeRecord`` structurally,
-# but the abstract interface stays on ``dict[str, Any]`` because many
-# call sites in ``fleet/manager.py`` still pass through plain dicts from
-# ``load_nodes`` and the provider-returned records may carry extra
-# provider-specific keys. Tightening the signature here cascades into a
-# fleet-wide ``dict[str, Any]`` → ``NodeRecord`` migration which is out
-# of scope for Agent 4. See ``docs/cleanup/04-type-consolidation.md``.
+from crucible.core.types import NodeRecord
+
+# Node records use ``crucible.core.types.NodeRecord`` (a ``TypedDict`` with
+# ``total=False``). Agent 5 tightened the provider interface from
+# ``list[dict[str, Any]]`` to ``list[NodeRecord]``. Provider-specific keys
+# (``pod_id``, ``api_state``, etc.) are already part of ``NodeRecord``, so
+# existing call sites flow through cleanly. See
+# ``docs/cleanup/05-weak-types.md``.
 
 
 class FleetProvider(abc.ABC):
@@ -30,7 +31,7 @@ class FleetProvider(abc.ABC):
         start_index: int = 1,
         replacement: bool = False,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Create *count* new compute nodes.
 
         Returns a list of node-record dicts (conforming to NodeRecord).
@@ -39,28 +40,28 @@ class FleetProvider(abc.ABC):
     @abc.abstractmethod
     def destroy(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Destroy nodes (all, or those whose name is in *selected_names*).
 
         Returns the list of surviving nodes.
         """
 
     @abc.abstractmethod
-    def refresh(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def refresh(self, nodes: list[NodeRecord]) -> list[NodeRecord]:
         """Re-query the provider API and return updated node records."""
 
     @abc.abstractmethod
     def wait_ready(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         timeout_seconds: int = 900,
         poll_seconds: int = 15,
         stalled_seconds: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Block until every node in *nodes* is reachable via SSH.
 
         Returns the updated node list.
@@ -71,18 +72,18 @@ class FleetProvider(abc.ABC):
 
     def stop(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Stop running nodes to save cost.  Default: no-op (returns nodes unchanged)."""
         return nodes
 
     def start(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Start stopped nodes.  Default: no-op (returns nodes unchanged)."""
         return nodes

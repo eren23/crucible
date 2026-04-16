@@ -11,6 +11,7 @@ from crucible.core.errors import ConfigError
 from crucible.core.experiment_contract import validate_experiment_contract
 from crucible.core.io import atomic_write_json
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn, utc_now_iso
+from crucible.core.types import ExperimentConfig, NodeRecord, QueueItem
 from crucible.fleet.bootstrap import (
     bootstrap_node,
     start_bootstrap_supervisor,
@@ -120,7 +121,7 @@ class FleetManager:
         start_index: int = 1,
         replacement: bool = False,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Provision *count* nodes via the configured provider and persist.
 
         Transactional w.r.t. inventory: whatever the provider returns is
@@ -167,7 +168,7 @@ class FleetManager:
         count: int,
         name_prefix: str = "crucible",
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Provision and block until all nodes are SSH-reachable."""
         nodes = self.provision(count=count, name_prefix=name_prefix, **kwargs)
         nodes = self.provider.wait_ready(nodes)
@@ -180,7 +181,7 @@ class FleetManager:
 
     def bootstrap(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
         *,
         train_shards: int = 1,
         skip_install: bool = False,
@@ -188,7 +189,7 @@ class FleetManager:
         selected_names: set[str] | None = None,
         data_source_name: str | None = None,
         data_source_config: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Bootstrap one or more nodes (sync, install, data download).
 
         Nodes are bootstrapped **in parallel** across a thread pool, since
@@ -201,8 +202,8 @@ class FleetManager:
             nodes = load_nodes(self.nodes_file)
 
         # Split into work and pass-through lists while preserving order.
-        to_bootstrap: list[tuple[int, dict[str, Any]]] = []
-        results: list[dict[str, Any]] = list(nodes)  # seed with originals
+        to_bootstrap: list[tuple[int, NodeRecord]] = []
+        results: list[NodeRecord] = list(nodes)  # seed with originals
         for idx, node in enumerate(nodes):
             if selected_names and node["name"] not in selected_names:
                 continue
@@ -212,7 +213,7 @@ class FleetManager:
             save_nodes(self.nodes_file, results)
             return results
 
-        def _run(entry: tuple[int, dict[str, Any]]) -> tuple[int, dict[str, Any]]:
+        def _run(entry: tuple[int, NodeRecord]) -> tuple[int, NodeRecord]:
             idx, node = entry
             return idx, bootstrap_node(
                 node,
@@ -241,10 +242,10 @@ class FleetManager:
         self,
         *,
         spec_path: Path | None = None,
-        experiments: list[dict[str, Any]] | None = None,
+        experiments: list[ExperimentConfig] | None = None,
         backend: str = "torch",
         limit: int = 0,
-    ) -> list[dict[str, Any]]:
+    ) -> list[QueueItem]:
         """Enqueue experiments from a spec file or an explicit list."""
         if spec_path is not None:
             experiments = load_wave_spec(spec_path, default_backend=backend)
@@ -256,7 +257,7 @@ class FleetManager:
         """Clear the fleet queue."""
         reset_queue(self.queue_path)
 
-    def queue_status(self) -> list[dict[str, Any]]:
+    def queue_status(self) -> list[QueueItem]:
         """Return the current queue contents."""
         return load_queue(self.queue_path)
 
@@ -266,10 +267,10 @@ class FleetManager:
 
     def dispatch(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
         *,
         max_assignments: int = 8,
-    ) -> list[dict[str, Any]]:
+    ) -> list[QueueItem]:
         """Dispatch queued experiments to idle ready nodes."""
         validate_experiment_contract(
             self.config,
@@ -293,7 +294,7 @@ class FleetManager:
 
     def collect(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
     ) -> None:
         """Rsync results from all nodes and merge into fleet results."""
         if nodes is None:
@@ -312,10 +313,10 @@ class FleetManager:
 
     def destroy(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Destroy nodes via the provider and update the nodes file."""
         if nodes is None:
             nodes = load_nodes_if_exists(self.nodes_file)
@@ -394,10 +395,10 @@ class FleetManager:
 
     def stop(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Stop nodes via the provider (preserves disk/bootstrap state)."""
         if nodes is None:
             nodes = load_nodes_if_exists(self.nodes_file)
@@ -407,10 +408,10 @@ class FleetManager:
 
     def start(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Start stopped nodes via the provider and wait for SSH."""
         if nodes is None:
             nodes = load_nodes_if_exists(self.nodes_file)
@@ -431,7 +432,7 @@ class FleetManager:
 
     def monitor(
         self,
-        nodes: list[dict[str, Any]] | None = None,
+        nodes: list[NodeRecord] | None = None,
     ) -> str:
         """Return a fleet-wide monitor table (probes nodes via SSH)."""
         if nodes is None:
@@ -444,8 +445,8 @@ class FleetManager:
 
     def refresh(
         self,
-        nodes: list[dict[str, Any]] | None = None,
-    ) -> list[dict[str, Any]]:
+        nodes: list[NodeRecord] | None = None,
+    ) -> list[NodeRecord]:
         """Refresh node records from the provider API and save."""
         if nodes is None:
             nodes = load_nodes(self.nodes_file)
@@ -461,11 +462,11 @@ class FleetManager:
     def _replace_stalled_nodes(
         self,
         *,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         selected_names: set[str],
         name_prefix: str,
         stage_label: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Destroy stalled nodes and provision replacements."""
         if not selected_names:
             return nodes
@@ -490,7 +491,7 @@ class FleetManager:
         failed_name: str,
         *,
         name_prefix: str,
-    ) -> dict[str, Any]:
+    ) -> NodeRecord:
         """Replace a single failed node and wait until ready."""
         nodes = load_nodes_snapshot(self.nodes_file)
         old_names = {n["name"] for n in nodes}
@@ -515,13 +516,13 @@ class FleetManager:
     def _provision_replacement_nodes(
         self,
         *,
-        existing_nodes: list[dict[str, Any]],
+        existing_nodes: list[NodeRecord],
         needed: int,
         name_prefix: str,
         train_shards: int,
         data_source_name: str | None = None,
         data_source_config: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Provision, wait, and bootstrap replacement nodes."""
         if needed <= 0:
             return []
@@ -537,7 +538,7 @@ class FleetManager:
         replacements = self.provider.wait_ready(
             replacements, timeout_seconds=900, poll_seconds=15,
         )
-        bootstrapped: list[dict[str, Any]] = []
+        bootstrapped: list[NodeRecord] = []
         for node in replacements:
             log_step(f"bootstrap {node['name']}: bootstrap replacement")
             bootstrapped.append(
@@ -643,7 +644,7 @@ class FleetManager:
             log_info(f"Dry run planned: {[w[0] for w in (wave_specs or [])]}")
             return day_dir
 
-        nodes: list[dict[str, Any]] = []
+        nodes: list[NodeRecord] = []
         recovery: dict[str, Any] = {
             "max_attempts_per_run": 3,
             "max_replacements": count,
@@ -675,7 +676,7 @@ class FleetManager:
 
             # Prepare waves from specs
             extra_tags = [day_tag(day_dir)]
-            prepared_waves: list[tuple[str, list[dict[str, Any]]]] = []
+            prepared_waves: list[tuple[str, list[ExperimentConfig]]] = []
             for wave_name, path in (wave_specs or []):
                 experiments = prepare_wave_experiments(
                     load_wave_spec(path), extra_tags=extra_tags,
@@ -761,8 +762,8 @@ class FleetManager:
 
             # Helper for provision_replacement_fn used by run_wave
             def _provision_replacements(
-                *, existing_nodes: list[dict[str, Any]], needed: int,
-            ) -> list[dict[str, Any]]:
+                *, existing_nodes: list[NodeRecord], needed: int,
+            ) -> list[NodeRecord]:
                 return self._provision_replacement_nodes(
                     existing_nodes=existing_nodes,
                     needed=needed,
@@ -1013,7 +1014,7 @@ class FleetManager:
             log_info(f"Dry run planned: night ({len(experiments)} runs)")
             return day_dir
 
-        nodes: list[dict[str, Any]] = []
+        nodes: list[NodeRecord] = []
         recovery: dict[str, Any] = {
             "max_attempts_per_run": 3,
             "max_replacements": count,
@@ -1150,8 +1151,8 @@ class FleetManager:
                 )
 
             def _provision_replacements(
-                *, existing_nodes: list[dict[str, Any]], needed: int,
-            ) -> list[dict[str, Any]]:
+                *, existing_nodes: list[NodeRecord], needed: int,
+            ) -> list[NodeRecord]:
                 return self._provision_replacement_nodes(
                     existing_nodes=existing_nodes,
                     needed=needed,

@@ -132,12 +132,12 @@ def merge_node_snapshots(
     incoming_nodes: list[NodeRecord],
 ) -> list[NodeRecord]:
     """Three-way merge: incoming records update existing ones; orphans are kept."""
-    existing_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
+    existing_by_key: dict[tuple[Any, Any], NodeRecord] = {}
     for node in existing_nodes:
         key = (node.get("node_id") or node.get("pod_id"), node.get("name"))
         existing_by_key[key] = node
 
-    merged: list[dict[str, Any]] = []
+    merged: list[NodeRecord] = []
     seen: set[tuple[Any, Any]] = set()
     for node in incoming_nodes:
         key = (node.get("node_id") or node.get("pod_id"), node.get("name"))

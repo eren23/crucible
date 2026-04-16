@@ -31,6 +31,7 @@ from typing import Any
 
 from crucible.core.errors import FleetError
 from crucible.core.log import log_info, log_warn, utc_now_iso
+from crucible.core.types import NodeRecord
 from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import ssh_ok, wait_for_ssh_ready
 
@@ -72,7 +73,7 @@ class SSHProvider(FleetProvider):
         start_index: int = 1,
         replacement: bool = False,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         log_warn(
             "SSH provider does not support provisioning. "
             "Add hosts to nodes.json manually."
@@ -81,10 +82,10 @@ class SSHProvider(FleetProvider):
 
     def destroy(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         log_warn(
             "SSH provider does not power off hosts — just removing from "
             "inventory. Your machines are still running."
@@ -93,10 +94,10 @@ class SSHProvider(FleetProvider):
             return [n for n in nodes if n["name"] not in selected_names]
         return []
 
-    def refresh(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        refreshed: list[dict[str, Any]] = []
+    def refresh(self, nodes: list[NodeRecord]) -> list[NodeRecord]:
+        refreshed: list[NodeRecord] = []
         for node in nodes:
-            updated = dict(node)
+            updated: NodeRecord = dict(node)  # type: ignore[assignment]
             if ssh_ok(node):
                 updated["state"] = "ready"
                 updated["last_seen_at"] = utc_now_iso()
@@ -107,12 +108,12 @@ class SSHProvider(FleetProvider):
 
     def wait_ready(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         timeout_seconds: int = 300,
         poll_seconds: int = 10,
         stalled_seconds: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Wait for every node in *nodes* to accept SSH.
 
         Delegates to ``wait_for_ssh_ready`` (from fleet.sync) for each
@@ -136,10 +137,10 @@ class SSHProvider(FleetProvider):
         backoff_base = int(self.initial_connect.get("backoff_base", 5))
         max_wait = int(self.initial_connect.get("max_wait", timeout_seconds))
 
-        current: list[dict[str, Any]] = []
+        current: list[NodeRecord] = []
         ready_count = 0
         for node in nodes:
-            updated = dict(node)
+            updated: NodeRecord = dict(node)  # type: ignore[assignment]
             try:
                 wait_for_ssh_ready(
                     node,
@@ -171,7 +172,7 @@ class SSHProvider(FleetProvider):
     # -- Utility ----------------------------------------------------------
 
     @classmethod
-    def load_from_file(cls, path: Path) -> list[dict[str, Any]]:
+    def load_from_file(cls, path: Path) -> list[NodeRecord]:
         """Load node records from a JSON file."""
         if not path.exists():
             return []

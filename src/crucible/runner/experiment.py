@@ -590,4 +590,4 @@ def run_experiment(
 
     # -- Persist result --
     append_jsonl(results_path, result)
-    return result
+    return result  # type: ignore[return-value]

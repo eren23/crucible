@@ -19,6 +19,7 @@ from urllib import request as urlrequest
 
 from crucible.core.errors import FleetError
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
+from crucible.core.types import NodeRecord
 from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import ssh_ok
 
@@ -590,7 +591,7 @@ def inventory_record_from_api(
     previous: dict[str, Any] | None = None,
     defaults: dict[str, Any] | None = None,
     requested_interruptible: bool | None = None,
-) -> dict[str, Any]:
+) -> NodeRecord:
     """Convert a RunPod API response into a fleet node record dict.
 
     Parameters
@@ -726,7 +727,7 @@ class RunPodProvider(FleetProvider):
         start_index: int = 1,
         replacement: bool = False,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         public_key = read_public_key(self.public_key_path)
         # Apply per-call overrides (e.g. from project spec pod config)
         eff_container_disk = kwargs.pop("container_disk_gb", self.container_disk_gb)
@@ -755,7 +756,7 @@ class RunPodProvider(FleetProvider):
         # fail after exhausting cloud-type fallbacks, we still return with
         # the successful pods via PartialProvisionError so the manager layer
         # can commit them to inventory (no orphans on RunPod).
-        created: list[dict[str, Any]] = []
+        created: list[NodeRecord] = []
         failed: list[dict[str, Any]] = []
         for index in range(start_index, start_index + count):
             ordinal = index - start_index + 1
@@ -818,11 +819,11 @@ class RunPodProvider(FleetProvider):
 
     def destroy(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        remaining: list[dict[str, Any]] = []
+    ) -> list[NodeRecord]:
+        remaining: list[NodeRecord] = []
         for node in nodes:
             if selected_names and node["name"] not in selected_names:
                 remaining.append(node)
@@ -835,13 +836,13 @@ class RunPodProvider(FleetProvider):
                     pass  # Best-effort: pod may already be gone
         return remaining
 
-    def refresh(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def refresh(self, nodes: list[NodeRecord]) -> list[NodeRecord]:
         previous_by_id: dict[str, dict[str, Any]] = {}
         for n in nodes:
             nid = n.get("pod_id") or n.get("node_id")
             if nid:
-                previous_by_id[nid] = n
-        refreshed: list[dict[str, Any]] = []
+                previous_by_id[nid] = dict(n)
+        refreshed: list[NodeRecord] = []
         seen_ids: set[str] = set()
         for node in nodes:
             pod_id = node.get("pod_id") or node.get("node_id")
@@ -855,7 +856,7 @@ class RunPodProvider(FleetProvider):
                     inventory_record_from_api(api, previous=previous_by_id.get(pod_id), defaults=self.defaults),
                 )
             except FleetError:
-                failed = dict(previous_by_id.get(pod_id, node))
+                failed: NodeRecord = dict(previous_by_id.get(pod_id, dict(node)))  # type: ignore[assignment]
                 failed["api_state"] = "lost"
                 failed["state"] = "lost"
                 refreshed.append(failed)
@@ -884,12 +885,12 @@ class RunPodProvider(FleetProvider):
 
     def wait_ready(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         timeout_seconds: int = 900,
         poll_seconds: int = 15,
         stalled_seconds: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Wait for API endpoints to be reachable, then for SSH connectivity."""
         stalled_seconds = stalled_seconds or min(timeout_seconds, 120)
         nodes = self._wait_for_api_ready(
@@ -942,12 +943,12 @@ class RunPodProvider(FleetProvider):
 
     def stop(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Stop running pods.  Preserves disk and bootstrap state."""
-        updated: list[dict[str, Any]] = []
+        updated: list[NodeRecord] = []
         for node in nodes:
             if selected_names and node["name"] not in selected_names:
                 updated.append(node)
@@ -958,7 +959,7 @@ class RunPodProvider(FleetProvider):
                 continue
             try:
                 runpod_stop_pod(pod_id)
-                node = dict(node)
+                node = dict(node)  # type: ignore[assignment]
                 node["state"] = "stopped"
                 node["api_state"] = "stopped"
                 log_info(f"Stopped {node['name']} ({pod_id})")
@@ -969,12 +970,12 @@ class RunPodProvider(FleetProvider):
 
     def start(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         selected_names: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         """Start stopped pods and wait for SSH readiness."""
-        started: list[dict[str, Any]] = []
+        started: list[NodeRecord] = []
         for node in nodes:
             if selected_names and node["name"] not in selected_names:
                 started.append(node)
@@ -991,7 +992,7 @@ class RunPodProvider(FleetProvider):
                     runpod_start_spot_pod(pod_id, bid_per_gpu=bid, gpu_count=gpu_count)
                 else:
                     runpod_start_pod(pod_id)
-                node = dict(node)
+                node = dict(node)  # type: ignore[assignment]
                 node["state"] = "starting"
                 node["api_state"] = "starting"
                 log_info(f"Started {node['name']} ({pod_id})")
@@ -1013,12 +1014,12 @@ class RunPodProvider(FleetProvider):
 
     def _wait_for_api_ready(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         timeout_seconds: int,
         poll_seconds: int,
         stalled_seconds: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         deadline = time.time() + timeout_seconds
         current = nodes
         last_ready = -1
@@ -1052,12 +1053,12 @@ class RunPodProvider(FleetProvider):
 
     def _wait_for_ssh_ready(
         self,
-        nodes: list[dict[str, Any]],
+        nodes: list[NodeRecord],
         *,
         timeout_seconds: int,
         poll_seconds: int,
         stalled_seconds: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[NodeRecord]:
         deadline = time.time() + timeout_seconds
         pending = {n["name"]: n for n in nodes}
         total = len(nodes)

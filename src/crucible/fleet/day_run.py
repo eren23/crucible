@@ -8,6 +8,7 @@ from typing import Any
 
 from crucible.core.io import atomic_write_json, _json_ready
 from crucible.core.log import utc_now_iso, utc_stamp
+from crucible.core.types import ExperimentResult, NodeRecord, QueueItem
 
 # Thread lock for event file appends
 EVENTS_LOCK = threading.Lock()
@@ -70,8 +71,8 @@ def record_day_progress(
     phase: str | None = None,
     current_wave: str | None = None,
     last_event: str | None = None,
-    nodes: list[dict[str, Any]] | None = None,
-    queue: list[dict[str, Any]] | None = None,
+    nodes: list[NodeRecord] | None = None,
+    queue: list[QueueItem] | None = None,
     wave_name: str | None = None,
 ) -> None:
     """Update the day summary with the latest fleet progress."""
@@ -101,7 +102,7 @@ def record_day_progress(
 
 def write_day_leaderboard(
     day_dir: Path,
-    rows: list[dict[str, Any]],
+    rows: list[ExperimentResult],
     metric_key: str = "val_loss",
 ) -> None:
     """Generate a markdown leaderboard ranked by *metric_key*."""

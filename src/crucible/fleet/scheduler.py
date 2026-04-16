@@ -414,7 +414,7 @@ def bootstrap_recovery_candidates(
         for row in wave_queue
         if row.get("lease_state") == "running"
     }
-    candidates: list[dict[str, Any]] = []
+    candidates: list[NodeRecord] = []
     for node in nodes:
         if len(candidates) >= limit:
             break
@@ -526,8 +526,8 @@ def run_wave(
     monitor_interval: int,
     min_completed: int,
     recovery: dict[str, Any],
-    refresh_fn: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
-    provision_replacement_fn: Callable[..., list[dict[str, Any]]] | None = None,
+    refresh_fn: Callable[[list[NodeRecord]], list[NodeRecord]] | None = None,
+    provision_replacement_fn: Callable[..., list[NodeRecord]] | None = None,
     baseline_curve: list[tuple[int, float]] | None = None,
     early_stop_step_threshold: int = 6000,
     early_stop_margin: float = 0.05,
@@ -609,7 +609,7 @@ def run_wave(
         for n in nodes:
             collect_from_node(n, fleet_runs_dir=fleet_runs_dir, results_file_rel=results_file_rel)
         merge_results(fleet_runs_dir, fleet_results_file)
-        all_results = read_jsonl(fleet_results_file)
+        all_results: list[ExperimentResult] = read_jsonl(fleet_results_file)  # type: ignore[assignment]
         result_index = results_by_id(all_results)
         queue = reconcile_queue_with_results(load_queue(queue_path), result_index)
         save_queue(queue_path, queue)

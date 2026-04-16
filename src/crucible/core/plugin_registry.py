@@ -18,12 +18,16 @@ from __future__ import annotations
 import importlib.util
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 from crucible.core.errors import PluginError
 
-T = TypeVar("T")
+# Bound to ``Callable[..., Any]`` because every registered plugin is a factory
+# (class constructor, factory function, or builder) invoked via ``build(...)``.
+# The bound lets ``get()`` / ``build()`` return ``T`` rather than ``Any``.
+T = TypeVar("T", bound=Callable[..., Any])
 
 PRECEDENCE: dict[str, int] = {"builtin": 0, "global": 1, "local": 2}
 _VALID_SOURCES = frozenset(PRECEDENCE)
@@ -102,7 +106,7 @@ class PluginRegistry(Generic[T]):
             )
         return factory(**kwargs)
 
-    def get(self, name: str) -> Any | None:
+    def get(self, name: str) -> T | None:
         """Return the raw factory/class for *name*, or ``None``."""
         with self._lock:
             return self._registry.get(name)
