@@ -103,4 +103,7 @@ videos
 .gsd/
 .bg-shell/
 
+# External clones (not part of Crucible)
+hermes-agent/
+
 CLAUDE.md.*.bak
