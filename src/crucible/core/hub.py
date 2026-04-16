@@ -42,7 +42,7 @@ from crucible.core.finding import (
     validate_finding,
 )
 from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_jsonl, write_yaml
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 
 
 _DEFAULT_HUB_DIR = Path.home() / ".crucible-hub"
@@ -214,10 +214,8 @@ class HubStore:
                 check=True,
             )
         except FileNotFoundError:
-            from crucible.core.log import log_warn
             log_warn("git not installed; hub will not support git sync")
         except subprocess.CalledProcessError as exc:
-            from crucible.core.log import log_warn
             log_warn(f"git init failed: {exc.stderr.strip() if exc.stderr else exc}")
 
         store = HubStore(hub_dir)
@@ -344,10 +342,8 @@ class HubStore:
                     if isinstance(raw, dict):
                         tracks.append(raw)
                     else:
-                        from crucible.core.log import log_warn
                         log_warn(f"Malformed track.yaml in {child.name}: expected dict")
                 except Exception as exc:
-                    from crucible.core.log import log_warn
                     log_warn(f"Failed to parse track.yaml in {child.name}: {exc}")
         return tracks
 

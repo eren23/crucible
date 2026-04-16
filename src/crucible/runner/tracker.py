@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.io import atomic_write_json, _json_ready
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 from crucible.runner.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
 
 
@@ -145,7 +145,6 @@ class RunTracker:
                 )
                 manifest = {**existing, **manifest}
             except (OSError, json.JSONDecodeError) as exc:
-                from crucible.core.log import log_warn
                 log_warn(f"Failed to merge existing manifest {self.manifest_path}: {exc}")
 
         if extra:

@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from typing import Any, TYPE_CHECKING
 
 from crucible.core.io import _json_ready, read_jsonl
+from crucible.core.log import log_warn
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectConfig
@@ -226,7 +227,6 @@ def wandb_annotate_finished_run(
         run.summary.update()
         return True
     except Exception as exc:
-        from crucible.core.log import log_warn
         log_warn(f"W&B annotation failed for {run_id}: {exc}")
         return False
 
@@ -293,7 +293,6 @@ def fetch_wandb_metrics(
                 result[key] = float(val)
         return result
     except Exception as exc:
-        from crucible.core.log import log_warn
         log_warn(f"W&B metric fetch failed for project={project!r}: {exc}")
         return {}
 
@@ -320,7 +319,6 @@ def fetch_wandb_run_info(
             "metrics": metrics,
         }
     except Exception as exc:
-        from crucible.core.log import log_warn
         log_warn(f"W&B run info fetch failed for project={project!r}: {exc}")
         return {}
 

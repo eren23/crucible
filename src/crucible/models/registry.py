@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from crucible.core.log import log_warn
+
 _REGISTRY: dict[str, Callable[..., Any]] = {}
 _REGISTRY_META: dict[str, dict] = {}
 _CURRENT_REGISTER_SOURCE: str = "local"
@@ -140,7 +142,6 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
                 spec.loader.exec_module(mod)
                 loaded.append(py_file.stem)
             except Exception as exc:
-                from crucible.core.log import log_warn
                 log_warn(f"Failed to load architecture plugin {py_file.name}: {exc}")
 
         # --- (2) YAML spec plugins ---
@@ -151,7 +152,6 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
                 _register_from_spec_file(yaml_file.stem, yaml_file, source=source)
                 loaded.append(yaml_file.stem)
             except Exception as exc:
-                from crucible.core.log import log_warn
                 log_warn(f"Failed to load architecture spec {yaml_file.name}: {exc}")
 
         # --- (3) Directory-bundle Python plugins ---
@@ -184,7 +184,6 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
                     spec.loader.exec_module(mod)
                     loaded.append(sub.name)
                 except Exception as exc:
-                    from crucible.core.log import log_warn
                     log_warn(
                         f"Failed to load architecture bundle {sub.name}: {exc}"
                     )

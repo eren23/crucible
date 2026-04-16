@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 from crucible.core.types import Finding
 
 
@@ -62,7 +62,6 @@ def validate_finding(finding: Finding) -> list[str]:
         errors.append("Finding must have a non-empty 'title'.")
 
     if not finding.get("body"):
-        from crucible.core.log import log_warn
         log_warn("Finding has no 'body' — consider adding a description")
 
     category = finding.get("category", "")

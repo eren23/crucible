@@ -21,8 +21,8 @@ from typing import Any
 import yaml
 
 from crucible.core.errors import SearchTreeError
-from crucible.core.io import append_jsonl, read_jsonl
-from crucible.core.log import utc_now_iso
+from crucible.core.io import append_jsonl, read_jsonl, read_yaml
+from crucible.core.log import log_warn, utc_now_iso
 
 
 class SearchTree:
@@ -752,7 +752,6 @@ class SearchTree:
             # Metric values can be missing or non-numeric for in-flight nodes.
             # Logging here would be noisy — the frontier will refresh on the
             # next record_result() once data is clean.
-            from crucible.core.log import log_warn
             log_warn(f"Frontier recompute skipped: {exc}")
 
     # ------------------------------------------------------------------
@@ -959,7 +958,7 @@ class SearchTree:
         """Load tree metadata from tree.yaml."""
         if not self._meta_path.exists():
             raise SearchTreeError(f"No search tree found at {self.tree_dir}")
-        raw = yaml.safe_load(self._meta_path.read_text(encoding="utf-8"))
+        raw = read_yaml(self._meta_path)
         if not isinstance(raw, dict):
             raise SearchTreeError(f"Invalid tree metadata in {self._meta_path}")
         self.meta = raw
@@ -969,11 +968,10 @@ class SearchTree:
         self.nodes.clear()
 
         # Try snapshot first (faster)
-        if self._snapshot_path.exists():
-            raw = yaml.safe_load(self._snapshot_path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and "nodes" in raw:
-                self.nodes = raw["nodes"]
-                return
+        raw = read_yaml(self._snapshot_path)
+        if isinstance(raw, dict) and "nodes" in raw:
+            self.nodes = raw["nodes"]
+            return
 
         # Fall back to rebuilding from JSONL ledger
         for event in read_jsonl(self._nodes_path):

@@ -9,6 +9,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol
 
+from crucible.core.log import log_warn
 
 if TYPE_CHECKING:
     import anthropic
@@ -51,7 +52,6 @@ class AnthropicClient:
         except KeyboardInterrupt:
             raise
         except Exception as exc:
-            from crucible.core.log import log_warn
             log_warn(f"LLM call failed (model={self.model}): {exc}")
             return None
 

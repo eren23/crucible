@@ -28,6 +28,7 @@ from typing import Any
 
 from crucible.core.errors import RunnerError
 from crucible.core.io import append_jsonl, read_jsonl
+from crucible.core.log import log_warn
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
 from crucible.core.types import ExperimentResult
@@ -585,7 +586,6 @@ def run_experiment(
             if data_links:
                 result["data_sources"] = data_links
         except Exception as exc:
-            from crucible.core.log import log_warn
             log_warn(f"Data provenance lookup failed for {exp_id}: {exc}")
 
     # -- Persist result --

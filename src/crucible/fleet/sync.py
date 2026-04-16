@@ -5,6 +5,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from crucible.core.log import log_warn
 from crucible.core.types import NodeRecord
 
 
@@ -332,7 +333,6 @@ def sync_taps(
         return
     # Verify tap SHAs if expected
     if expected_shas:
-        from crucible.core.log import log_warn
         from crucible.runner.fingerprint import safe_git_sha
 
         for tap_name, expected in expected_shas.items():
@@ -366,7 +366,6 @@ def sync_taps(
         try:
             _run(cmd, check=True)
         except Exception as exc:
-            from crucible.core.log import log_warn
             log_warn(f"Tap sync failed for {tap.name} on {node['name']}: {exc}")
 
 

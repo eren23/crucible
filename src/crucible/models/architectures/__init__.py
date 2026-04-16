@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path as _Path
 
 import crucible.models.registry as _reg
+from crucible.core.log import log_warn
 
 # --- Builtins (source="builtin") ---
 _reg._CURRENT_REGISTER_SOURCE = "builtin"
@@ -22,8 +23,7 @@ try:
         if _specs_dir.is_dir():
             _reg.load_global_architectures(_specs_dir, source="builtin")
 except Exception as _exc_builtin:
-    from crucible.core.log import log_warn as _lw1
-    _lw1(f"Builtin YAML spec loading failed (non-fatal): {_exc_builtin}")
+    log_warn(f"Builtin YAML spec loading failed (non-fatal): {_exc_builtin}")
 
 # --- Global hub architectures (source="global") ---
 # Loads .py plugins and .yaml specs from hub architecture directories.
@@ -59,8 +59,7 @@ try:
         if _tap_install_arch_dir.is_dir():
             _reg.load_global_architectures(_tap_install_arch_dir, source="global")
 except Exception as _exc_hub:
-    from crucible.core.log import log_warn as _lw2
-    _lw2(f"Global hub architecture loading failed (non-fatal): {_exc_hub}")
+    log_warn(f"Global hub architecture loading failed (non-fatal): {_exc_hub}")
 
 # --- Project-local architectures from .crucible/architectures/ (source="local") ---
 # Loads both .py plugins and .yaml specs from the project architectures directory.
@@ -75,6 +74,5 @@ try:
     if _local_arch_dir.is_dir():
         _reg.load_global_architectures(_local_arch_dir, source="local")
 except Exception as _exc_local:
-    from crucible.core.log import log_warn as _lw3
-    _lw3(f"Local architecture loading failed (non-fatal): {_exc_local}")
+    log_warn(f"Local architecture loading failed (non-fatal): {_exc_local}")
 

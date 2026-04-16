@@ -25,6 +25,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from crucible.core.log import log_warn
 from crucible.core.plugin_registry import PluginRegistry
 
 LOGGER_REGISTRY = PluginRegistry("logger")
@@ -140,7 +141,6 @@ class MultiLogger(TrainingLogger):
             try:
                 logger.finish(exit_code=exit_code)
             except Exception as exc:
-                from crucible.core.log import log_warn
                 log_warn(f"Logger {type(logger).__name__} finish() failed: {exc}")
 
 

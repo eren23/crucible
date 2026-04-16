@@ -11,6 +11,7 @@ from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError
+from crucible.core.log import log_warn
 from crucible.researcher.batch_design import DEFAULT_TIER_COSTS, design_batch
 from crucible.researcher.hypothesis import generate_hypotheses
 from crucible.researcher.llm_client import AnthropicClient, LLMClient
@@ -98,8 +99,7 @@ class AutonomousResearcher:
                     if literature_context:
                         print(f"  Literature: found {len(all_papers)} relevant papers.")
                 except Exception as lit_exc:
-                    from crucible.core.log import log_warn as _lit_warn
-                    _lit_warn(f"Literature search failed (non-fatal): {lit_exc}")
+                    log_warn(f"Literature search failed (non-fatal): {lit_exc}")
 
                 if self.dry_run:
                     hypotheses = _dry_run_hypotheses(self._iteration)
