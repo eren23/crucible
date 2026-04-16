@@ -5,6 +5,7 @@ import concurrent.futures
 import json
 import shlex
 import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -35,6 +36,7 @@ from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launc
 from crucible.fleet.sync import (
     checked_remote_exec,
     local_git_sha,
+    remote_exec,
     rsync_base,
     scp_to_node,
     ssh_ok,
@@ -617,9 +619,10 @@ def bootstrap_project(
     log_step(f"{name}: cleaning up previous training processes")
     try:
         # Uses pkill to find python training scripts in the workspace
-        cleanup_cmd = f"pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
+        cleanup_cmd = "pkill -9 -f 'python.*train' 2>/dev/null; sleep 1; echo cleanup_done"
         remote_exec(node, cleanup_cmd, check=False, timeout=15)
-    except Exception as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
+        # Best-effort cleanup: SSH/process errors are non-fatal — proceed with bootstrap.
         log_warn(f"{name}: process cleanup failed (non-fatal): {exc}")
 
     # 1. Clone or update repo

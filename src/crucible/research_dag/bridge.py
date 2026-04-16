@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,16 @@ from crucible.research_dag.node_format import (
 log = logging.getLogger(__name__)
 
 _CANVAS_TTL = 60  # seconds — re-probe canvas connectivity after this interval
+
+# Spider Chat HTTP failures — any of these means the canvas is unreachable or
+# returned an unexpected payload. All operations degrade gracefully.
+_HTTP_FAILURES = (
+    ResearchDAGError,
+    urllib.error.URLError,
+    TimeoutError,
+    json.JSONDecodeError,
+    OSError,
+)
 
 
 class ResearchDAGBridge:
@@ -71,11 +82,11 @@ class ResearchDAGBridge:
         try:
             self._http_request("GET", "/api/health")
             return True
-        except Exception:
+        except _HTTP_FAILURES:
             try:
                 self._http_request("GET", "/api/flows?limit=1")
                 return True
-            except Exception:
+            except _HTTP_FAILURES:
                 log.info("Spider Chat not reachable at %s — local-only mode", self.spiderchat_url)
                 return False
 
@@ -480,7 +491,7 @@ class ResearchDAGBridge:
 
         try:
             resp = self._http_request("POST", f"/api/flows/{self._safe_path_id(flow_id)}/nodes", body)
-        except Exception:
+        except _HTTP_FAILURES:
             log.warning("Spider Chat unreachable — node %s tracked locally only", crucible_id)
             self._invalidate_canvas_cache()
             return ""
@@ -497,7 +508,7 @@ class ResearchDAGBridge:
                         "source": parent_id,
                         "target": node_id,
                     })
-                except Exception:
+                except _HTTP_FAILURES:
                     log.debug("Failed to create edge %s -> %s", parent_id, node_id)
 
         log.info("Created canvas node %s for crucible %s", node_id, crucible_id)
@@ -526,7 +537,7 @@ class ResearchDAGBridge:
             self._http_request("PATCH", f"/api/flows/{self._safe_path_id(flow_id)}/nodes/{self._safe_path_id(node_id)}", {
                 "data": update_data,
             })
-        except Exception:
+        except _HTTP_FAILURES:
             log.debug("Failed to update canvas node %s", node_id)
             self._invalidate_canvas_cache()
 
@@ -535,7 +546,7 @@ class ResearchDAGBridge:
         try:
             resp = self._http_request("GET", f"/api/flows/{self._safe_path_id(flow_id)}")
             return resp.get("nodes", [])
-        except Exception:
+        except _HTTP_FAILURES:
             log.debug("Failed to get flow nodes for %s", flow_id)
             self._invalidate_canvas_cache()
             return []
@@ -545,7 +556,7 @@ class ResearchDAGBridge:
         try:
             resp = self._http_request("GET", f"/api/flows/{self._safe_path_id(flow_id)}")
             return resp.get("edges", [])
-        except Exception:
+        except _HTTP_FAILURES:
             log.debug("Failed to get flow edges for %s", flow_id)
             self._invalidate_canvas_cache()
             return []

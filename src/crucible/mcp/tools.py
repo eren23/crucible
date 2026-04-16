@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 from collections.abc import Callable
@@ -36,7 +37,9 @@ def _get_hub_store() -> HubStore:
     from crucible.core.hub import HubStore
 
     config = _get_config()
-    hub_dir = HubStore.resolve_hub_dir(config_hub_dir=config.hub_dir)
+    # getattr: tests may pass partial configs without a hub_dir attribute;
+    # resolve_hub_dir falls back to the default hub location when None.
+    hub_dir = HubStore.resolve_hub_dir(config_hub_dir=getattr(config, "hub_dir", None))
     return HubStore(hub_dir=hub_dir)
 
 
@@ -115,7 +118,9 @@ def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
                 result["disk_used_pct"] = disk_parts[4]
 
         return result
-    except Exception as exc:
+    except (subprocess.SubprocessError, OSError, ValueError, IndexError) as exc:
+        # SSH/parse failures: return a placeholder so get_fleet_status keeps
+        # reporting other nodes' metrics rather than aborting the whole probe.
         return {"node": name, "error": str(exc)}
 
 
@@ -161,21 +166,22 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             ssh_nodes = [n for n in nodes if n.get("ssh_host")]
             metrics = []
+            import concurrent.futures as _cf
             with ThreadPoolExecutor(max_workers=min(8, len(ssh_nodes) or 1)) as pool:
                 futures = {pool.submit(_probe_node_metrics, n): n for n in ssh_nodes}
                 for fut in as_completed(futures, timeout=30):
                     try:
                         metrics.append(fut.result(timeout=10))
-                    except Exception:
+                    except (_cf.TimeoutError, _cf.CancelledError, OSError) as exc:
+                        # Probe timeout or SSH failure: report a placeholder so
+                        # the caller sees which node failed, not an empty list.
                         node = futures[fut]
-                        metrics.append({"node": node.get("name", "?"), "error": "probe timeout"})
+                        metrics.append({"node": node.get("name", "?"), "error": f"probe failed: {exc}"})
             result["metrics"] = metrics
 
         return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}", "nodes": []}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}", "nodes": []}
 
 
 def get_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
@@ -208,8 +214,6 @@ def get_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
         return {"total_completed": len(results), "primary_metric": primary, "top": entries}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}", "top": []}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}", "top": []}
 
 
 def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
@@ -223,8 +227,6 @@ def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
         return {"total": len(rows), "summary": summary}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
@@ -255,8 +257,6 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
@@ -274,8 +274,6 @@ def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
         return {"found": False, "run_id": run_id}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -303,8 +301,6 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -368,8 +364,6 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
         return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def cleanup_orphans(args: dict[str, Any]) -> dict[str, Any]:
@@ -394,8 +388,6 @@ def cleanup_orphans(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def stop_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -412,8 +404,6 @@ def stop_nodes(args: dict[str, Any]) -> dict[str, Any]:
         return {"stopped": stopped, "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def start_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -430,8 +420,6 @@ def start_nodes(args: dict[str, Any]) -> dict[str, Any]:
         return {"started": started, "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_list_volumes(args: dict[str, Any]) -> dict[str, Any]:
@@ -444,8 +432,6 @@ def runpod_list_volumes(args: dict[str, Any]) -> dict[str, Any]:
         return {"volumes": volumes, "count": len(volumes)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_create_volume(args: dict[str, Any]) -> dict[str, Any]:
@@ -462,8 +448,6 @@ def runpod_create_volume(args: dict[str, Any]) -> dict[str, Any]:
         return {"volume": volume, "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_delete_volume(args: dict[str, Any]) -> dict[str, Any]:
@@ -476,8 +460,6 @@ def runpod_delete_volume(args: dict[str, Any]) -> dict[str, Any]:
         return {"deleted": args["volume_id"], "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_gpu_availability(args: dict[str, Any]) -> dict[str, Any]:
@@ -493,8 +475,6 @@ def runpod_gpu_availability(args: dict[str, Any]) -> dict[str, Any]:
         return {"gpu_types": gpu_types, "count": len(gpu_types)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_list_templates_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -507,8 +487,6 @@ def runpod_list_templates_tool(args: dict[str, Any]) -> dict[str, Any]:
         return {"templates": templates, "count": len(templates)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def runpod_create_template_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -528,8 +506,6 @@ def runpod_create_template_tool(args: dict[str, Any]) -> dict[str, Any]:
         return {"template": template, "status": "ok"}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def sync_code(args: dict[str, Any]) -> dict[str, Any]:
@@ -557,13 +533,13 @@ def sync_code(args: dict[str, Any]) -> dict[str, Any]:
                 # no-op if the user has no taps installed.
                 sync_taps(node)
                 synced.append(node["name"])
-            except Exception as exc:
+            except (CrucibleError, subprocess.SubprocessError, OSError, RuntimeError) as exc:
+                # Per-node failure: record and continue syncing remaining nodes
+                # rather than aborting the whole batch.
                 errors.append({"node": node["name"], "error": str(exc)})
         return {"synced": synced, "errors": errors}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def fleet_refresh(args: dict[str, Any]) -> dict[str, Any]:
@@ -591,8 +567,6 @@ def fleet_refresh(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def bootstrap_nodes(args: dict[str, Any]) -> dict[str, Any]:
@@ -632,8 +606,6 @@ def bootstrap_nodes(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
@@ -666,8 +638,6 @@ def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def collect_results(args: dict[str, Any]) -> dict[str, Any]:
@@ -702,8 +672,6 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def get_research_state(args: dict[str, Any]) -> dict[str, Any]:
@@ -725,8 +693,6 @@ def get_research_state(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def get_sensitivity(args: dict[str, Any]) -> dict[str, Any]:
@@ -741,8 +707,6 @@ def get_sensitivity(args: dict[str, Any]) -> dict[str, Any]:
         return {"parameters": {k: v for k, v in list(sens.items())[:20]}}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -823,8 +787,6 @@ def design_browse_experiments(args: dict[str, Any]) -> dict[str, Any]:
         return {"total_matched": len(filtered), "experiments": trimmed}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
@@ -875,8 +837,6 @@ def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def design_generate_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
@@ -918,8 +878,6 @@ def design_generate_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def design_batch_from_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
@@ -957,8 +915,6 @@ def design_batch_from_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
         return {"batch": batch, "batch_size": len(batch)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
@@ -992,8 +948,6 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1024,14 +978,12 @@ def context_get_analysis(args: dict[str, Any]) -> dict[str, Any]:
                         active_track, include_global=True, max_findings=20,
                     )
                     result["hub_findings"] = hub_findings
-        except Exception:
-            pass  # Hub is optional
+        except (CrucibleError, OSError):
+            pass  # Hub is optional — missing or unreachable hub is non-fatal
 
         return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
@@ -1055,8 +1007,6 @@ def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "recorded", "entry": entry}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def context_get_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1074,8 +1024,6 @@ def context_get_findings(args: dict[str, Any]) -> dict[str, Any]:
         return {"findings": findings, "total": len(findings)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1150,8 +1098,6 @@ def version_save_design(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "saved", "version_meta": meta}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def version_list_designs(args: dict[str, Any]) -> dict[str, Any]:
@@ -1183,8 +1129,6 @@ def version_list_designs(args: dict[str, Any]) -> dict[str, Any]:
         return {"designs": designs, "total": len(designs)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def version_diff(args: dict[str, Any]) -> dict[str, Any]:
@@ -1225,8 +1169,6 @@ def version_diff(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def version_get_design(args: dict[str, Any]) -> dict[str, Any]:
@@ -1248,8 +1190,6 @@ def version_get_design(args: dict[str, Any]) -> dict[str, Any]:
         return {"version_meta": meta, "design": content}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
@@ -1323,8 +1263,6 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def version_link_result(args: dict[str, Any]) -> dict[str, Any]:
@@ -1347,8 +1285,6 @@ def version_link_result(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "linked", "version_meta": new_meta}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1380,8 +1316,6 @@ def note_add(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "added", "note": entry}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def note_get(args: dict[str, Any]) -> dict[str, Any]:
@@ -1396,8 +1330,6 @@ def note_get(args: dict[str, Any]) -> dict[str, Any]:
         return {"run_id": run_id, "notes": entries, "total": len(entries)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def note_search(args: dict[str, Any]) -> dict[str, Any]:
@@ -1414,8 +1346,6 @@ def note_search(args: dict[str, Any]) -> dict[str, Any]:
         return {"notes": entries, "total": len(entries)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1454,8 +1384,6 @@ def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "uploaded", "run_id": run_id, "wandb_url": wandb_url, "image_path": image_path}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def wandb_get_url(args: dict[str, Any]) -> dict[str, Any]:
@@ -1471,8 +1399,6 @@ def wandb_get_url(args: dict[str, Any]) -> dict[str, Any]:
         return {"run_id": run_id, "wandb_url": None, "reason": "No W&B URL found in status sidecar or results."}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def wandb_annotate(args: dict[str, Any]) -> dict[str, Any]:
@@ -1499,8 +1425,6 @@ def wandb_annotate(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"Failed to annotate W&B run for {run_id}. wandb may not be installed or the run may be inaccessible."}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1542,8 +1466,6 @@ def hub_status(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_sync(args: dict[str, Any]) -> dict[str, Any]:
@@ -1558,8 +1480,6 @@ def hub_sync(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "synced", **result}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def track_create(args: dict[str, Any]) -> dict[str, Any]:
@@ -1577,8 +1497,6 @@ def track_create(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "created", "track": track}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def track_list(args: dict[str, Any]) -> dict[str, Any]:
@@ -1597,8 +1515,6 @@ def track_list(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def track_switch(args: dict[str, Any]) -> dict[str, Any]:
@@ -1613,8 +1529,6 @@ def track_switch(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "switched", "active_track": name}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
@@ -1634,8 +1548,6 @@ def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
         return {"findings": findings[:limit], "total": len(findings)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def _research_finding_to_hub_finding(finding: dict[str, Any], config: ProjectConfig) -> dict[str, Any]:
@@ -1716,8 +1628,6 @@ def finding_promote(args: dict[str, Any]) -> dict[str, Any]:
             return {"status": "promoted", "finding": promoted}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1742,8 +1652,6 @@ def get_research_briefing(args: dict[str, Any]) -> dict[str, Any]:
         return build_briefing(config)
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
@@ -1803,8 +1711,6 @@ def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1844,14 +1750,14 @@ def research_literature_search(args: dict[str, Any]) -> dict[str, Any]:
                 state = ResearchState(state_path, budget_hours=0)
                 beliefs = state.beliefs
                 findings = state.findings
-        except Exception:
-            pass
+        except (CrucibleError, OSError, ValueError):
+            pass  # auto-query falls back to empty belief/finding list
         try:
             prog_path = config.project_root / config.researcher.program_file
             if prog_path.exists():
                 program_text = prog_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
+        except OSError:
+            pass  # program file is optional
         queries = suggest_queries(program_text, beliefs, findings)
         _search = multi_angle_search if multi_angle else search_papers
         all_papers: list[dict[str, Any]] = []
@@ -1898,7 +1804,8 @@ def model_list_families(args: dict[str, Any]) -> dict[str, Any]:
             try:
                 hub = _get_hub_store()
                 global_meta = {entry["name"]: entry for entry in hub.list_architectures()}
-            except Exception:
+            except (CrucibleError, OSError):
+                # Hub is optional — skip global metadata if unavailable.
                 global_meta = {}
             for entry in families:
                 name = entry["name"]
@@ -1948,7 +1855,7 @@ def model_get_config_schema(args: dict[str, Any]) -> dict[str, Any]:
         if family not in list_families():
             return {"error": f"Unknown family: {family}. Available: {list_families()}"}
         return {"family": family, "parameters": get_family_schema(family)}
-    except Exception as exc:
+    except (CrucibleError, ImportError, KeyError) as exc:
         return {"error": f"Failed to get schema: {exc}"}
 
 
@@ -1962,7 +1869,7 @@ def model_validate_config(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.models.registry import list_families
         if family not in list_families():
             errors.append(f"Unknown MODEL_FAMILY: {family}")
-    except Exception as exc:
+    except (CrucibleError, ImportError) as exc:
         warnings.append(f"Could not validate MODEL_FAMILY: {exc}")
     activation = config.get("ACTIVATION", "relu_sq")
     try:
@@ -1984,8 +1891,8 @@ def model_validate_config(args: dict[str, Any]) -> dict[str, Any]:
                     f"Spec-based family {family!r} has template variables without defaults "
                     f"or config values: {missing_vars}"
                 )
-    except Exception:
-        pass  # Don't fail validation for spec introspection errors
+    except (CrucibleError, OSError, KeyError, TypeError):
+        pass  # Spec introspection is best-effort — don't block validation.
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
@@ -2016,11 +1923,12 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
             try:
                 from crucible.models.registry import load_global_architectures
                 load_global_architectures(hub._arch_plugins_dir)
-            except Exception:
+            except (CrucibleError, ImportError, OSError):
+                # Hot-reload is best-effort; saved file still loads on restart.
                 pass
             from crucible.models.registry import list_families
             return {"status": "registered", "scope": "global", "family": name, "families": list_families()}
-        except Exception as exc:
+        except (CrucibleError, OSError) as exc:
             return {"error": f"Failed to store global architecture: {exc}"}
 
     import importlib.util
@@ -2036,7 +1944,10 @@ def model_add_architecture(args: dict[str, Any]) -> dict[str, Any]:
             spec.loader.exec_module(mod)
         from crucible.models.registry import list_families
         return {"status": "registered", "scope": "local", "family": name, "families": list_families()}
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        # User-submitted architecture code may raise anything at import time
+        # (syntax errors, missing imports, bad register_model calls). Surface
+        # it as a structured error and clean up the file.
         file_path.unlink(missing_ok=True)
         return {"error": f"Failed to import: {e}"}
 
@@ -2059,7 +1970,7 @@ def model_add_activation(args: dict[str, Any]) -> dict[str, Any]:
         test = torch.randn(2, 3)
         result = activation_fn(test)
         assert result.shape == test.shape
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — user activation code can raise anything
         return {"error": f"Invalid activation code: {e}"}
     from crucible.models.components.mlp import ACTIVATIONS
     ACTIVATIONS[name] = activation_fn
@@ -2120,7 +2031,7 @@ def model_list_global_architectures(args: dict[str, Any]) -> dict[str, Any]:
     try:
         hub = _get_hub_store()
         return {"architectures": hub.list_architectures()}
-    except Exception as exc:
+    except (CrucibleError, OSError) as exc:
         return {"architectures": [], "note": str(exc)}
 
 
@@ -2136,7 +2047,7 @@ def model_promote_architecture(args: dict[str, Any]) -> dict[str, Any]:
         hub = _get_hub_store()
         result = hub.store_architecture(name=name, code=code, source_project=config.name)
         return {"status": "promoted", "family": name, "metadata": result}
-    except Exception as exc:
+    except (CrucibleError, OSError) as exc:
         return {"error": f"Promotion failed: {exc}"}
 
 
@@ -2166,11 +2077,12 @@ def model_import_architecture(args: dict[str, Any]) -> dict[str, Any]:
                 from crucible.models.composer import register_from_spec
 
                 register_from_spec(name, target, source="local")
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Hot-reload is best-effort; saved file still loads on next startup.
             pass
         from crucible.models.registry import list_families
         return {"status": "imported", "family": name, "path": str(target), "families": list_families()}
-    except Exception as exc:
+    except (CrucibleError, OSError) as exc:
         return {"error": f"Import failed: {exc}"}
 
 
@@ -2274,7 +2186,7 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.models.composer import ArchitectureSpec
         ArchitectureSpec.from_dict(spec_dict)
-    except Exception as exc:
+    except (CrucibleError, KeyError, ValueError, TypeError) as exc:
         return {"error": f"Spec validation failed: {exc}"}
 
     # Determine save path
@@ -2282,7 +2194,7 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     if scope == "global":
         try:
             hub = _get_hub_store()
-        except Exception as exc:
+        except (CrucibleError, OSError) as exc:
             return {"error": f"Hub not available for global scope: {exc}"}
     else:
         arch_dir = config.project_root / config.store_dir / "architectures"
@@ -2297,7 +2209,7 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
                 kind="spec",
             )
             path = hub.hub_dir / result["relative_path"]
-        except Exception as exc:
+        except (CrucibleError, OSError) as exc:
             return {"error": f"Failed to store global architecture spec: {exc}"}
     else:
         arch_dir.mkdir(parents=True, exist_ok=True)
@@ -2309,7 +2221,7 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.models.composer import register_from_spec
         register_from_spec(name, spec_dict, source="local" if scope == "local" else "global")
-    except Exception as exc:
+    except (CrucibleError, KeyError, ValueError) as exc:
         return {"error": f"Registration failed (spec saved at {path}): {exc}"}
 
     return {"registered": name, "scope": scope, "path": str(path)}
@@ -2343,7 +2255,7 @@ def model_from_template(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.models.composer import ArchitectureSpec
         ArchitectureSpec.from_dict(merged)
-    except Exception as exc:
+    except (CrucibleError, KeyError, ValueError, TypeError) as exc:
         return {"error": f"Merged spec validation failed: {exc}"}
 
     # Save
@@ -2358,7 +2270,7 @@ def model_from_template(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.models.composer import register_from_spec
         register_from_spec(name, merged, source="local")
-    except Exception as exc:
+    except (CrucibleError, KeyError, ValueError) as exc:
         return {"error": f"Registration failed (spec saved at {path}): {exc}"}
 
     return {"registered": name, "base": base, "path": str(path), "spec": merged}
@@ -2486,7 +2398,9 @@ def model_preview_spec(args: dict[str, Any]) -> dict[str, Any]:
             "layers": layers,
             "config_used": {k: v for k, v in defaults.items() if k != "model_family"},
         }
-    except Exception as exc:
+    except (CrucibleError, KeyError, ValueError, TypeError, ImportError, RuntimeError) as exc:
+        # Preview instantiates a torch model — may raise on shape mismatches,
+        # missing deps, or bad spec fields.
         return {"error": f"Preview failed: {exc}"}
 
 
@@ -2524,8 +2438,6 @@ def config_get_presets(args: dict[str, Any]) -> dict[str, Any]:
             return {"presets": all_presets}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
@@ -2564,8 +2476,6 @@ def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
         return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -2682,7 +2592,7 @@ def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
             try:
                 text = lf.read_text(encoding="utf-8", errors="replace")
                 combined.append(f"--- {lf.name} ---\n{text}")
-            except Exception:
+            except OSError:
                 combined.append(f"--- {lf.name} --- (read error)")
         full_text = "\n".join(combined)
         lines = full_text.splitlines()
@@ -2742,7 +2652,7 @@ def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
             "log_text": "\n".join(lines),
             "lines_returned": len(lines),
         }
-    except Exception as exc:
+    except (CrucibleError, subprocess.SubprocessError, OSError) as exc:
         return {"found": False, "run_id": run_id, "reason": f"SSH probe failed: {exc}. Try collect_results to download logs locally."}
 
 
@@ -2776,8 +2686,8 @@ def model_fetch_architecture(args: dict[str, Any]) -> dict[str, Any]:
                 search_paths.append(("global", hub._arch_specs_dir / f"{family}.yaml"))
             else:
                 search_paths.append(("global", hub._arch_plugins_dir / f"{family}.py"))
-    except Exception:
-        pass
+    except (CrucibleError, OSError):
+        pass  # Hub is optional
 
     # Builtin code
     import crucible.models.architectures as arch_pkg
@@ -2800,7 +2710,7 @@ def model_fetch_architecture(args: dict[str, Any]) -> dict[str, Any]:
                     "content": content,
                     "file_path": str(path),
                 }
-            except Exception as exc:
+            except OSError as exc:
                 return {"error": f"Found {path} but failed to read: {exc}"}
 
     from crucible.models.registry import list_families
@@ -2906,8 +2816,6 @@ def tree_create(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_get(args: dict[str, Any]) -> dict[str, Any]:
@@ -2945,8 +2853,6 @@ def tree_get(args: dict[str, Any]) -> dict[str, Any]:
         return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_expand_node(args: dict[str, Any]) -> dict[str, Any]:
@@ -2971,8 +2877,6 @@ def tree_expand_node(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
@@ -3079,8 +2983,6 @@ def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
     except json.JSONDecodeError as exc:
         return {"error": f"Failed to parse LLM response as JSON: {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
@@ -3114,8 +3016,6 @@ def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
             }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
@@ -3184,8 +3084,6 @@ def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_sync_results(args: dict[str, Any]) -> dict[str, Any]:
@@ -3225,8 +3123,6 @@ def tree_sync_results(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_list(args: dict[str, Any]) -> dict[str, Any]:
@@ -3247,14 +3143,14 @@ def tree_list(args: dict[str, Any]) -> dict[str, Any]:
                 try:
                     tree = SearchTree.load(entry)
                     trees.append(tree.get_tree_summary())
-                except Exception:
+                except (CrucibleError, OSError, ValueError, KeyError):
+                    # Corrupt tree.yaml: report it in the listing rather than
+                    # aborting the whole enumeration.
                     trees.append({"name": entry.name, "status": "error", "error": "failed to load"})
 
         return {"trees": trees, "total": len(trees)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -3265,25 +3161,22 @@ def tree_list(args: dict[str, Any]) -> dict[str, Any]:
 def config_get_modalities(args: dict[str, Any]) -> dict[str, Any]:
     """List available training backends with their modality tags."""
     config = _get_config()
-    try:
-        from crucible.training.data_adapters import DATA_ADAPTER_REGISTRY
-        from crucible.training.objectives import OBJECTIVE_REGISTRY
+    from crucible.training.data_adapters import DATA_ADAPTER_REGISTRY
+    from crucible.training.objectives import OBJECTIVE_REGISTRY
 
-        backends = []
-        for t in config.training:
-            backends.append({
-                "backend": t.backend,
-                "script": t.script,
-                "modality": t.modality,
-            })
+    backends = []
+    for t in config.training:
+        backends.append({
+            "backend": t.backend,
+            "script": t.script,
+            "modality": t.modality,
+        })
 
-        return {
-            "training_backends": backends,
-            "data_adapters": sorted(DATA_ADAPTER_REGISTRY.keys()),
-            "objectives": sorted(OBJECTIVE_REGISTRY.keys()),
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {
+        "training_backends": backends,
+        "data_adapters": sorted(DATA_ADAPTER_REGISTRY.keys()),
+        "objectives": sorted(OBJECTIVE_REGISTRY.keys()),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3442,12 +3335,9 @@ def _persist_project_observation(
 def list_projects(args: dict[str, Any]) -> dict[str, Any]:
     """List all external project specs in .crucible/projects/."""
     config = _get_config()
-    try:
-        from crucible.core.config import list_project_specs
-        specs = list_project_specs(config.project_root)
-        return {"projects": specs}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    from crucible.core.config import list_project_specs
+    specs = list_project_specs(config.project_root)
+    return {"projects": specs}
 
 
 def provision_project(args: dict[str, Any]) -> dict[str, Any]:
@@ -3510,8 +3400,6 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
@@ -3559,7 +3447,9 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
                 updated.pop("error", None)
                 upsert_node_record(nodes_file, updated)
                 results.append(updated)
-            except Exception as exc:
+            except (CrucibleError, subprocess.SubprocessError, OSError, RuntimeError) as exc:
+                # Per-node bootstrap failure: mark the node and continue with
+                # the rest of the batch.
                 node["state"] = "boot_failed"
                 node["error"] = str(exc)
                 upsert_node_record(nodes_file, node)
@@ -3581,8 +3471,6 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def run_project(args: dict[str, Any]) -> dict[str, Any]:
@@ -3768,7 +3656,9 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
                     "status": "launched",
                     "variant_name": variant_name,
                 })
-            except Exception as exc:
+            except (CrucibleError, subprocess.SubprocessError, OSError, RuntimeError) as exc:
+                # Per-node launch failure: record and keep launching on the
+                # remaining nodes.
                 _persist_project_observation(
                     node_run_id,
                     {
@@ -3795,8 +3685,6 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
         return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def run_project_chain(args: dict[str, Any]) -> dict[str, Any]:
@@ -3864,8 +3752,6 @@ def run_project_chain(args: dict[str, Any]) -> dict[str, Any]:
 
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def _observe_project_run(
@@ -4037,8 +3923,6 @@ def collect_project_results(args: dict[str, Any]) -> dict[str, Any]:
         return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def get_project_run_status(args: dict[str, Any]) -> dict[str, Any]:
@@ -4054,8 +3938,6 @@ def get_project_run_status(args: dict[str, Any]) -> dict[str, Any]:
         return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4142,8 +4024,6 @@ def recipe_save(args: dict[str, Any]) -> dict[str, Any]:
         return {"saved": True, "path": str(path), "name": name, "overwritten": overwritten}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
@@ -4168,7 +4048,8 @@ def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
                 data = yaml.safe_load(path.read_text())
                 if not isinstance(data, dict):
                     continue
-            except Exception:
+            except (OSError, yaml.YAMLError):
+                # Skip corrupt/unreadable recipe files silently during listing.
                 continue
 
             tags = data.get("tags", [])
@@ -4187,8 +4068,6 @@ def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
         return {"recipes": recipes, "total": len(recipes)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
@@ -4220,8 +4099,9 @@ def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
         return data
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    except yaml.YAMLError as exc:
+        # Recipe yaml is user-supplied on disk; report parse errors rather than crash.
+        return {"error": f"Failed to parse recipe YAML: {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4231,7 +4111,12 @@ def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _plugin_add_common(args: dict[str, Any], plugin_type: str) -> dict[str, Any]:
-    """Common logic for all plugin-add tools: save code to disk and load via importlib."""
+    """Common logic for all plugin-add tools: save code to disk and load via importlib.
+
+    User-submitted plugin code is executed via importlib; any exception from
+    ``exec_module`` is caller-supplied and must be returned as a structured error
+    rather than propagated (this is the MCP user-input sanitizer boundary).
+    """
     import importlib.util
     import sys as _sys
 
@@ -4262,8 +4147,10 @@ def _plugin_add_common(args: dict[str, Any], plugin_type: str) -> dict[str, Any]
                 "path": str(path)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    except Exception as exc:  # noqa: BLE001 — user plugin code can raise anything
+        # User plugin code can raise arbitrary exceptions at import time — surface
+        # them to the MCP caller rather than crashing the registration handler.
+        return {"error": f"Plugin registration failed: {type(exc).__name__}: {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4308,8 +4195,6 @@ def plugin_list(args: dict[str, Any]) -> dict[str, Any]:
         return {key: items}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def plugin_add(args: dict[str, Any]) -> dict[str, Any]:
@@ -4335,8 +4220,6 @@ def plugin_get_schema(args: dict[str, Any]) -> dict[str, Any]:
         return {"type": plugin_type, "name": name, "schema": registry.get_schema(name)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4361,8 +4244,6 @@ def hub_tap_add(args: dict[str, Any]) -> dict[str, Any]:
         return tm.add_tap(args.get("url", ""), name=args.get("name", ""))
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_tap_remove(args: dict[str, Any]) -> dict[str, Any]:
@@ -4375,8 +4256,6 @@ def hub_tap_remove(args: dict[str, Any]) -> dict[str, Any]:
         return {"removed": True}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_tap_list(args: dict[str, Any]) -> dict[str, Any]:
@@ -4428,8 +4307,6 @@ def hub_uninstall(args: dict[str, Any]) -> dict[str, Any]:
         return {"removed": True}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_installed(args: dict[str, Any]) -> dict[str, Any]:
@@ -4458,8 +4335,6 @@ def hub_publish(args: dict[str, Any]) -> dict[str, Any]:
         )
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def hub_tap_push(args: dict[str, Any]) -> dict[str, Any]:
@@ -4523,7 +4398,7 @@ def trace_list(args: dict[str, Any]) -> dict[str, Any]:
             meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
             if meta:
                 traces.append(meta)
-        except Exception:
+        except (OSError, yaml.YAMLError):
             continue
     return {"traces": traces}
 
@@ -4560,176 +4435,155 @@ def trace_get(args: dict[str, Any]) -> dict[str, Any]:
 
 def data_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered data sources."""
-    try:
-        from crucible.core.data_sources import list_data_sources, describe_data_source
+    from crucible.core.data_sources import list_data_sources, describe_data_source
 
-        sources = []
-        for name in list_data_sources():
-            info = describe_data_source(name)
-            if info:
-                sources.append(info)
+    sources = []
+    for name in list_data_sources():
+        info = describe_data_source(name)
+        if info:
+            sources.append(info)
 
-        return {"sources": sources}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {"sources": sources}
 
 
 def data_status(args: dict[str, Any]) -> dict[str, Any]:
     """Check data status for a source."""
-    try:
-        from crucible.core.data_sources import build_data_source
+    from crucible.core.data_sources import build_data_source
 
-        name = args.get("name")
-        if not name:
-            return {"error": "name is required"}
+    name = args.get("name")
+    if not name:
+        return {"error": "name is required"}
 
-        source_type = args.get("type", "huggingface")
-        config = args.get("config", {})
+    source_type = args.get("type", "huggingface")
+    config = args.get("config", {})
 
-        source = build_data_source(source_type, name=name, config=config)
-        status_result = source.status()
+    source = build_data_source(source_type, name=name, config=config)
+    status_result = source.status()
 
-        return {
-            "name": name,
-            "status": status_result.status.value,
-            "manifest": status_result.manifest,
-            "shard_count": status_result.shard_count,
-            "last_prepared": status_result.last_prepared.isoformat() if status_result.last_prepared else None,
-            "issues": status_result.issues,
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {
+        "name": name,
+        "status": status_result.status.value,
+        "manifest": status_result.manifest,
+        "shard_count": status_result.shard_count,
+        "last_prepared": status_result.last_prepared.isoformat() if status_result.last_prepared else None,
+        "issues": status_result.issues,
+    }
 
 
 def data_prepare(args: dict[str, Any]) -> dict[str, Any]:
     """Prepare (download/cache) data for a source."""
-    try:
-        from crucible.core.data_sources import build_data_source
+    from crucible.core.data_sources import build_data_source
 
-        name = args.get("name")
-        if not name:
-            return {"error": "name is required"}
+    name = args.get("name")
+    if not name:
+        return {"error": "name is required"}
 
-        source_type = args.get("type", "huggingface")
-        config = args.get("config", {})
-        force = args.get("force", False)
-        background = args.get("background", False)
+    source_type = args.get("type", "huggingface")
+    config = args.get("config", {})
+    force = args.get("force", False)
+    background = args.get("background", False)
 
-        source = build_data_source(source_type, name=name, config=config)
-        result = source.prepare(force=force, background=background)
+    source = build_data_source(source_type, name=name, config=config)
+    result = source.prepare(force=force, background=background)
 
-        return {
-            "success": result.success,
-            "job_id": result.job_id,
-            "message": result.message,
-            "shards_downloaded": result.shards_downloaded,
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {
+        "success": result.success,
+        "job_id": result.job_id,
+        "message": result.message,
+        "shards_downloaded": result.shards_downloaded,
+    }
 
 
 def data_validate(args: dict[str, Any]) -> dict[str, Any]:
     """Validate data integrity."""
-    try:
-        from crucible.core.data_sources import build_data_source
+    from crucible.core.data_sources import build_data_source
 
-        name = args.get("name")
-        if not name:
-            return {"error": "name is required"}
+    name = args.get("name")
+    if not name:
+        return {"error": "name is required"}
 
-        source_type = args.get("type", "huggingface")
-        config = args.get("config", {})
+    source_type = args.get("type", "huggingface")
+    config = args.get("config", {})
 
-        source = build_data_source(source_type, name=name, config=config)
-        result = source.validate()
+    source = build_data_source(source_type, name=name, config=config)
+    result = source.validate()
 
-        return {
-            "valid": result.valid,
-            "errors": result.errors,
-            "warnings": result.warnings,
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {
+        "valid": result.valid,
+        "errors": result.errors,
+        "warnings": result.warnings,
+    }
 
 
 def data_search(args: dict[str, Any]) -> dict[str, Any]:
     """Search for available data."""
-    try:
-        from crucible.core.data_sources import build_data_source
+    from crucible.core.data_sources import build_data_source
 
-        query = args.get("query", "")
-        source_type = args.get("type", "huggingface")
+    query = args.get("query", "")
+    source_type = args.get("type", "huggingface")
 
-        source = build_data_source(source_type, name="_search", config={})
-        results = source.search(query)
+    source = build_data_source(source_type, name="_search", config={})
+    results = source.search(query)
 
-        return {
-            "results": [
-                {
-                    "name": r.name,
-                    "source": r.source,
-                    "description": r.description,
-                    "shard_count": r.shard_count,
-                }
-                for r in results
-            ]
-        }
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {
+        "results": [
+            {
+                "name": r.name,
+                "source": r.source,
+                "description": r.description,
+                "shard_count": r.shard_count,
+            }
+            for r in results
+        ]
+    }
 
 
 def data_link(args: dict[str, Any]) -> dict[str, Any]:
     """Link data source to an experiment run."""
-    try:
-        run_id = args.get("run_id")
-        data_name = args.get("data_name")
+    run_id = args.get("run_id")
+    data_name = args.get("data_name")
 
-        if not run_id or not data_name:
-            return {"error": "run_id and data_name are required"}
+    if not run_id or not data_name:
+        return {"error": "run_id and data_name are required"}
 
-        import json
+    import json
 
-        config = _get_config()
-        store_path = config.project_root / ".crucible" / "store.jsonl"
-        store_path.parent.mkdir(parents=True, exist_ok=True)
+    config = _get_config()
+    store_path = config.project_root / ".crucible" / "store.jsonl"
+    store_path.parent.mkdir(parents=True, exist_ok=True)
 
-        entry = {
-            "type": "data_link",
-            "run_id": run_id,
-            "data_name": data_name,
-        }
-        with open(store_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+    entry = {
+        "type": "data_link",
+        "run_id": run_id,
+        "data_name": data_name,
+    }
+    with open(store_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
-        return {"linked": True, "run_id": run_id, "data_name": data_name}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {"linked": True, "run_id": run_id, "data_name": data_name}
 
 
 def data_get_linked(args: dict[str, Any]) -> dict[str, Any]:
     """Get data linked to an experiment run."""
-    try:
-        run_id = args.get("run_id")
-        if not run_id:
-            return {"error": "run_id is required"}
+    run_id = args.get("run_id")
+    if not run_id:
+        return {"error": "run_id is required"}
 
-        import json
+    import json
 
-        config = _get_config()
-        store_path = config.project_root / ".crucible" / "store.jsonl"
-        if not store_path.exists():
-            return {"data_sources": []}
+    config = _get_config()
+    store_path = config.project_root / ".crucible" / "store.jsonl"
+    if not store_path.exists():
+        return {"data_sources": []}
 
-        links = []
-        with open(store_path) as f:
-            for line in f:
-                entry = json.loads(line)
-                if entry.get("type") == "data_link" and entry.get("run_id") == run_id:
-                    links.append({"name": entry.get("data_name")})
+    links = []
+    with open(store_path) as f:
+        for line in f:
+            entry = json.loads(line)
+            if entry.get("type") == "data_link" and entry.get("run_id") == run_id:
+                links.append({"name": entry.get("data_name")})
 
-        return {"data_sources": links}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
+    return {"data_sources": links}
 
 
 # ------------------------------------------------------------------
@@ -4789,8 +4643,6 @@ def research_dag_init(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "initialized", **result}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def research_dag_sync(args: dict[str, Any]) -> dict[str, Any]:
@@ -4827,8 +4679,6 @@ def research_dag_sync(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "synced", **result}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def research_dag_push_node(args: dict[str, Any]) -> dict[str, Any]:
@@ -4861,8 +4711,6 @@ def research_dag_push_node(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "pushed", "canvas_node_id": canvas_id}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def research_dag_pull_manual(args: dict[str, Any]) -> dict[str, Any]:
@@ -4882,8 +4730,6 @@ def research_dag_pull_manual(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
@@ -4897,8 +4743,6 @@ def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", **bridge.status()}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -4959,8 +4803,6 @@ def harness_init(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def harness_propose(args: dict[str, Any]) -> dict[str, Any]:
@@ -4978,8 +4820,6 @@ def harness_propose(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", "candidates": cands, "count": len(cands)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
@@ -5002,8 +4842,6 @@ def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
@@ -5024,8 +4862,6 @@ def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", **summary}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def harness_frontier(args: dict[str, Any]) -> dict[str, Any]:
@@ -5043,8 +4879,6 @@ def harness_frontier(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", **opt.frontier()}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def harness_evolution_log(args: dict[str, Any]) -> dict[str, Any]:
@@ -5058,8 +4892,6 @@ def harness_evolution_log(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", "records": records, "count": len(records)}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 def tree_pareto(args: dict[str, Any]) -> dict[str, Any]:
@@ -5073,8 +4905,6 @@ def tree_pareto(args: dict[str, Any]) -> dict[str, Any]:
         return {"status": "ok", **tree.frontier_summary()}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
-    except Exception as exc:
-        return {"error": f"[unexpected] {exc}"}
 
 
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {

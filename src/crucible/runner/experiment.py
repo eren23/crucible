@@ -542,7 +542,7 @@ def run_experiment(
             error=result["error"],
         )
         raise
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError, RunnerError) as exc:
         result["status"] = "failed"
         result["error"] = str(exc)
         result["failure_class"] = "runner_exception"
@@ -585,7 +585,8 @@ def run_experiment(
                     data_links.append(entry.get("data_name"))
             if data_links:
                 result["data_sources"] = data_links
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
+            # Data provenance is best-effort — store.jsonl may be corrupt or unreadable.
             log_warn(f"Data provenance lookup failed for {exp_id}: {exc}")
 
     # -- Persist result --

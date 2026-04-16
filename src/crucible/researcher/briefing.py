@@ -10,7 +10,14 @@ from __future__ import annotations
 from typing import Any
 
 from crucible.core.config import ProjectConfig
+from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
+
+# Briefing sections are best-effort: missing/corrupt state returns an empty
+# default rather than propagating. We narrow to the union of errors these
+# sections can realistically raise (I/O, data shape, optional-dep imports,
+# and any CrucibleError subclass).
+_BRIEFING_SECTION_ERRORS = (CrucibleError, OSError, KeyError, ValueError, ImportError)
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +51,7 @@ def _track_section(config: ProjectConfig) -> dict[str, Any] | None:
         if track is None:
             return None
         return {"name": track.get("name", active), "description": track.get("description", "")}
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'track' failed: {exc}")
         if config.active_track:
             return {"name": config.active_track, "description": ""}
@@ -71,7 +78,7 @@ def _recent_experiments(config: ProjectConfig, limit: int = 10) -> list[dict[str
                 "timestamp": r.get("timestamp", ""),
             })
         return entries
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'recent_experiments' failed: {exc}")
         return []
 
@@ -93,7 +100,7 @@ def _leaderboard_top3(config: ProjectConfig) -> list[dict[str, Any]]:
                 "model_bytes": r.get("model_bytes"),
             })
         return entries
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'leaderboard_top3' failed: {exc}")
         return []
 
@@ -114,7 +121,7 @@ def _hypotheses_section(config: ProjectConfig) -> list[dict[str, Any]]:
                 "status": h.get("status", "pending"),
             })
         return entries
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'hypotheses' failed: {exc}")
         return []
 
@@ -137,7 +144,7 @@ def _recent_findings(config: ProjectConfig, limit: int = 10) -> list[dict[str, A
                 "ts": f.get("ts", ""),
             })
         return entries
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'recent_findings' failed: {exc}")
         return []
 
@@ -166,7 +173,7 @@ def _recent_notes(config: ProjectConfig, limit: int = 10) -> list[dict[str, Any]
                 "body_preview": body_preview,
             })
         return entries
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'recent_notes' failed: {exc}")
         return []
 
@@ -180,7 +187,7 @@ def _beliefs_section(config: ProjectConfig) -> list[str]:
             return []
         state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
         return list(state.beliefs)
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'beliefs' failed: {exc}")
         return []
 
@@ -200,7 +207,7 @@ def _budget_section(config: ProjectConfig) -> dict[str, float]:
             "remaining_hours": state.budget_remaining,
             "total_hours": config.researcher.budget_hours,
         }
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'budget' failed: {exc}")
         return {
             "remaining_hours": config.researcher.budget_hours,
@@ -223,7 +230,7 @@ def _hub_findings(config: ProjectConfig) -> list[dict[str, Any]]:
         else:
             # No active track -- just load global findings
             return hub.list_findings("global", status="active")
-    except Exception as exc:
+    except _BRIEFING_SECTION_ERRORS as exc:
         log_warn(f"Briefing section 'hub_findings' failed: {exc}")
         return []
 

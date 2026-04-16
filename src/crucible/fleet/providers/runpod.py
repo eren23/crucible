@@ -856,7 +856,9 @@ class RunPodProvider(FleetProvider):
                     inventory_record_from_api(api, previous=previous_by_id.get(pod_id), defaults=self.defaults),
                 )
             except FleetError:
-                failed: NodeRecord = dict(previous_by_id.get(pod_id, dict(node)))  # type: ignore[assignment]
+                # pod_id was populated into previous_by_id at the top of refresh(),
+                # so the lookup always hits — no need for a dict(node) fallback.
+                failed: NodeRecord = dict(previous_by_id[pod_id])  # type: ignore[assignment]
                 failed["api_state"] = "lost"
                 failed["state"] = "lost"
                 refreshed.append(failed)

@@ -22,6 +22,18 @@ from typing import Any
 from crucible.core.log import log_info, log_warn
 
 
+# Literature search failures are best-effort — network/parse/data-shape errors
+# return empty results rather than blocking the research loop.
+_LITERATURE_FAILURES = (
+    urllib.error.URLError,
+    TimeoutError,
+    json.JSONDecodeError,
+    OSError,
+    KeyError,
+    ValueError,
+    AttributeError,
+)
+
 # Simple in-memory cache with 1-hour TTL
 _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _CACHE_TTL = 3600.0
@@ -62,7 +74,7 @@ def _search_via_hub(query: str, limit: int) -> list[dict[str, Any]] | None:
         return papers
     except ImportError:
         return None
-    except Exception as exc:
+    except _LITERATURE_FAILURES as exc:
         log_warn(f"Literature search via huggingface_hub failed: {exc}")
         return None
 
@@ -93,7 +105,7 @@ def _search_via_api(query: str, limit: int) -> list[dict[str, Any]]:
                 }
             )
         return papers
-    except Exception as exc:
+    except _LITERATURE_FAILURES as exc:
         log_warn(f"Literature search via HTTP API failed: {exc}")
         return []
 
@@ -163,7 +175,11 @@ def expand_query(query: str) -> list[str]:
         log_info(f"Query expansion: {query!r} -> {len(angles)} angles")
     except ImportError:
         pass  # anthropic not installed
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
+        # Query expansion is strictly best-effort: Anthropic SDK errors
+        # (AnthropicError subclasses — not imported at module scope because
+        # anthropic is an optional dep), malformed-JSON responses, and network
+        # hiccups must all degrade to "use original query only".
         log_warn(f"Query expansion failed (non-fatal): {exc}")
 
     _expansion_cache[query] = (now, angles)
@@ -203,7 +219,7 @@ def get_paper_detail(paper_id: str) -> dict[str, Any] | None:
         return _normalize_paper(p)
     except ImportError:
         pass
-    except Exception as exc:
+    except _LITERATURE_FAILURES as exc:
         log_warn(f"Paper detail fetch via huggingface_hub failed for {paper_id!r}: {exc}")
     try:
         url = f"https://huggingface.co/api/papers/{urllib.request.quote(paper_id)}"
@@ -220,7 +236,7 @@ def get_paper_detail(paper_id: str) -> dict[str, Any] | None:
             "github_repo": data.get("github_repo", ""),
             "keywords": data.get("ai_keywords", []),
         }
-    except Exception as exc:
+    except _LITERATURE_FAILURES as exc:
         log_warn(f"Paper detail fetch via HTTP API failed for {paper_id!r}: {exc}")
         return None
 

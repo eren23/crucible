@@ -121,7 +121,9 @@ def run_generic_training() -> None:
     if objective_name:
         try:
             objective = build_objective(objective_name)
-        except Exception as exc:
+        except (KeyError, TypeError, ImportError) as exc:
+            # Fallback: if the objective plugin isn't registered or init fails,
+            # keep objective=None and rely on model-internal loss below.
             objective_build_error = exc
 
     # Parameter groups
@@ -147,7 +149,7 @@ def run_generic_training() -> None:
     # Build data adapter eagerly so misconfiguration fails fast.
     try:
         data_adapter = build_data_adapter(data_adapter_name)
-    except Exception as exc:
+    except (KeyError, TypeError, ImportError) as exc:
         raise RuntimeError(f"Failed to build DATA_ADAPTER={data_adapter_name!r}: {exc}") from exc
 
     # ---------------------------------------------------------------
@@ -207,7 +209,9 @@ def run_generic_training() -> None:
                     try:
                         scalar_val = val.item() if val.numel() == 1 else val.mean().item()
                         print(f"metric:{key}={scalar_val:.6f}", flush=True)
-                    except Exception as exc:
+                    except (RuntimeError, ValueError, TypeError) as exc:
+                        # Torch tensor ops can raise RuntimeError (device/shape) or
+                        # ValueError; log and skip this metric.
                         print(f"warning: could not convert metric {key}: {exc}", file=sys.stderr, flush=True)
 
         # Validation
