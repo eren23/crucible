@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from crucible.core.log import log_warn
+from crucible.core.types import PluginFactory
 
-_REGISTRY: dict[str, Callable[..., Any]] = {}
+_REGISTRY: dict[str, PluginFactory] = {}
 _REGISTRY_META: dict[str, dict] = {}
 _CURRENT_REGISTER_SOURCE: str = "local"
 _FAMILY_SCHEMAS: dict[str, dict] = {}
 
 
-def register_model(name: str, factory: Callable[..., Any], *, source: str = "") -> None:
+def register_model(name: str, factory: PluginFactory, *, source: str = "") -> None:
     """Register a model family under *name*.
 
     *factory* is a callable ``(args) -> nn.Module`` that accepts an

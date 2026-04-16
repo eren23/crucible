@@ -14,19 +14,19 @@ Usage in training backends::
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from crucible.core.plugin_registry import PluginRegistry
+from crucible.core.types import PluginFactory
 
-OPTIMIZER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("optimizer")
+OPTIMIZER_REGISTRY: PluginRegistry[PluginFactory] = PluginRegistry("optimizer")
 
 
 # ---------------------------------------------------------------------------
 # Convenience wrappers (public API)
 # ---------------------------------------------------------------------------
 
-def register_optimizer(name: str, factory: Callable[..., Any], *, source: str = "builtin") -> None:
+def register_optimizer(name: str, factory: PluginFactory, *, source: str = "builtin") -> None:
     """Register an optimizer factory under *name*."""
     OPTIMIZER_REGISTRY.register(name, factory, source=source)
 

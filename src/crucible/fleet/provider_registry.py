@@ -15,22 +15,22 @@ Usage::
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from crucible.core.plugin_registry import PluginRegistry
+from crucible.core.types import PluginFactory
 
 if TYPE_CHECKING:
     from crucible.fleet.provider import FleetProvider
 
-PROVIDER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("fleet_provider")
+PROVIDER_REGISTRY: PluginRegistry[PluginFactory] = PluginRegistry("fleet_provider")
 
 
 # ---------------------------------------------------------------------------
 # Convenience wrappers (public API)
 # ---------------------------------------------------------------------------
 
-def register_provider(name: str, factory: Callable[..., Any], *, source: str = "builtin") -> None:
+def register_provider(name: str, factory: PluginFactory, *, source: str = "builtin") -> None:
     """Register a fleet provider factory under *name*."""
     PROVIDER_REGISTRY.register(name, factory, source=source)
 

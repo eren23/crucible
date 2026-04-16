@@ -1,7 +1,21 @@
 """Shared type definitions used across Crucible modules."""
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from collections.abc import Callable
+from typing import Any, TypeAlias, TypedDict
+
+
+# ---------------------------------------------------------------------------
+# Plugin / registry types
+# ---------------------------------------------------------------------------
+
+# Factory callable used by every ``PluginRegistry`` (optimizers, schedulers,
+# fleet providers, model architectures, composer block types, etc.). The
+# registries are generic over this shape; we keep it as loose as the runtime
+# is because each plugin type has its own call signature (positional
+# ``params`` for optimizers, ``optimizer`` for schedulers, ``**kwargs`` for
+# providers). Tightening further would require per-plugin-type aliases.
+PluginFactory: TypeAlias = Callable[..., Any]
 
 
 # ---------------------------------------------------------------------------
@@ -95,19 +109,27 @@ class NodeRecord(TypedDict, total=False):
     """A compute node in the fleet (pod, VM, bare metal)."""
     name: str
     node_id: str
+    pod_id: str                 # alias of node_id for backward compat
     gpu: str
+    gpu_count: int
+    interruptible: bool
     ssh_host: str
     ssh_port: int
     user: str
     ssh_key: str
     workspace_path: str
     python_bin: str
-    state: str  # new | bootstrapped | running | dead | destroyed
+    env_source: str             # which .env file to sync for secrets
+    state: str                  # new | bootstrapped | running | dead | destroyed | ready | unreachable
+    api_state: str              # provider-reported lifecycle state
     env_ready: bool
     dataset_ready: bool
     git_sha: str | None
     cost_per_hr: float
-    provider: str  # runpod | ssh
+    provider: str               # runpod | ssh
+    last_seen_at: str | None
+    replacement: bool           # re-provisioned to replace a dead node
+    network_volume_id: str
 
 
 class QueueItem(TypedDict, total=False):

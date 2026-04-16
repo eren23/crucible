@@ -10,9 +10,10 @@ import copy
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from crucible.core.errors import ComposerError
+from crucible.core.types import PluginFactory
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +193,7 @@ class SpecResolver:
 from crucible.core.plugin_registry import PluginRegistry
 
 BLOCK_TYPE_REGISTRY = PluginRegistry("block_type")
-BLOCK_TYPES: dict[str, Callable[..., Any]] = BLOCK_TYPE_REGISTRY._registry  # convenience alias
+BLOCK_TYPES: dict[str, PluginFactory] = BLOCK_TYPE_REGISTRY._registry  # convenience alias
 
 
 def _ensure_block_types() -> None:
@@ -210,7 +211,7 @@ def _ensure_block_types() -> None:
 # ---------------------------------------------------------------------------
 
 AUGMENTATION_REGISTRY = PluginRegistry("augmentation")
-AUGMENTATIONS: dict[str, Callable[..., Any]] = AUGMENTATION_REGISTRY._registry  # convenience alias
+AUGMENTATIONS: dict[str, PluginFactory] = AUGMENTATION_REGISTRY._registry  # convenience alias
 
 
 def _ensure_augmentations() -> None:

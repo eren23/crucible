@@ -16,19 +16,19 @@ Usage in training backends::
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from typing import Any
 
 from crucible.core.plugin_registry import PluginRegistry
+from crucible.core.types import PluginFactory
 
-SCHEDULER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("scheduler")
+SCHEDULER_REGISTRY: PluginRegistry[PluginFactory] = PluginRegistry("scheduler")
 
 
 # ---------------------------------------------------------------------------
 # Convenience wrappers (public API)
 # ---------------------------------------------------------------------------
 
-def register_scheduler(name: str, factory: Callable[..., Any], *, source: str = "builtin") -> None:
+def register_scheduler(name: str, factory: PluginFactory, *, source: str = "builtin") -> None:
     """Register a scheduler factory under *name*."""
     SCHEDULER_REGISTRY.register(name, factory, source=source)
 

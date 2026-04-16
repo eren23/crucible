@@ -4,6 +4,14 @@ from __future__ import annotations
 import abc
 from typing import Any
 
+# Node records conform to ``crucible.core.types.NodeRecord`` structurally,
+# but the abstract interface stays on ``dict[str, Any]`` because many
+# call sites in ``fleet/manager.py`` still pass through plain dicts from
+# ``load_nodes`` and the provider-returned records may carry extra
+# provider-specific keys. Tightening the signature here cascades into a
+# fleet-wide ``dict[str, Any]`` → ``NodeRecord`` migration which is out
+# of scope for Agent 4. See ``docs/cleanup/04-type-consolidation.md``.
+
 
 class FleetProvider(abc.ABC):
     """Interface every compute-provider backend must implement.
