@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from crucible.core.config import ProjectConfig, ProjectSpec
+    from crucible.core.config import ProjectSpec
 
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.data_sources import bootstrap_data_source_spec_from_data_config
