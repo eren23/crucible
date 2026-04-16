@@ -525,6 +525,6 @@ class TestValidPluginTypes:
             "optimizers", "schedulers", "callbacks", "loggers",
             "providers", "architectures", "data_adapters", "data_sources",
             "objectives", "block_types", "stack_patterns", "augmentations",
-            "activations", "launchers", "evaluations",
+            "activations", "launchers", "evaluations", "domain_specs",
         }
         assert VALID_PLUGIN_TYPES == expected

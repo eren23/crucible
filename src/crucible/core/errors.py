@@ -91,3 +91,12 @@ class ResearchDAGError(CrucibleError):
 
 class ProjectTemplateError(ConfigError):
     """Project template loading, variable substitution, or inheritance failures."""
+
+class DomainSpecError(CrucibleError):
+    """Domain spec loading, validation, or missing-field failures."""
+
+class CandidateValidationError(CrucibleError):
+    """Harness candidate failed validation (syntax, interface, constraints)."""
+
+class HarnessOptimizerError(CrucibleError):
+    """Harness optimizer orchestration failures."""

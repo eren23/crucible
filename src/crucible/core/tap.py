@@ -32,13 +32,13 @@ VALID_PLUGIN_TYPES = frozenset({
     "optimizers", "schedulers", "callbacks", "loggers",
     "providers", "architectures", "data_adapters", "data_sources",
     "objectives", "block_types", "stack_patterns", "augmentations",
-    "activations", "launchers", "evaluations",
+    "activations", "launchers", "evaluations", "domain_specs",
 })
 
 # Plugin types that ship as multi-file directory bundles (copied whole)
 # rather than single `.py` files. Keep in sync with the install/uninstall
 # branches below.
-BUNDLE_PLUGIN_TYPES = frozenset({"launchers", "evaluations"})
+BUNDLE_PLUGIN_TYPES = frozenset({"launchers", "evaluations", "domain_specs"})
 
 _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
@@ -582,7 +582,8 @@ class TapManager:
         if project_root is None:
             project_root = Path.cwd()
         local_root = project_root / store_dir / plugins_subdir / plugin_type
-        if plugin_type == "launchers":
+        is_bundle = plugin_type in BUNDLE_PLUGIN_TYPES
+        if is_bundle:
             local_bundle = local_root / name
             if not local_bundle.is_dir():
                 raise TapError(f"Local plugin not found: {local_bundle}")
@@ -600,7 +601,7 @@ class TapManager:
                 f"Remove it manually or update the existing version."
             )
 
-        if plugin_type == "launchers":
+        if is_bundle:
             shutil.copytree(local_bundle, dest_dir)
         else:
             dest_dir.mkdir(parents=True, exist_ok=True)
@@ -609,7 +610,7 @@ class TapManager:
         # Copy or create plugin.yaml
         manifest_path = dest_dir / "plugin.yaml"
         if not manifest_path.exists():
-            if plugin_type == "launchers":
+            if is_bundle:
                 local_meta = local_bundle / "plugin.yaml"
             else:
                 local_meta = local_plugin.with_suffix(".yaml")
