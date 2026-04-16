@@ -37,7 +37,6 @@ from typing import Any
 
 from crucible.core.errors import HubError
 from crucible.core.finding import (
-    FINDING_STATUSES,
     can_promote,
     make_finding_id,
     validate_finding,

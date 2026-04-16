@@ -15,12 +15,13 @@ Usage::
 """
 from __future__ import annotations
 
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.plugin_registry import PluginRegistry
+
+if TYPE_CHECKING:
+    from crucible.fleet.provider import FleetProvider
 
 PROVIDER_REGISTRY: PluginRegistry[Callable[..., Any]] = PluginRegistry("fleet_provider")
 
@@ -36,8 +37,6 @@ def register_provider(name: str, factory: Callable[..., Any], *, source: str = "
 
 def build_provider(name: str, **kwargs: Any) -> FleetProvider:
     """Build a fleet provider by name."""
-    from crucible.fleet.provider import FleetProvider  # noqa: F811 — lazy to avoid circular
-
     factory = PROVIDER_REGISTRY.get(name)
     if factory is None:
         from crucible.core.errors import PluginError
@@ -74,7 +73,6 @@ def _runpod_factory(
     template_id: str = "",
     **kwargs: Any,
 ) -> FleetProvider:
-    from crucible.fleet.provider import FleetProvider  # noqa: F811
     from crucible.fleet.providers.runpod import RunPodProvider
     return RunPodProvider(
         image_name=image_name or "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
@@ -94,7 +92,6 @@ def _ssh_factory(
     defaults: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> FleetProvider:
-    from crucible.fleet.provider import FleetProvider  # noqa: F811
     from crucible.fleet.providers.ssh import SSHProvider
     return SSHProvider(
         ssh_key=ssh_key,

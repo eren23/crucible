@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from crucible.core.errors import CrucibleError
 

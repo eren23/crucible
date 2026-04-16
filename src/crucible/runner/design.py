@@ -5,7 +5,7 @@ and links execution results back to designs via the version store.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from crucible.core.types import ExperimentConfig, ExperimentDesign, VersionMeta
 
