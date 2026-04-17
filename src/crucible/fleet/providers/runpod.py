@@ -547,10 +547,15 @@ def create_api_pod(
         gql_input["minMemoryInGb"] = 8
         gql_input["minVcpuCount"] = 2
 
-    # Try on-demand first for non-interruptible, spot for interruptible
-    mutation_name = "podFindAndDeployOnDemand"
+    # Spot = podFindAndDeployInterruptable, on-demand = podFindAndDeployOnDemand
+    if interruptible:
+        mutation_name = "podFindAndDeployInterruptable"
+        input_type = "PodFindAndDeployInterruptableInput"
+    else:
+        mutation_name = "podFindAndDeployOnDemand"
+        input_type = "PodFindAndDeployOnDemandInput"
     query = f"""
-    mutation($input: PodFindAndDeployOnDemandInput!) {{
+    mutation($input: {input_type}!) {{
         {mutation_name}(input: $input) {{
             id name desiredStatus imageName
             machine {{ podHostId }}

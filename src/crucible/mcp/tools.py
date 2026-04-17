@@ -290,6 +290,8 @@ def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
             kwargs["template_id"] = args["template_id"]
         if args.get("gpu_count"):
             kwargs["gpu_count"] = args["gpu_count"]
+        if "interruptible" in args:
+            kwargs["interruptible"] = args["interruptible"]
         new_nodes = fleet.provision(
             count=args.get("count", 2),
             name_prefix=args.get("name_prefix", "crucible"),
@@ -3371,7 +3373,10 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
             provider_overrides["container_disk_gb"] = spec.pod.container_disk
         if spec.pod.volume_disk:
             provider_overrides["volume_gb"] = spec.pod.volume_disk
-        if spec.pod.interruptible is not None:
+        # interruptible: MCP arg overrides spec, spec overrides default
+        if "interruptible" in args:
+            provider_overrides["interruptible"] = args["interruptible"]
+        elif spec.pod.interruptible is not None:
             provider_overrides["interruptible"] = spec.pod.interruptible
         if spec.pod.gpu_count:
             provider_overrides["gpu_count"] = spec.pod.gpu_count

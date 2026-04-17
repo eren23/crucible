@@ -385,6 +385,7 @@ TOOLS: list[Tool] = [
             "properties": {
                 "count": {"type": "integer", "description": "Number of nodes to create.", "default": 2},
                 "name_prefix": {"type": "string", "description": "Node name prefix.", "default": "crucible"},
+                "interruptible": {"type": "boolean", "description": "Use spot/interruptible instances (cheaper, can be preempted). Default false.", "default": False},
                 "network_volume_id": {"type": "string", "description": "RunPod network volume ID for shared storage."},
                 "template_id": {"type": "string", "description": "RunPod template ID for standardized provisioning."},
             },
@@ -1870,6 +1871,7 @@ TOOLS: list[Tool] = [
             "properties": {
                 "project_name": {"type": "string", "description": "Name of the project spec (without .yaml)."},
                 "count": {"type": "integer", "default": 1, "description": "Number of nodes."},
+                "interruptible": {"type": "boolean", "description": "Override spot/on-demand. If not set, uses project spec's pod.interruptible value."},
             },
             "required": ["project_name"],
             "additionalProperties": False,
