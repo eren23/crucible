@@ -51,11 +51,31 @@ def launch_project(
         parts = [f"export {k}={shlex.quote(str(v))}" for k, v in effective_overrides.items()]
         override_exports = " && ".join(parts) + " && "
 
-    # Activation + env sourcing
+    # Activation + env sourcing.  ``set -a`` forces every variable
+    # assigned by ``source`` (including bare ``KEY=val`` lines, not just
+    # ``export KEY=val``) to be exported into the subprocess environment.
+    # This guards against bootstrap writing a .env without ``export``
+    # prefixes — a bug we hit in practice which caused WANDB_API_KEY to
+    # silently drop and training to log offline.
     activate = f"cd {ws}"
     if spec.python:
         activate += " && source .venv/bin/activate"
-    source_env = f"if [ -f {ws}/.env ]; then source {ws}/.env; fi"
+    source_env = (
+        f"if [ -f {ws}/.env ]; then set -a; source {ws}/.env; set +a; fi"
+    )
+
+    # Preflight: if the spec forwards WANDB_API_KEY, enforce that it is
+    # actually exported after sourcing .env.  Fail loudly at launch time
+    # rather than silently training offline.
+    forwarded = list(getattr(spec, "env_forward", []) or [])
+    preflight = ""
+    if "WANDB_API_KEY" in forwarded:
+        preflight = (
+            ' && if [ -z "${WANDB_API_KEY:-}" ]; then '
+            'echo "[Crucible] ERROR: WANDB_API_KEY missing after sourcing .env. '
+            'Refusing to launch — W&B would silently go offline." >&2; '
+            'exit 101; fi'
+        )
 
     train_cmd = spec.train
     exit_code_file = f"{log_dir}/{run_id}.exit_code"
@@ -70,7 +90,7 @@ def launch_project(
         f"threading.Thread(target=lambda: open({exit_code_file!r},'w').write(str(proc.wait())), daemon=True).start()"
     )
     cmd = (
-        f"{activate} && {source_env} && "
+        f"{activate} && {source_env}{preflight} && "
         f"{override_exports}"
         f"mkdir -p {log_dir_quoted} && "
         f"python -c {shlex.quote(launch_snippet)}"

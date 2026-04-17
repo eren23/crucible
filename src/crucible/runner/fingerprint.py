@@ -178,6 +178,28 @@ def build_run_manifest(project_root: Path) -> dict[str, Any]:
             manifest_path.read_bytes()
         ).hexdigest()[:16]
 
+    # Data file checksums (HDF5 + other binary data).  Records SHA-256 of
+    # each data file so we can detect dataset mutations even if
+    # manifest.json stays the same.  Hashes are streamed in 1 MiB chunks
+    # to avoid loading multi-GB files into memory.
+    data_file_hashes: dict[str, str] = {}
+    data_patterns = ("*.h5", "*.hdf5", "*.parquet", "*.jsonl")
+    for tap_dir in (hub_taps.iterdir() if hub_taps.is_dir() else []):
+        data_subdir = tap_dir / "data"
+        if not data_subdir.is_dir():
+            continue
+        for pat in data_patterns:
+            for data_file in data_subdir.glob(pat):
+                rel = f"{tap_dir.name}/data/{data_file.name}"
+                h = hashlib.sha256()
+                try:
+                    with data_file.open("rb") as fh:
+                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    data_file_hashes[rel] = h.hexdigest()[:16]
+                except OSError:
+                    continue
+
     return {
         "git_sha": safe_git_sha(project_root),
         "git_dirty": safe_git_dirty(project_root),
@@ -186,4 +208,5 @@ def build_run_manifest(project_root: Path) -> dict[str, Any]:
         "code_files": fp["files"],
         "tap_versions": tap_versions,
         "data_manifest_checksum": data_checksum,
+        "data_file_hashes": data_file_hashes,
     }
