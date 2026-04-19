@@ -175,7 +175,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (133 total)
+### MCP Tools (136 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -236,6 +236,13 @@ Taps are git repos containing plugins with `plugin.yaml` manifests. Install copi
 `tree_pareto` — General-purpose Pareto frontier query for any search tree.
 
 Candidates are stored as Python files under `.crucible/search_trees/{tree}/candidates/{node_id}.py`; domain specs ship as a `domain_specs` tap plugin type. See `docs/harness-optimization.md` and `.crucible/taps/meta-harness/` for the workflow and bundled templates.
+
+**Tier 13 — Eval Watcher (auto-eval daemon, 3 tools):**
+`eval_watch_start(project_name, interval=300)` — start a daemon that polls running pods every `interval` seconds, SCPs new checkpoints to `.crucible/eval_watch_ckpts/`, and runs each script in the project's `eval_suite:` block on each new ckpt.
+`eval_watch_status(recent=10)` — current daemon state + last N evaluation rows.
+`eval_watch_stop()` — halt the daemon.
+
+Each project YAML can declare an `eval_suite:` block listing scripts to run on every checkpoint. Each script must accept `--checkpoint <path>` and `--out <json_path>`. Results land in `.crucible/eval_watch.jsonl` (append-only, SHA-deduplicated). State persists across Crucible restarts. See `docs/eval-watcher.md` for usage, schema, and debugging.
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 

@@ -4912,6 +4912,43 @@ def tree_pareto(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+# ─── Eval watcher (auto-eval daemon for running pods) ──────────────────────
+
+def eval_watch_start(args: dict[str, Any]) -> dict[str, Any]:
+    """Start the eval-watcher daemon for a project."""
+    try:
+        from crucible.runner import eval_watcher
+        return eval_watcher.start(
+            project_name=args["project_name"],
+            interval=int(args.get("interval", 300)),
+            remote_pattern=args.get(
+                "remote_pattern",
+                "/workspace/project/checkpoints/*.pt",
+            ),
+            env=args.get("env") or None,
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def eval_watch_stop(args: dict[str, Any]) -> dict[str, Any]:
+    """Stop the eval-watcher daemon."""
+    try:
+        from crucible.runner import eval_watcher
+        return eval_watcher.stop()
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def eval_watch_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Return current state + most recent N eval rows."""
+    try:
+        from crucible.runner import eval_watcher
+        return eval_watcher.status(recent=int(args.get("recent", 10)))
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Fleet status & lifecycle
     "get_fleet_status": get_fleet_status,
@@ -5072,4 +5109,8 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "harness_frontier": harness_frontier,
     "harness_evolution_log": harness_evolution_log,
     "tree_pareto": tree_pareto,
+    # Eval watcher (auto-eval daemon)
+    "eval_watch_start": eval_watch_start,
+    "eval_watch_stop": eval_watch_stop,
+    "eval_watch_status": eval_watch_status,
 }

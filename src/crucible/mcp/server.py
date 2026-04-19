@@ -2685,6 +2685,78 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="eval_watch_start",
+        description=(
+            "Start the auto-eval daemon for a project. Polls running pods every "
+            "`interval` seconds, SCPs new checkpoints from `remote_pattern`, and "
+            "runs each script in the project's `eval_suite:` block on each new ckpt. "
+            "Idempotent: same checkpoint+script never runs twice (SHA-tracked).\n\n"
+            "REQUIRES: project YAML must contain an `eval_suite:` block (list of "
+            "{script, args}). Pods must be reachable via the local SSH key.\n"
+            "RETURNS: {status: 'started'|'already_running', state, suite_size}\n"
+            "NEXT: eval_watch_status to inspect progress, eval_watch_stop to halt."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Project spec name (without .yaml).",
+                },
+                "interval": {
+                    "type": "integer",
+                    "description": "Seconds between polls. Default 300.",
+                    "default": 300,
+                },
+                "remote_pattern": {
+                    "type": "string",
+                    "description": (
+                        "Glob on the pod for checkpoints to pull. "
+                        "Default `/workspace/project/checkpoints/*.pt`."
+                    ),
+                    "default": "/workspace/project/checkpoints/*.pt",
+                },
+                "env": {
+                    "type": "object",
+                    "description": "Extra env vars passed to every eval script.",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["project_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="eval_watch_stop",
+        description=(
+            "Stop the auto-eval daemon and wait for the in-flight poll to finish.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {status: 'stopped'|'not_running', state}"
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="eval_watch_status",
+        description=(
+            "Return the current state of the auto-eval daemon plus the most recent "
+            "evaluation rows from `.crucible/eval_watch.jsonl`.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {state: {running, project, last_poll_at, total_runs, ...}, "
+            "recent: [{label, script, ckpt_sha, ok, elapsed_s, result, ran_at}]}"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "recent": {
+                    "type": "integer",
+                    "description": "How many recent rows to include. Default 10.",
+                    "default": 10,
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
