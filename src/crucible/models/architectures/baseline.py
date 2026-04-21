@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import torch
 from torch import Tensor, nn
 
 from crucible.models.base import TiedEmbeddingLM
 from crucible.models.registry import register_model, register_schema
+from crucible.core.types import ArgsNamespace
 from crucible.models.components.attention import Block, _parse_block_pattern
 from crucible.models.components.gate import SmearGate
 from crucible.models.components.hash_embed import BigramHash, TrigramHash
@@ -115,7 +115,7 @@ class BaselineGPT(TiedEmbeddingLM):
         return x
 
 
-def _build_baseline(args: Any) -> BaselineGPT:
+def _build_baseline(args: ArgsNamespace) -> BaselineGPT:
     common = dict(
         vocab_size=args.vocab_size,
         tie_embeddings=args.tie_embeddings,

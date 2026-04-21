@@ -27,6 +27,11 @@ from typing import Any
 
 from crucible.core.log import log_warn
 from crucible.core.plugin_registry import PluginRegistry
+from crucible.core.types import JsonDict
+
+# Metrics dict: keys are metric names, values are scalars (float, int)
+# or occasionally string tags.
+MetricsPayload = dict[str, float | int | str]
 
 LOGGER_REGISTRY = PluginRegistry("logger")
 
@@ -39,7 +44,7 @@ class TrainingLogger(ABC):
     """Interface for training logging backends."""
 
     @abstractmethod
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: MetricsPayload, *, step: int | None = None) -> None:
         """Log a dict of metrics at an optional step."""
 
     @abstractmethod
@@ -55,9 +60,9 @@ class ConsoleLogger(TrainingLogger):
     """Prints metrics to stdout."""
 
     def __init__(self, **kwargs: Any) -> None:
-        self.prefix = kwargs.get("prefix", "")
+        self.prefix: str = kwargs.get("prefix", "")
 
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: MetricsPayload, *, step: int | None = None) -> None:
         parts = [f"{k}={v}" for k, v in sorted(metrics.items())]
         line = " ".join(parts)
         if step is not None:
@@ -83,10 +88,10 @@ class JsonlLogger(TrainingLogger):
         self._closed = False
         atexit.register(self.finish)
 
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: MetricsPayload, *, step: int | None = None) -> None:
         if self._closed:
             return
-        entry: dict[str, Any] = {"ts": time.time()}
+        entry: JsonDict = {"ts": time.time()}
         if step is not None:
             entry["step"] = step
         entry.update(metrics)
@@ -105,7 +110,7 @@ class JsonlLogger(TrainingLogger):
 class WandbLoggerAdapter(TrainingLogger):
     """Adapter wrapping the existing WandbLogger for the registry interface."""
 
-    def __init__(self, *, run_id: str = "", config: dict[str, Any] | None = None, **kwargs: Any) -> None:
+    def __init__(self, *, run_id: str = "", config: JsonDict | None = None, **kwargs: Any) -> None:
         from crucible.runner.wandb_logger import WandbLogger
         self._inner = WandbLogger.create(
             run_id=run_id,
@@ -113,7 +118,7 @@ class WandbLoggerAdapter(TrainingLogger):
             backend=kwargs.get("backend", "generic"),
         )
 
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: MetricsPayload, *, step: int | None = None) -> None:
         if self._inner.enabled:
             self._inner.log(metrics, step=step)
 
@@ -132,7 +137,7 @@ class MultiLogger(TrainingLogger):
     def __init__(self, loggers: list[TrainingLogger]) -> None:
         self.loggers = loggers
 
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: MetricsPayload, *, step: int | None = None) -> None:
         for logger in self.loggers:
             logger.log(metrics, step=step)
 

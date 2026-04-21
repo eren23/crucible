@@ -2,7 +2,36 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeAlias, TypedDict
+from typing import Any, Protocol, TypeAlias, TypedDict, runtime_checkable
+
+
+# ---------------------------------------------------------------------------
+# JSON types
+# ---------------------------------------------------------------------------
+
+# Recursive type for values that can be represented in JSON.
+# Used in place of ``Any`` wherever data flows through JSON serialization
+# (YAML configs, JSONL records, API responses, etc.).
+JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+
+# Convenience alias for the most common dict shape in Crucible: a string-keyed
+# mapping with JSON-representable values.
+JsonDict: TypeAlias = dict[str, JsonValue]
+
+
+# ---------------------------------------------------------------------------
+# Model / namespace types
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class ArgsNamespace(Protocol):
+    """Protocol for argparse-style namespace objects used by model builders.
+
+    Model factories receive ``args`` with attributes like ``model_dim``,
+    ``num_layers``, ``vocab_size``, etc.  This protocol captures the
+    duck-typing contract without requiring a specific class.
+    """
+    def __getattr__(self, name: str) -> Any: ...
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +138,7 @@ class NodeRecord(TypedDict, total=False):
     """A compute node in the fleet (pod, VM, bare metal)."""
     name: str
     node_id: str
-    pod_id: str                 # alias of node_id for backward compat
+    pod_id: str                 # RunPod API pod ID (equals node_id for RunPod provider)
     gpu: str
     gpu_count: int
     interruptible: bool

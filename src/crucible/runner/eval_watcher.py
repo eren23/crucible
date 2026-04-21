@@ -34,11 +34,14 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import CrucibleError
 from crucible.core.io import atomic_write_json
 from crucible.core.log import utc_now_iso
+
+if TYPE_CHECKING:
+    from crucible.core.types import NodeRecord
 
 
 class EvalWatcherError(CrucibleError):
@@ -132,7 +135,7 @@ def _sha256_of_file(path: Path, chunk: int = 1 << 16) -> str:
     return h.hexdigest()[:16]
 
 
-def _ssh_cmd(node: dict[str, Any], remote_cmd: str, timeout: int = 15) -> str:
+def _ssh_cmd(node: NodeRecord, remote_cmd: str, timeout: int = 15) -> str:
     host = node.get("ssh_host")
     port = node.get("ssh_port")
     user = node.get("user", "root")
@@ -153,7 +156,7 @@ def _ssh_cmd(node: dict[str, Any], remote_cmd: str, timeout: int = 15) -> str:
         return ""
 
 
-def _scp_pull(node: dict[str, Any], remote_path: str, local_path: Path,
+def _scp_pull(node: NodeRecord, remote_path: str, local_path: Path,
               timeout: int = 60) -> bool:
     host = node.get("ssh_host")
     port = node.get("ssh_port")
@@ -175,7 +178,7 @@ def _scp_pull(node: dict[str, Any], remote_path: str, local_path: Path,
         return False
 
 
-def _list_remote_checkpoints(node: dict[str, Any], pattern: str) -> list[str]:
+def _list_remote_checkpoints(node: NodeRecord, pattern: str) -> list[str]:
     cmd = f"ls {shlex.quote(pattern)} 2>/dev/null || true"
     out = _ssh_cmd(node, cmd)
     return [line.strip() for line in out.splitlines() if line.strip()]

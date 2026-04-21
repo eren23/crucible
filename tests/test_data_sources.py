@@ -123,8 +123,8 @@ class TestDataPipeline:
                 )
 
             def validate(self):
-                from crucible.core.data_sources import ValidationResult
-                return ValidationResult(valid=True, errors=[], warnings=[])
+                from crucible.core.data_sources import DataValidationResult
+                return DataValidationResult(valid=True, errors=[], warnings=[])
 
         instance = DummySource(name="dummy", config={})
         pipeline.register_source("dummy", instance)

@@ -10,10 +10,14 @@ import copy
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import ComposerError
-from crucible.core.types import PluginFactory
+from crucible.core.types import ArgsNamespace, JsonValue, PluginFactory
+
+if TYPE_CHECKING:
+    import torch
+    from torch import Tensor, nn
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +44,7 @@ def _coerce_value(raw: str) -> bool | int | float | str:
     return raw
 
 
-def _resolve_value(value: Any, variables: dict[str, Any]) -> Any:
+def _resolve_value(value: JsonValue, variables: dict[str, JsonValue]) -> JsonValue:
     """Resolve template ``{VAR:default}`` references in *value*.
 
     - Strings are scanned for ``{VAR}`` or ``{VAR:default}`` patterns.
@@ -91,15 +95,15 @@ class ArchitectureSpec:
     name: str
     version: int = 1
     base: str = "tied_embedding_lm"
-    embedding: dict = field(default_factory=dict)
-    block: dict = field(default_factory=dict)
-    stack: dict = field(default_factory=dict)
-    transform: dict | None = None
-    init: dict | None = None
-    augmentations: dict | None = None
+    embedding: dict[str, JsonValue] = field(default_factory=dict)
+    block: dict[str, JsonValue] = field(default_factory=dict)
+    stack: dict[str, JsonValue] = field(default_factory=dict)
+    transform: dict[str, JsonValue] | None = None
+    init: dict[str, JsonValue] | None = None
+    augmentations: dict[str, JsonValue] | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> ArchitectureSpec:
+    def from_dict(cls, d: dict[str, JsonValue]) -> ArchitectureSpec:
         """Create an ArchitectureSpec from a parsed YAML dict."""
         if "name" not in d:
             raise ComposerError("Architecture spec must include a 'name' field")
@@ -139,28 +143,28 @@ class ResolvedSpec:
     name: str
     version: int
     base: str
-    embedding: dict
-    block: dict
-    stack: dict
-    transform: dict | None
-    init: dict | None
-    augmentations: dict | None
+    embedding: dict[str, JsonValue]
+    block: dict[str, JsonValue]
+    stack: dict[str, JsonValue]
+    transform: dict[str, JsonValue] | None
+    init: dict[str, JsonValue] | None
+    augmentations: dict[str, JsonValue] | None
 
 
 class SpecResolver:
     """Resolves template variables in an ArchitectureSpec against an args namespace."""
 
-    def __init__(self, spec: ArchitectureSpec, args: Any):
+    def __init__(self, spec: ArchitectureSpec, args: ArgsNamespace):
         self.spec = spec
         self.args = args
 
-    def _build_variables(self) -> dict[str, Any]:
+    def _build_variables(self) -> dict[str, JsonValue]:
         """Extract template variables from the args namespace.
 
         Converts attribute names to uppercase for matching against
         ``{VAR_NAME}`` patterns in specs.
         """
-        variables: dict[str, Any] = {}
+        variables: dict[str, JsonValue] = {}
         for attr in dir(self.args):
             if attr.startswith("_"):
                 continue
@@ -232,15 +236,23 @@ def _ensure_augmentations() -> None:
 class StackPattern:
     """Base class for stack wiring patterns."""
 
-    def build(self, resolved: ResolvedSpec, args: Any) -> dict:
+    def build(self, resolved: ResolvedSpec, args: ArgsNamespace) -> dict[str, Any]:
         """Return extra nn.Modules/Parameters the pattern needs.
 
         Returns a dict of name -> nn.Module/nn.Parameter to be registered
-        on the parent model.
+        on the parent model.  The values are heterogeneous (Parameters,
+        Modules, plain ints) so ``Any`` is the correct value type here.
         """
         raise NotImplementedError
 
-    def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
+    def forward(
+        self,
+        x: Tensor,
+        x0: Tensor,
+        blocks: nn.ModuleList,
+        extra: dict[str, Any],
+        lora: Any = None,  # LoRA adapter — optional, structurally opaque
+    ) -> Tensor:
         """Execute the stack forward pass.
 
         *x* is the current hidden state, *x0* is the initial embeddings,
@@ -253,10 +265,10 @@ class StackPattern:
 class SequentialPattern(StackPattern):
     """Simple linear pass through all blocks."""
 
-    def build(self, resolved: ResolvedSpec, args: Any) -> dict:
+    def build(self, resolved: ResolvedSpec, args: ArgsNamespace) -> dict[str, Any]:
         return {}
 
-    def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
+    def forward(self, x: Tensor, x0: Tensor, blocks: nn.ModuleList, extra: dict[str, Any], lora: Any = None) -> Tensor:
         for i, block in enumerate(blocks):
             qd = lora.q_loras[i] if lora else None
             vd = lora.v_loras[i] if lora else None
@@ -267,7 +279,7 @@ class SequentialPattern(StackPattern):
 class EncoderDecoderSkipPattern(StackPattern):
     """Encoder-decoder with learned skip connections (from baseline.py)."""
 
-    def build(self, resolved: ResolvedSpec, args: Any) -> dict:
+    def build(self, resolved: ResolvedSpec, args: ArgsNamespace) -> dict[str, Any]:
         import torch
         from torch import nn
 
@@ -281,7 +293,7 @@ class EncoderDecoderSkipPattern(StackPattern):
             "_num_decoder": num_decoder,
         }
 
-    def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
+    def forward(self, x: Tensor, x0: Tensor, blocks: nn.ModuleList, extra: dict[str, Any], lora: Any = None) -> Tensor:
         num_encoder = extra["_num_encoder"]
         num_decoder = extra["_num_decoder"]
         skip_weights = extra["skip_weights"]
@@ -311,7 +323,7 @@ class EncoderDecoderSkipPattern(StackPattern):
 class LoopedPattern(StackPattern):
     """Looped iteration over shared blocks with step scales (from looped.py)."""
 
-    def build(self, resolved: ResolvedSpec, args: Any) -> dict:
+    def build(self, resolved: ResolvedSpec, args: ArgsNamespace) -> dict[str, Any]:
         import torch
         from torch import nn
 
@@ -326,7 +338,7 @@ class LoopedPattern(StackPattern):
             "_logical_steps": logical_steps,
         }
 
-    def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
+    def forward(self, x: Tensor, x0: Tensor, blocks: nn.ModuleList, extra: dict[str, Any], lora: Any = None) -> Tensor:
         logical_steps = extra["_logical_steps"]
         step_scales = extra["step_scales"]
         num_blocks = len(blocks)
@@ -339,7 +351,7 @@ class LoopedPattern(StackPattern):
 class PrefixMemoryStackPattern(StackPattern):
     """Sequential with step scales for PrefixMemoryBlock (from prefix_memory.py)."""
 
-    def build(self, resolved: ResolvedSpec, args: Any) -> dict:
+    def build(self, resolved: ResolvedSpec, args: ArgsNamespace) -> dict[str, Any]:
         import torch
         from torch import nn
 
@@ -350,7 +362,7 @@ class PrefixMemoryStackPattern(StackPattern):
             "_num_layers": num_layers,
         }
 
-    def forward(self, x: Any, x0: Any, blocks: Any, extra: dict, lora: Any = None) -> Any:
+    def forward(self, x: Tensor, x0: Tensor, blocks: nn.ModuleList, extra: dict[str, Any], lora: Any = None) -> Tensor:
         step_scales = extra["step_scales"]
         for step, block in enumerate(blocks):
             x_next = block(x, x0)
@@ -380,16 +392,16 @@ class ComposedArchitecture:
     docstrings while keeping the actual model as a proper ``nn.Module``.
     """
 
-    def __new__(cls, resolved: ResolvedSpec, args: Any) -> Any:
+    def __new__(cls, resolved: ResolvedSpec, args: ArgsNamespace) -> nn.Module:
         return _build_composed_model(resolved, args)
 
 
 def _build_blocks(
     resolved_spec: ResolvedSpec,
-    build_args: Any,
+    build_args: ArgsNamespace,
     pattern_name: str,
     model_dim: int,
-) -> tuple[Any, int]:
+) -> tuple[nn.ModuleList, int]:
     """Build a ModuleList of blocks from the resolved spec.
 
     Returns ``(blocks, num_blocks_built)`` where *blocks* is a
@@ -468,12 +480,12 @@ def _build_blocks(
 
 
 def _build_stack_extras(
-    model: Any,
+    model: nn.Module,
     pattern: StackPattern,
     pattern_name: str,
     resolved_spec: ResolvedSpec,
-    build_args: Any,
-) -> dict:
+    build_args: ArgsNamespace,
+) -> dict[str, Any]:
     """Build and register stack pattern extras on *model*."""
     from torch import nn
 
@@ -490,7 +502,7 @@ def _build_stack_extras(
     return stack_extra
 
 
-def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
+def _build_composed_model(resolved: ResolvedSpec, args: ArgsNamespace) -> nn.Module:
     """Build a composed model from a resolved spec + args namespace."""
     import math
     import torch
@@ -515,7 +527,7 @@ def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
         from crucible.models.components.norm import RMSNorm
 
         class _ComposedGenericModel(CrucibleModel):
-            def __init__(self, resolved_spec: ResolvedSpec, build_args: Any):
+            def __init__(self, resolved_spec: ResolvedSpec, build_args: ArgsNamespace):
                 super().__init__()
                 self._resolved = resolved_spec
                 self._pattern = pattern
@@ -562,8 +574,7 @@ def _build_composed_model(resolved: ResolvedSpec, args: Any) -> Any:
 
     # ----- Default: TiedEmbeddingLM path -----
     class _ComposedModel(TiedEmbeddingLM):
-        def __init__(self, resolved_spec: ResolvedSpec, build_args: Any):
-            # Extract embedding params
+        def __init__(self, resolved_spec: ResolvedSpec, build_args: ArgsNamespace):
             emb = resolved_spec.embedding
             vocab_size = emb.get("vocab_size", getattr(build_args, "vocab_size", 50304))
             model_dim = emb.get("model_dim", getattr(build_args, "model_dim", 512))
@@ -733,7 +744,7 @@ def register_from_spec(
 
     actual_name = name or spec.name
 
-    def _factory(args: Any) -> Any:
+    def _factory(args: ArgsNamespace) -> nn.Module:
         resolver = SpecResolver(spec, args)
         resolved = resolver.resolve()
         return ComposedArchitecture(resolved, args)

@@ -23,6 +23,7 @@ from typing import Any, TYPE_CHECKING
 
 from crucible.core.io import _json_ready, read_jsonl
 from crucible.core.log import log_warn
+from crucible.core.types import JsonDict
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectConfig
@@ -34,11 +35,11 @@ class WandbLogger:
 
     def __init__(
         self,
-        run: Any | None = None,
+        run: object | None = None,
         enabled: bool = False,
         error: str | None = None,
     ):
-        self.run = run
+        self.run = run  # wandb.Run instance; typed as object to avoid hard dep
         self.enabled = enabled
         self.error = error
 
@@ -54,7 +55,7 @@ class WandbLogger:
         cls,
         *,
         run_id: str,
-        config: dict[str, Any],
+        config: JsonDict,
         backend: str,
         tracker: "RunTracker | None" = None,
         job_type: str | None = None,
@@ -131,7 +132,7 @@ class WandbLogger:
             )
         return logger
 
-    def log(self, metrics: dict[str, Any], *, step: int | None = None) -> None:
+    def log(self, metrics: JsonDict, *, step: int | None = None) -> None:
         """Log metrics to W&B. No-op if not enabled."""
         if not self.enabled or self.run is None:
             return
@@ -143,7 +144,7 @@ class WandbLogger:
         else:
             self.run.log(payload, step=step)
 
-    def update_summary(self, values: dict[str, Any]) -> None:
+    def update_summary(self, values: JsonDict) -> None:
         """Update the W&B run summary. No-op if not enabled."""
         if not self.enabled or self.run is None:
             return
@@ -172,7 +173,7 @@ class WandbLogger:
             self.run.summary["crucible_findings"] = findings
         return True
 
-    def update_config(self, extra: dict[str, Any]) -> None:
+    def update_config(self, extra: JsonDict) -> None:
         """Update W&B run config with additional crucible metadata."""
         if not self.enabled or self.run is None:
             return
@@ -262,46 +263,11 @@ def _resolve_wandb_url(run_id: str, config: ProjectConfig) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# External project WandB metric fetch
-# ---------------------------------------------------------------------------
-
-def fetch_wandb_metrics(
-    project: str,
-    entity: str | None = None,
-    run_name: str | None = None,
-) -> dict[str, float]:
-    """Fetch final metrics from WandB API for a completed run.
-
-    Returns a dict of metric names to float values from the run summary.
-    Returns empty dict if wandb is unavailable or no matching run is found.
-    """
-    try:
-        import wandb
-    except ImportError:
-        return {}
-
-    try:
-        run = _fetch_wandb_run(project=project, entity=entity, run_name=run_name)
-        if run is None:
-            return {}
-        result: dict[str, float] = {}
-        for key, val in run.summary.items():
-            if key.startswith("_"):
-                continue
-            if isinstance(val, (int, float)):
-                result[key] = float(val)
-        return result
-    except Exception as exc:
-        log_warn(f"W&B metric fetch failed for project={project!r}: {exc}")
-        return {}
-
-
 def fetch_wandb_run_info(
     project: str,
     entity: str | None = None,
     run_name: str | None = None,
-) -> dict[str, Any]:
+) -> JsonDict:
     """Fetch metrics + URL for a completed W&B run."""
     try:
         run = _fetch_wandb_run(project=project, entity=entity, run_name=run_name)
@@ -328,8 +294,12 @@ def _fetch_wandb_run(
     project: str,
     entity: str | None = None,
     run_name: str | None = None,
-) -> Any | None:
-    """Fetch a single W&B run, preferring the supplied display name."""
+) -> object | None:
+    """Fetch a single W&B run, preferring the supplied display name.
+
+    Returns a ``wandb.apis.public.Run`` instance, typed as ``object``
+    to avoid a hard dependency on the wandb package.
+    """
     try:
         import wandb
     except ImportError:

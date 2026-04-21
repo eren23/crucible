@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from crucible.core.redact import redact_secrets
+from crucible.core.types import JsonDict, JsonValue
 
 
 class SessionTracer:
@@ -28,12 +29,12 @@ class SessionTracer:
     def record(
         self,
         tool: str,
-        arguments: dict[str, Any],
-        result: Any,
+        arguments: JsonDict,
+        result: JsonValue,
         duration_ms: float,
         status: str = "ok",
         error: str | None = None,
-        identifiers: dict[str, Any] | None = None,
+        identifiers: dict[str, list[str]] | None = None,
     ) -> None:
         """Append a redacted tool call to the trace JSONL."""
         self._seq += 1

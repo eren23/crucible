@@ -97,7 +97,7 @@ def _materialize_global_architectures(project_root: Path) -> None:
                 if src_file.name.startswith("_"):
                     continue
                 shutil.copy2(src_file, target_dir / src_file.name)
-    except Exception as exc:
+    except (OSError, ValueError, KeyError, AttributeError, shutil.Error) as exc:
         log_warn(f"Hub architecture materialization failed (non-fatal): {exc}")
 
 
@@ -119,8 +119,8 @@ def _resolve_step_timeout(label: str, explicit: int | None) -> int | None:
     try:
         cfg = load_config()
         timeouts = cfg.fleet.ssh.step_timeouts
-    except Exception:
-        # Config missing or unreadable — fall back to the hard-coded default
+    except (OSError, AttributeError, KeyError, ValueError):
+        # Config missing, unreadable, or missing fleet.ssh — fall back to hard-coded default
         return None
     if label in timeouts:
         return int(timeouts[label])
@@ -135,7 +135,7 @@ def bootstrap_step(
     command: str,
     *,
     timeout: int | None = None,
-) -> Any:
+) -> subprocess.CompletedProcess[str]:
     """Run one labelled bootstrap command on a node.
 
     ``timeout`` defaults to the per-step value from
@@ -155,7 +155,7 @@ def _record_step(
     fn: Callable[[], Any],
     *,
     required: bool = True,
-) -> Any:
+) -> Any:  # return type matches fn() — intentionally generic
     """Run *fn* and record its outcome in ``node["bootstrap_steps"]``.
 
     Every bootstrap step goes through this helper so we can surface
@@ -545,10 +545,7 @@ def bootstrap_node(
                     f"data source status"
                 )
             else:
-                # Resolve download command: runtime override > config > legacy
-                # fineweb default (only when ``data.source=='huggingface'`` and
-                # ``data.variant`` looks like a fineweb variant, i.e. when this
-                # is actually the Parameter Golf workflow).
+                # Resolve download command: runtime override > config.
                 download_cmd = (
                     data_download_cmd
                     or (proj_cfg.data.probe.download_command or "").strip()

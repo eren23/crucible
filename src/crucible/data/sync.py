@@ -134,7 +134,6 @@ def probe_data_on_node(
         log_warn(f"SSH probe failed for {node.get('name', ssh_host)}: {result.stderr.strip()}")
         return {"reachable": False, "error": result.stderr.strip(), "datasets": {}}
 
-    # Parse the file listing.
     datasets: dict[str, dict[str, int]] = {}
     total_files = 0
 

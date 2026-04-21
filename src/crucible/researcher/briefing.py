@@ -63,7 +63,6 @@ def _recent_experiments(config: ProjectConfig, limit: int = 10) -> list[dict[str
         from crucible.analysis.results import merged_results
 
         all_results = merged_results(config)
-        # Sort by timestamp descending
         all_results.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
         recent = all_results[:limit]
         entries = []

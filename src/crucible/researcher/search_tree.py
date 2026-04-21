@@ -620,11 +620,15 @@ class SearchTree:
     # ------------------------------------------------------------------
 
     def _get_metrics(self) -> list[dict[str, str]]:
-        """Return the list of tracked metrics, with legacy-tree fallback."""
+        """Return the list of tracked metrics.
+
+        Trees created before multi-metric support store only
+        ``primary_metric`` / ``metric_direction``; reconstruct the
+        ``metrics`` list from those fields when absent.
+        """
         metrics = self.meta.get("metrics")
         if metrics:
             return list(metrics)
-        # Backward compat: reconstruct from primary_metric/metric_direction.
         return [
             {
                 "name": self.meta.get("primary_metric", "val_bpb"),
@@ -651,7 +655,7 @@ class SearchTree:
             if node.get("status") != "completed":
                 continue
             values = node.get("result_metrics") or {}
-            # Fall back to primary-metric-only vectors for legacy nodes.
+            # Single-metric nodes: populate vector from result_metric.
             if not values and node.get("result_metric") is not None and len(names) == 1:
                 values = {names[0]: node["result_metric"]}
             if any(n not in values for n in names):
@@ -696,7 +700,7 @@ class SearchTree:
             for node in completed:
                 values = node.get("result_metrics") or {}
                 if name not in values and node.get("result_metric") is not None and len(names) == 1:
-                    # Legacy single-metric tree
+                    # Single-metric tree: use result_metric as the sole value.
                     v = node["result_metric"]
                 else:
                     v = values.get(name)

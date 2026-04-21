@@ -16,7 +16,15 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
+    from torch import Tensor
+
+    from crucible.models.base import CrucibleModel
+    from crucible.training.data_adapters import DataAdapter
+    from crucible.training.objectives import TrainingObjective
 
 # Self-bootstrap: ensure src/ is on path when invoked directly
 _src = str(Path(__file__).resolve().parent.parent.parent)
@@ -264,14 +272,14 @@ def run_generic_training() -> None:
 
 
 def _resolve_step_result(
-    model: Any,
-    batch: dict[str, Any],
+    model: CrucibleModel,
+    batch: dict[str, Tensor],
     *,
-    objective: Any,
+    objective: TrainingObjective | None,
     objective_name: str,
     objective_build_error: Exception | None,
     stage: str,
-) -> dict[str, Any]:
+) -> dict[str, Tensor]:
     """Return a step result dict guaranteed to contain a ``loss`` entry."""
     if hasattr(model, f"{stage}_step"):
         step_fn = getattr(model, f"{stage}_step")
@@ -308,11 +316,11 @@ def _resolve_step_result(
 # ---------------------------------------------------------------------------
 
 def _run_validation(
-    model: Any,
-    objective: Any,
-    data_adapter: Any,
-    device: Any,
-    args: Any,
+    model: CrucibleModel,
+    objective: TrainingObjective | None,
+    data_adapter: DataAdapter,
+    device: torch.device,
+    args: object,
     *,
     objective_name: str,
     objective_build_error: Exception | None,
@@ -368,15 +376,15 @@ def _run_validation(
 # ---------------------------------------------------------------------------
 
 def _get_batch(
-    data_adapter: Any,
-    model: Any,
-    device: Any,
-    args: Any,
+    data_adapter: DataAdapter,
+    model: CrucibleModel,
+    device: torch.device,
+    args: object,
     *,
     batch_size: int = 8,
     image_size: int = 32,
     num_frames: int = 4,
-) -> dict[str, Any]:
+) -> dict[str, Tensor]:
     """Get a batch from the configured data adapter."""
     if data_adapter is None:
         raise RuntimeError("No data adapter is configured for generic training.")
@@ -392,39 +400,6 @@ def _get_batch(
         raise RuntimeError(
             f"{type(data_adapter).__name__}.next_batch() failed: {exc}"
         ) from exc
-
-
-def _get_dummy_batch(
-    model: Any,
-    device: Any,
-    args: Any,
-    batch_size: int = 8,
-    image_size: int = 32,
-    num_frames: int = 4,
-) -> dict[str, Any]:
-    """Build a minimal batch dict for the model's modality."""
-    import torch
-
-    modality = getattr(model, "modality", lambda: "generic")()
-    if modality == "lm":
-        seq_len = getattr(args, "seq_len", 128)
-        vocab = getattr(args, "vocab_size", 50257)
-        input_ids = torch.randint(0, vocab, (1, seq_len), device=device)
-        target_ids = torch.randint(0, vocab, (1, seq_len), device=device)
-        return {"input_ids": input_ids, "target_ids": target_ids}
-    if modality in ("vision", "diffusion"):
-        channels = getattr(args, "image_channels", 3)
-        images = torch.randn(batch_size, channels, image_size, image_size, device=device)
-        return {"images": images}
-    if modality == "world_model":
-        channels = getattr(args, "image_channels", 3)
-        frames = torch.randn(
-            batch_size, num_frames, channels, image_size, image_size, device=device
-        )
-        actions = torch.randn(batch_size, num_frames - 1, 2, device=device)
-        return {"frames": frames, "actions": actions}
-    # Generic fallback
-    return {}
 
 
 if __name__ == "__main__":

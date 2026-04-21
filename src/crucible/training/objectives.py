@@ -5,7 +5,16 @@ interface so the generic training backend can swap objectives via config.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import torch
+
+# Dicts passed to/from objectives contain torch.Tensor values.  We use
+# ``dict[str, Any]`` because some entries may be non-tensor metadata or
+# because the Tensor import is unavailable at import time.  The runtime
+# contract is: ``predictions["logits"]`` is always a Tensor, etc.
+TensorDict = dict[str, Any]
 
 
 class TrainingObjective:
@@ -14,8 +23,8 @@ class TrainingObjective:
     name: str = ""
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         """Compute loss from predictions and targets.
 
         Returns a dict with at least a ``'loss'`` key (a scalar tensor).
@@ -37,8 +46,8 @@ class CrossEntropyObjective(TrainingObjective):
         self.label_smoothing = label_smoothing
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         import torch.nn.functional as F
 
         logits = predictions["logits"]
@@ -62,8 +71,8 @@ class MSEObjective(TrainingObjective):
     name = "mse"
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         import torch.nn.functional as F
 
         loss = F.mse_loss(predictions["output"], targets["target"])
@@ -79,8 +88,8 @@ class KLDivergenceObjective(TrainingObjective):
         self.log_target = log_target
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         import torch.nn.functional as F
 
         loss = F.kl_div(
@@ -103,10 +112,10 @@ class CompositeObjective(TrainingObjective):
         self.objectives = objectives
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         total_loss = None
-        result: dict[str, Any] = {}
+        result: TensorDict = {}
         for weight, obj in self.objectives:
             sub = obj.compute(predictions, targets)
             sub_loss = sub["loss"]
@@ -138,8 +147,8 @@ class DiffusionLossObjective(TrainingObjective):
     name = "diffusion"
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         import torch.nn.functional as F
 
         noise_pred = predictions["noise_pred"]
@@ -177,8 +186,8 @@ class JEPAObjective(TrainingObjective):
         self.var_target = var_target
 
     def compute(
-        self, predictions: dict[str, Any], targets: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, predictions: TensorDict, targets: TensorDict
+    ) -> TensorDict:
         import torch
         import torch.nn.functional as F
 
@@ -217,7 +226,7 @@ def register_objective(name: str, cls: type["TrainingObjective"], *, source: str
     _OBJECTIVE_REGISTRY.register(name, cls, source=source)
 
 
-def build_objective(name: str, **kwargs: Any) -> "TrainingObjective":
+def build_objective(name: str, **kwargs: Any) -> TrainingObjective:
     """Instantiate a registered objective by name."""
     cls = _OBJECTIVE_REGISTRY.get(name)
     if cls is None:

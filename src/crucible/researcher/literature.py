@@ -164,7 +164,6 @@ def expand_query(query: str) -> list[str]:
             messages=[{"role": "user", "content": query}],
         )
         text = response.content[0].text.strip()
-        # Parse JSON array from response
         parsed = json.loads(text) if text.startswith("[") else json.loads(
             re.search(r"\[.*\]", text, re.DOTALL).group()  # type: ignore[union-attr]
         )
@@ -205,40 +204,6 @@ def multi_angle_search(
                 seen.add(pid)
                 all_papers.append(p)
     return all_papers[:limit]
-
-
-def get_paper_detail(paper_id: str) -> dict[str, Any] | None:
-    """Fetch single paper metadata."""
-    if not paper_id.strip():
-        return None
-    try:
-        from huggingface_hub import HfApi
-
-        api = HfApi()
-        p = api.paper_info(paper_id)
-        return _normalize_paper(p)
-    except ImportError:
-        pass
-    except _LITERATURE_FAILURES as exc:
-        log_warn(f"Paper detail fetch via huggingface_hub failed for {paper_id!r}: {exc}")
-    try:
-        url = f"https://huggingface.co/api/papers/{urllib.request.quote(paper_id)}"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
-        return {
-            "id": data.get("id", paper_id),
-            "title": data.get("title", ""),
-            "summary": (data.get("summary") or "")[:500],
-            "ai_summary": data.get("ai_summary", ""),
-            "upvotes": data.get("upvotes", 0),
-            "published_at": data.get("publishedAt", ""),
-            "github_repo": data.get("github_repo", ""),
-            "keywords": data.get("ai_keywords", []),
-        }
-    except _LITERATURE_FAILURES as exc:
-        log_warn(f"Paper detail fetch via HTTP API failed for {paper_id!r}: {exc}")
-        return None
 
 
 def format_literature_context(

@@ -149,7 +149,6 @@ class VersionStore:
         self._write_yaml(version_path, content)
         shutil.copy2(version_path, current_path)
 
-        # Update in-memory index
         self._index.setdefault(key, []).append(meta)
 
         return meta
@@ -258,7 +257,7 @@ class VersionStore:
                 text=True,
                 check=False,
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return None
         sha = proc.stdout.strip()
         return sha or None
@@ -307,5 +306,5 @@ class VersionStore:
             meta["git_committed"] = True
             meta["commit_sha"] = commit_sha
             return commit_sha
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             return None

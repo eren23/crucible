@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 from torch import Tensor, nn
 
+from crucible.core.types import ArgsNamespace
 from crucible.models.base import TiedEmbeddingLM
 from crucible.models.registry import register_model
 from crucible.models.components.attention import Block
@@ -48,7 +47,7 @@ class LoopedTransformerLM(TiedEmbeddingLM):
         return x
 
 
-def _build_looped(args: Any) -> LoopedTransformerLM:
+def _build_looped(args: ArgsNamespace) -> LoopedTransformerLM:
     common = dict(
         vocab_size=args.vocab_size,
         tie_embeddings=args.tie_embeddings,

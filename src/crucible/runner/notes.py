@@ -108,7 +108,6 @@ class NoteStore:
             "created_at": created_at,
         }
 
-        # Write .md file
         run_dir = self.notes_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         note_path = run_dir / f"{note_id}.md"

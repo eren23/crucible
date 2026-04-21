@@ -17,6 +17,11 @@ class _FakeMeta:
     primary = "val_loss"
 
 
+class _FakeWandb:
+    project = "test-project"
+    entity = "test-entity"
+
+
 class _FakeConfig:
     """Minimal stand-in for ProjectConfig used by tree tool handlers."""
 
@@ -25,6 +30,7 @@ class _FakeConfig:
         self.store_dir = ".crucible"
         self.metrics = _FakeMeta()
         self.nodes_file = "nodes.json"
+        self.wandb = _FakeWandb()
 
 
 def _patch_config(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
@@ -67,15 +73,15 @@ class TestTreeCreate:
         assert len(result["root_node_ids"]) == 2
         assert result["total_nodes"] == 2
 
-    def test_duplicate_tree_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_duplicate_tree_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create
+        from crucible.core.errors import SearchTreeError
 
         _patch_config(monkeypatch, tmp_path)
 
         tree_create({"name": "dup-tree"})
-        result = tree_create({"name": "dup-tree"})
-        assert "error" in result
-        assert "already exists" in result["error"]
+        with pytest.raises(SearchTreeError, match="already exists"):
+            tree_create({"name": "dup-tree"})
 
 
 # ---------------------------------------------------------------------------
@@ -100,13 +106,14 @@ class TestTreeGet:
         assert result["summary"]["total_nodes"] == 1
         assert "root" in result["ascii_tree"]
 
-    def test_nonexistent_tree_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_nonexistent_tree_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_get
+        from crucible.core.errors import SearchTreeError
 
         _patch_config(monkeypatch, tmp_path)
 
-        result = tree_get({"name": "no-such-tree"})
-        assert "error" in result
+        with pytest.raises(SearchTreeError):
+            tree_get({"name": "no-such-tree"})
 
 
 # ---------------------------------------------------------------------------
@@ -146,18 +153,19 @@ class TestTreeExpandNode:
         assert len(result["new_node_ids"]) == 2
         assert result["total_nodes"] == 3
 
-    def test_expand_nonexistent_node_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_expand_nonexistent_node_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create, tree_expand_node
+        from crucible.core.errors import SearchTreeError
 
         _patch_config(monkeypatch, tmp_path)
         tree_create({"name": "err-tree"})
 
-        result = tree_expand_node({
-            "name": "err-tree",
-            "parent_node_id": "nonexistent",
-            "children": [{"name": "c", "config": {}}],
-        })
-        assert "error" in result
+        with pytest.raises(SearchTreeError):
+            tree_expand_node({
+                "name": "err-tree",
+                "parent_node_id": "nonexistent",
+                "children": [{"name": "c", "config": {}}],
+            })
 
 
 # ---------------------------------------------------------------------------
@@ -250,10 +258,18 @@ class TestTreeList:
 
 
 class TestTreeEnqueuePending:
+    @staticmethod
+    def _patch_queue_contract(monkeypatch):
+        monkeypatch.setattr(
+            "crucible.mcp.tools._queue_contract_fields",
+            lambda config: {"execution_provider": "runpod", "contract_status": "valid", "wandb": {"project": "test"}},
+        )
+
     def test_enqueues_pending_nodes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create, tree_enqueue_pending
 
         _patch_config(monkeypatch, tmp_path)
+        self._patch_queue_contract(monkeypatch)
 
         create_res = tree_create({
             "name": "enq-tree",
@@ -263,8 +279,6 @@ class TestTreeEnqueuePending:
             ],
         })
 
-        # Mock enqueue_experiments to avoid filesystem queue side effects
-        # but still return properly shaped items
         call_log: list[Any] = []
 
         def fake_enqueue(queue_path, experiments, limit=0):
@@ -274,7 +288,6 @@ class TestTreeEnqueuePending:
                 for e in experiments
             ]
 
-        # Patch at the source module -- tree_enqueue_pending imports it locally
         monkeypatch.setattr(
             "crucible.fleet.queue.enqueue_experiments",
             fake_enqueue,
@@ -289,12 +302,12 @@ class TestTreeEnqueuePending:
         from crucible.mcp.tools import tree_create, tree_prune, tree_enqueue_pending
 
         _patch_config(monkeypatch, tmp_path)
+        self._patch_queue_contract(monkeypatch)
 
         create_res = tree_create({
             "name": "nopend-tree",
             "roots": [{"name": "r", "config": {}}],
         })
-        # Prune the only node
         tree_prune({
             "name": "nopend-tree",
             "node_id": create_res["root_node_ids"][0],

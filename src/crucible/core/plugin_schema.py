@@ -80,7 +80,7 @@ class ValidationIssue:
 
 
 @dataclass
-class ValidationResult:
+class ManifestValidationResult:
     """Aggregate result of validating one plugin manifest."""
     path: Path
     ok: bool
@@ -93,6 +93,10 @@ class ValidationResult:
     @property
     def warnings(self) -> list[ValidationIssue]:
         return [i for i in self.issues if i.severity == "warning"]
+
+
+#: Backward-compatible alias -- external code may still import the old name.
+ValidationResult = ManifestValidationResult
 
 
 def validate_manifest_dict(data: dict[str, Any]) -> list[ValidationIssue]:
@@ -221,10 +225,10 @@ def validate_manifest_dict(data: dict[str, Any]) -> list[ValidationIssue]:
     return issues
 
 
-def validate_manifest_file(path: Path) -> ValidationResult:
-    """Validate the plugin.yaml at *path*, returning a ValidationResult."""
+def validate_manifest_file(path: Path) -> ManifestValidationResult:
+    """Validate the plugin.yaml at *path*, returning a ManifestValidationResult."""
     if not path.exists():
-        return ValidationResult(
+        return ManifestValidationResult(
             path=path,
             ok=False,
             issues=[ValidationIssue("error", "<file>", f"does not exist: {path}")],
@@ -232,17 +236,17 @@ def validate_manifest_file(path: Path) -> ValidationResult:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
-        return ValidationResult(
+        return ManifestValidationResult(
             path=path,
             ok=False,
             issues=[ValidationIssue("error", "<yaml>", f"invalid YAML: {exc}")],
         )
     issues = validate_manifest_dict(raw)
     ok = not any(i.severity == "error" for i in issues)
-    return ValidationResult(path=path, ok=ok, issues=issues)
+    return ManifestValidationResult(path=path, ok=ok, issues=issues)
 
 
-def validate_tap_directory(root: Path) -> list[ValidationResult]:
+def validate_tap_directory(root: Path) -> list[ManifestValidationResult]:
     """Validate every ``plugin.yaml`` file discovered under *root*.
 
     Walks the tap repo recursively, skipping common cruft dirs
@@ -264,7 +268,7 @@ def validate_tap_directory(root: Path) -> list[ValidationResult]:
         "_manuscript",
         "findings",
     }
-    results: list[ValidationResult] = []
+    results: list[ManifestValidationResult] = []
     for manifest_path in sorted(root.rglob("plugin.yaml")):
         # Skip anything inside a blocked directory
         rel_parts = manifest_path.relative_to(root).parts

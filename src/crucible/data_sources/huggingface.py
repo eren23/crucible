@@ -12,9 +12,9 @@ from crucible.core.data_sources import (
     DataSourcePlugin,
     DataStatus,
     DataStatusResult,
+    DataValidationResult,
     PreparationResult,
     SearchResult,
-    ValidationResult,
     register_data_source,
 )
 
@@ -178,11 +178,11 @@ class HuggingFaceDataSource(DataSourcePlugin):
                 success=False, job_id=job_id, message=str(e), shards_downloaded=0
             )
 
-    def validate(self) -> ValidationResult:
+    def validate(self) -> DataValidationResult:
         """Validate HuggingFace data integrity."""
         manifest_local = self._get_manifest_local_path()
         if not manifest_local.exists():
-            return ValidationResult(valid=False, errors=["Manifest not found"], warnings=[])
+            return DataValidationResult(valid=False, errors=["Manifest not found"], warnings=[])
 
         errors = []
         warnings = []
@@ -190,7 +190,7 @@ class HuggingFaceDataSource(DataSourcePlugin):
         try:
             manifest = json.loads(manifest_local.read_text(encoding="utf-8"))
         except Exception as e:
-            return ValidationResult(
+            return DataValidationResult(
                 valid=False, errors=[f"Manifest parse error: {e}"], warnings=[]
             )
 
@@ -213,7 +213,7 @@ class HuggingFaceDataSource(DataSourcePlugin):
             if actual_val < expected_val:
                 errors.append(f"Val shards: expected {expected_val}, found {actual_val}")
 
-        return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return DataValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def search(self, query: str) -> list[SearchResult]:
         """Search HuggingFace for datasets."""

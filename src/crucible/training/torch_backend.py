@@ -50,7 +50,7 @@ from crucible.models.components.linear import CastedLinear
 # Crucible runner utilities
 from crucible.runner.tracker import RunTracker
 from crucible.runner.wandb_logger import WandbLogger
-from crucible.runner.fingerprint import code_fingerprint
+from crucible.core.fingerprint import code_fingerprint
 from crucible.core.io import collect_public_attrs
 
 try:

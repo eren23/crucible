@@ -256,7 +256,7 @@ class TapManager:
                 manifests.append(data)
             except TapError:
                 continue  # skip symlink-escaped manifests
-            except Exception:
+            except (OSError, yaml.YAMLError, KeyError, TypeError):
                 continue  # skip malformed manifests
         return manifests
 
@@ -508,9 +508,9 @@ class TapManager:
         matched_type = record.get("type", "")
 
         # Remove the installed payload (name validated, no traversal).
-        # Architectures can now be installed either as a single {name}.py
-        # file (legacy single-file plugins like moe, partial_rope) or as
-        # a directory bundle (multi-file plugins like code_wm that pull in
+        # Architectures can be installed either as a single {name}.py
+        # file (self-contained plugins like moe, partial_rope) or as a
+        # directory bundle (multi-file plugins like code_wm that pull in
         # sibling modules). Prefer the exact installed `path` recorded in
         # the ledger when present; fall back to both layouts otherwise.
         recorded_path = record.get("path", "")

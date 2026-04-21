@@ -11,9 +11,9 @@ from crucible.core.data_sources import (
     DataSourcePlugin,
     DataStatus,
     DataStatusResult,
+    DataValidationResult,
     PreparationResult,
     SearchResult,
-    ValidationResult,
     register_data_source,
 )
 
@@ -78,13 +78,13 @@ class LocalFilesSource(DataSourcePlugin):
             shards_downloaded=self.status().shard_count.get("total", 0),
         )
 
-    def validate(self) -> ValidationResult:
+    def validate(self) -> DataValidationResult:
         """Validate local files."""
         errors = []
         warnings = []
 
         if not self.path.exists():
-            return ValidationResult(
+            return DataValidationResult(
                 valid=False, errors=["Path does not exist"], warnings=warnings
             )
 
@@ -94,7 +94,7 @@ class LocalFilesSource(DataSourcePlugin):
         if len(shard_files) == 0:
             errors.append("No shard files (.bin or .jsonl) found")
 
-        return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return DataValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def search(self, query: str) -> list[SearchResult]:
         """Search local files by walking directory."""

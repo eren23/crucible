@@ -302,7 +302,6 @@ def _main() -> None:
     models_sub = models_parser.add_subparsers(dest="models_command")
     models_sub.add_parser("list", help="List registered model families")
 
-    # Parse and dispatch
     args = parser.parse_args()
 
     if args.command is None:
@@ -393,14 +392,12 @@ def _cmd_init() -> None:
     cwd = Path.cwd()
     target = cwd / "crucible.yaml"
 
-    # Create crucible.yaml
     if target.exists():
         print(f"crucible.yaml already exists at {target}")
     else:
         target.write_text(generate_default_config(), encoding="utf-8")
         print(f"Created {target}")
 
-    # Create .crucible/ directory structure
     dirs_to_create = [
         cwd / ".crucible",
         cwd / ".crucible" / "plugins" / "optimizers",

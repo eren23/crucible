@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.log import log_warn
-from crucible.core.types import PluginFactory
+from crucible.core.types import ArgsNamespace, JsonDict, PluginFactory
+
+if TYPE_CHECKING:
+    from torch import nn
 
 _REGISTRY: dict[str, PluginFactory] = {}
-_REGISTRY_META: dict[str, dict] = {}
+_REGISTRY_META: dict[str, dict[str, str]] = {}
 _CURRENT_REGISTER_SOURCE: str = "local"
-_FAMILY_SCHEMAS: dict[str, dict] = {}
+_FAMILY_SCHEMAS: dict[str, JsonDict] = {}
 
 
 def register_model(name: str, factory: PluginFactory, *, source: str = "") -> None:
@@ -38,7 +41,7 @@ def register_model(name: str, factory: PluginFactory, *, source: str = "") -> No
     _REGISTRY_META[name] = {"source": source}
 
 
-def build_model(args: Any) -> Any:
+def build_model(args: ArgsNamespace) -> nn.Module:
     """Build a model from an argparse-style namespace.
 
     ``args.model_family`` selects the registered factory.
@@ -54,7 +57,7 @@ def build_model(args: Any) -> Any:
     return _REGISTRY[family](args)
 
 
-def register_schema(name: str, schema: dict) -> None:
+def register_schema(name: str, schema: JsonDict) -> None:
     """Register a parameter schema for a model family.
 
     *schema* maps parameter names to dicts of ``{type, default, description}``.
@@ -62,7 +65,7 @@ def register_schema(name: str, schema: dict) -> None:
     _FAMILY_SCHEMAS[name] = schema
 
 
-def get_family_schema(name: str) -> dict:
+def get_family_schema(name: str) -> JsonDict:
     """Return the parameter schema for *name*, or a generic stub."""
     return _FAMILY_SCHEMAS.get(name, {"note": "No schema registered for this family"})
 
@@ -107,8 +110,8 @@ def load_global_architectures(hub_arch_dir: Path, *, source: str = "global") -> 
 
     Three discovery paths are scanned at ``hub_arch_dir``:
 
-    1. ``<hub_arch_dir>/*.py`` — top-level single-file plugins (legacy single
-       file install path used for moe, partial_rope, looped_aug, etc.).
+    1. ``<hub_arch_dir>/*.py`` — top-level single-file plugins (used for
+       self-contained plugins like moe, partial_rope, looped_aug, etc.).
     2. ``<hub_arch_dir>/*.yaml`` — declarative architecture specs.
     3. ``<hub_arch_dir>/<name>/<name>.py`` — directory bundle install path
        (used by multi-file plugins like code_wm that depend on sibling
@@ -213,10 +216,3 @@ def _register_from_spec_file(
     """
     from crucible.models.composer import register_from_spec
     register_from_spec(name, spec_path, source=source)
-
-
-def reset_registry() -> None:
-    """Clear all registered models (for testing only)."""
-    _REGISTRY.clear()
-    _REGISTRY_META.clear()
-    _FAMILY_SCHEMAS.clear()

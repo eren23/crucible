@@ -16,10 +16,17 @@ Usage in training backends::
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.plugin_registry import PluginRegistry
 from crucible.core.types import PluginFactory
+
+if TYPE_CHECKING:
+    import torch.optim
+    import torch.optim.lr_scheduler
+    LRScheduler = torch.optim.lr_scheduler.LRScheduler | None
+else:
+    LRScheduler = Any
 
 SCHEDULER_REGISTRY: PluginRegistry[PluginFactory] = PluginRegistry("scheduler")
 
@@ -33,7 +40,7 @@ def register_scheduler(name: str, factory: PluginFactory, *, source: str = "buil
     SCHEDULER_REGISTRY.register(name, factory, source=source)
 
 
-def build_scheduler(name: str, optimizer: Any, **kwargs: Any) -> Any:
+def build_scheduler(name: str, optimizer: torch.optim.Optimizer, **kwargs: Any) -> LRScheduler:
     """Build a scheduler by name.
 
     *optimizer* is the torch optimizer.  All remaining *kwargs*
@@ -67,7 +74,7 @@ def list_schedulers_detailed() -> list[dict[str, str]]:
 # Torch is lazy-imported to avoid top-level dependency.
 
 
-def _constant_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, **kwargs: Any) -> Any:
+def _constant_factory(optimizer: torch.optim.Optimizer, *, total_steps: int = 0, warmup_steps: int = 0, **kwargs: Any) -> LRScheduler:
     """Constant LR (with optional warmup)."""
     if warmup_steps <= 0:
         return None
@@ -82,7 +89,7 @@ def _constant_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-def _cosine_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> Any:
+def _cosine_factory(optimizer: torch.optim.Optimizer, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> LRScheduler:
     """Cosine decay with optional linear warmup."""
     import torch
 
@@ -101,7 +108,7 @@ def _cosine_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int =
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-def _cosine_restarts_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, num_restarts: int = 1, **kwargs: Any) -> Any:
+def _cosine_restarts_factory(optimizer: torch.optim.Optimizer, *, total_steps: int = 0, warmup_steps: int = 0, num_restarts: int = 1, **kwargs: Any) -> torch.optim.lr_scheduler.CosineAnnealingWarmRestarts:
     """Cosine annealing with warm restarts."""
     import torch
 
@@ -109,7 +116,7 @@ def _cosine_restarts_factory(optimizer: Any, *, total_steps: int = 0, warmup_ste
     return torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=t_0)
 
 
-def _linear_factory(optimizer: Any, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> Any:
+def _linear_factory(optimizer: torch.optim.Optimizer, *, total_steps: int = 0, warmup_steps: int = 0, min_lr_scale: float = 0.0, **kwargs: Any) -> LRScheduler:
     """Linear decay with optional warmup."""
     import torch
 

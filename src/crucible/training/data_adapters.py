@@ -5,13 +5,16 @@ Each adapter wraps a modality-specific data source and returns batches as
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import torch
 
 
 class DataAdapter:
     """Base class for data adapters."""
 
-    def next_batch(self, **kwargs: Any) -> dict[str, Any]:
+    def next_batch(self, **kwargs: Any) -> dict[str, torch.Tensor]:
         """Return the next training batch as a dict of tensors."""
         raise NotImplementedError
 
@@ -27,7 +30,9 @@ class TokenDataAdapter(DataAdapter):
     Translates ``(x, y)`` tuples into ``{'input_ids': x, 'target_ids': y}``.
     """
 
-    def __init__(self, loader: Any):
+    def __init__(self, loader: object):
+        # loader is a DistributedTokenLoader; typed as object to avoid
+        # circular import with data loading module.
         self.loader = loader
 
     def next_batch(
@@ -36,7 +41,7 @@ class TokenDataAdapter(DataAdapter):
         seq_len: int = 0,
         grad_accum_steps: int = 1,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> dict[str, torch.Tensor]:
         x, y = self.loader.next_batch(global_tokens, seq_len, grad_accum_steps)
         return {"input_ids": x, "target_ids": y}
 
@@ -95,9 +100,9 @@ class ImageFolderAdapter(DataAdapter):
     def next_batch(
         self,
         batch_size: int = 8,
-        device: Any = None,
+        device: torch.device | str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> dict[str, torch.Tensor]:
         import torch
 
         images_list = []
@@ -143,9 +148,9 @@ class SyntheticImageAdapter(DataAdapter):
         self,
         batch_size: int = 8,
         image_size: int = 32,
-        device: Any = None,
+        device: torch.device | str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> dict[str, torch.Tensor]:
         import torch
 
         images = torch.randn(batch_size, self.channels, image_size, image_size)
@@ -186,9 +191,9 @@ class SyntheticVideoAdapter(DataAdapter):
         batch_size: int = 4,
         num_frames: int = 4,
         image_size: int = 32,
-        device: Any = None,
+        device: torch.device | str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> dict[str, torch.Tensor]:
         import torch
 
         frames = torch.zeros(batch_size, num_frames, 3, image_size, image_size)
@@ -258,7 +263,7 @@ def register_data_adapter(name: str, cls: type["DataAdapter"], *, source: str = 
     _ADAPTER_REGISTRY.register(name, cls, source=source)
 
 
-def build_data_adapter(name: str, **kwargs: Any) -> "DataAdapter":
+def build_data_adapter(name: str, **kwargs: Any) -> DataAdapter:
     """Instantiate a registered data adapter by name."""
     cls = _ADAPTER_REGISTRY.get(name)
     if cls is None:

@@ -14,10 +14,18 @@ Usage in training backends::
 """
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.plugin_registry import PluginRegistry
 from crucible.core.types import PluginFactory
+
+if TYPE_CHECKING:
+    import torch.optim
+
+# Type alias for optimizer param input -- matches torch's Optimizer.__init__
+# signature: either an Iterable of Tensors or an Iterable of param-group dicts.
+OptimizerParams = Iterable[Any]  # torch.Tensor | dict[str, Any]
 
 OPTIMIZER_REGISTRY: PluginRegistry[PluginFactory] = PluginRegistry("optimizer")
 
@@ -31,7 +39,7 @@ def register_optimizer(name: str, factory: PluginFactory, *, source: str = "buil
     OPTIMIZER_REGISTRY.register(name, factory, source=source)
 
 
-def build_optimizer(name: str, params: Any, **kwargs: Any) -> Any:
+def build_optimizer(name: str, params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     """Build an optimizer by name.
 
     *params* is the parameter list/groups (as accepted by ``torch.optim``).
@@ -64,27 +72,27 @@ def list_optimizers_detailed() -> list[dict[str, str]]:
 # Torch is lazy-imported to avoid top-level dependency.
 
 
-def _adam_factory(params: Any, **kwargs: Any) -> Any:
+def _adam_factory(params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     import torch
     return torch.optim.Adam(params, **kwargs)
 
 
-def _adamw_factory(params: Any, **kwargs: Any) -> Any:
+def _adamw_factory(params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     import torch
     return torch.optim.AdamW(params, **kwargs)
 
 
-def _sgd_factory(params: Any, **kwargs: Any) -> Any:
+def _sgd_factory(params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     import torch
     return torch.optim.SGD(params, **kwargs)
 
 
-def _rmsprop_factory(params: Any, **kwargs: Any) -> Any:
+def _rmsprop_factory(params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     import torch
     return torch.optim.RMSprop(params, **kwargs)
 
 
-def _muon_factory(params: Any, **kwargs: Any) -> Any:
+def _muon_factory(params: OptimizerParams, **kwargs: Any) -> torch.optim.Optimizer:
     from crucible.training.muon import Muon
     return Muon(params, **kwargs)
 

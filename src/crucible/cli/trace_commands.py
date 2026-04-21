@@ -159,7 +159,6 @@ def _cmd_export(args: argparse.Namespace) -> None:
 
     output = "\n".join(lines) + "\n"
 
-    # Write to file or stdout
     out_path = getattr(args, "output", None)
     if out_path:
         Path(out_path).write_text(output, encoding="utf-8")

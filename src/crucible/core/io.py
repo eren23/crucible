@@ -9,8 +9,10 @@ from typing import Any
 
 import yaml
 
+from crucible.core.types import JsonDict, JsonValue
 
-def _json_ready(value: Any) -> Any:
+
+def _json_ready(value: Any) -> JsonValue:
     """Recursively convert a value to JSON-serializable form."""
     if isinstance(value, Path):
         return str(value)
@@ -23,7 +25,7 @@ def _json_ready(value: Any) -> Any:
     return str(value)
 
 
-def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+def atomic_write_json(path: Path, payload: JsonDict) -> None:
     """Write JSON atomically via temp file + rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -43,11 +45,11 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             os.unlink(tmp_name)
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
+def read_jsonl(path: Path) -> list[JsonDict]:
     """Read a JSONL file, returning a list of dicts. Returns [] if file missing."""
     if not path.exists():
         return []
-    records: list[dict[str, Any]] = []
+    records: list[JsonDict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -59,7 +61,7 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def append_jsonl(path: Path, record: dict[str, Any]) -> None:
+def append_jsonl(path: Path, record: JsonDict) -> None:
     """Append a single JSON record to a JSONL file with file locking."""
     import fcntl
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +74,7 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+def write_jsonl(path: Path, records: list[JsonDict]) -> None:
     """Write a list of records to a JSONL file (overwrites)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -80,7 +82,7 @@ def write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             f.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
 
 
-def atomic_write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+def atomic_write_jsonl(path: Path, records: list[JsonDict]) -> None:
     """Write JSONL atomically via temp file + rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -116,7 +118,7 @@ def read_yaml(path: Path) -> dict | list | None:
     return None
 
 
-def write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None:
+def write_yaml(path: Path, data: JsonValue, *, sort_keys: bool = False) -> None:
     """Write *data* as YAML, creating parent directories as needed.
 
     This is a simple (non-atomic) write suitable for files where
@@ -134,7 +136,7 @@ def write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def atomic_write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None:
+def atomic_write_yaml(path: Path, data: JsonValue, *, sort_keys: bool = False) -> None:
     """Write YAML atomically via temp file + rename.
 
     Mirrors the pattern used by :func:`atomic_write_json` and
@@ -166,15 +168,15 @@ def atomic_write_yaml(path: Path, data: Any, *, sort_keys: bool = False) -> None
             os.unlink(tmp_name)
 
 
-def collect_public_attrs(obj: Any) -> dict[str, Any]:
+def collect_public_attrs(obj: object) -> JsonDict:
     """Serialize an object's public, non-callable attributes to a dict."""
-    config: dict[str, Any] = {}
+    config: JsonDict = {}
     for name in dir(obj):
         if name.startswith("_"):
             continue
         try:
             value = getattr(obj, name)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             continue
         if callable(value):
             continue

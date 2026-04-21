@@ -1,4 +1,4 @@
-"""Tests for crucible.runner.fingerprint."""
+"""Tests for crucible.core.fingerprint."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from crucible.runner.fingerprint import (
+from crucible.core.fingerprint import (
     build_run_manifest,
     code_fingerprint,
     ensure_clean_commit,
@@ -116,19 +116,19 @@ class TestDiscoverFiles:
 # ---------------------------------------------------------------------------
 
 class TestSafeGitSha:
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_returns_sha(self, mock_run):
         mock_run.return_value = MagicMock(stdout="abc123def456\n", returncode=0)
         result = safe_git_sha(Path("/fake"))
         assert result == "abc123def456"
 
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_returns_none_on_empty(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=128)
         result = safe_git_sha(Path("/fake"))
         assert result is None
 
-    @patch("crucible.runner.fingerprint.subprocess.run", side_effect=FileNotFoundError)
+    @patch("crucible.core.fingerprint.subprocess.run", side_effect=FileNotFoundError)
     def test_returns_none_on_exception(self, mock_run):
         result = safe_git_sha(Path("/fake"))
         assert result is None
@@ -139,25 +139,25 @@ class TestSafeGitSha:
 # ---------------------------------------------------------------------------
 
 class TestSafeGitDirty:
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_clean_repo(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         result = safe_git_dirty(Path("/fake"))
         assert result is False
 
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_dirty_repo(self, mock_run):
         mock_run.return_value = MagicMock(stdout=" M src/file.py\n", returncode=0)
         result = safe_git_dirty(Path("/fake"))
         assert result is True
 
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_returns_none_on_error(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=128)
         result = safe_git_dirty(Path("/fake"))
         assert result is None
 
-    @patch("crucible.runner.fingerprint.subprocess.run", side_effect=FileNotFoundError)
+    @patch("crucible.core.fingerprint.subprocess.run", side_effect=FileNotFoundError)
     def test_returns_none_on_exception(self, mock_run):
         result = safe_git_dirty(Path("/fake"))
         assert result is None
@@ -168,19 +168,19 @@ class TestSafeGitDirty:
 # ---------------------------------------------------------------------------
 
 class TestSafeGitBranch:
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_returns_branch(self, mock_run):
         mock_run.return_value = MagicMock(stdout="main\n", returncode=0)
         result = safe_git_branch(Path("/fake"))
         assert result == "main"
 
-    @patch("crucible.runner.fingerprint.subprocess.run")
+    @patch("crucible.core.fingerprint.subprocess.run")
     def test_returns_none_on_empty(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=128)
         result = safe_git_branch(Path("/fake"))
         assert result is None
 
-    @patch("crucible.runner.fingerprint.subprocess.run", side_effect=FileNotFoundError)
+    @patch("crucible.core.fingerprint.subprocess.run", side_effect=FileNotFoundError)
     def test_returns_none_on_exception(self, mock_run):
         result = safe_git_branch(Path("/fake"))
         assert result is None
@@ -191,20 +191,20 @@ class TestSafeGitBranch:
 # ---------------------------------------------------------------------------
 
 class TestEnsureCleanCommit:
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123")
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value="abc123")
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=False)
     def test_clean_repo_returns_sha(self, mock_dirty, mock_sha):
         result = ensure_clean_commit(Path("/fake"))
         assert result == "abc123"
 
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123")
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=True)
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value="abc123")
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=True)
     def test_dirty_repo_raises_without_auto_commit(self, mock_dirty, mock_sha):
         with pytest.raises(RuntimeError, match="uncommitted changes"):
             ensure_clean_commit(Path("/fake"), auto_commit=False)
 
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value=None)
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value=None)
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=False)
     def test_no_git_repo_raises(self, mock_dirty, mock_sha):
         with pytest.raises(RuntimeError, match="Not in a git repository"):
             ensure_clean_commit(Path("/fake"))
@@ -215,9 +215,9 @@ class TestEnsureCleanCommit:
 # ---------------------------------------------------------------------------
 
 class TestBuildRunManifest:
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
-    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.core.fingerprint.safe_git_branch", return_value="main")
     def test_basic_manifest(self, mock_branch, mock_dirty, mock_sha, tmp_path):
         (tmp_path / "train.py").write_text("code", encoding="utf-8")
         manifest = build_run_manifest(tmp_path)
@@ -227,9 +227,9 @@ class TestBuildRunManifest:
         assert "code_fingerprint" in manifest
         assert isinstance(manifest["tap_versions"], dict)
 
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
-    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.core.fingerprint.safe_git_branch", return_value="main")
     def test_manifest_includes_data_checksum(self, mock_branch, mock_dirty, mock_sha, tmp_path):
         data_dir = tmp_path / "data"
         data_dir.mkdir()
@@ -238,9 +238,34 @@ class TestBuildRunManifest:
         assert manifest["data_manifest_checksum"] is not None
         assert len(manifest["data_manifest_checksum"]) == 16
 
-    @patch("crucible.runner.fingerprint.safe_git_sha", return_value="abc123def")
-    @patch("crucible.runner.fingerprint.safe_git_dirty", return_value=False)
-    @patch("crucible.runner.fingerprint.safe_git_branch", return_value="main")
+    @patch("crucible.core.fingerprint.safe_git_sha", return_value="abc123def")
+    @patch("crucible.core.fingerprint.safe_git_dirty", return_value=False)
+    @patch("crucible.core.fingerprint.safe_git_branch", return_value="main")
     def test_manifest_no_data_dir(self, mock_branch, mock_dirty, mock_sha, tmp_path):
         manifest = build_run_manifest(tmp_path)
         assert manifest["data_manifest_checksum"] is None
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatibility shim
+# ---------------------------------------------------------------------------
+
+class TestRunnerFingerprintShim:
+    """Verify that the old import path still works."""
+
+    def test_shim_reexports_all_public_symbols(self):
+        from crucible.runner import fingerprint as shim
+        from crucible.core import fingerprint as canonical
+
+        for name in (
+            "safe_git_sha",
+            "safe_git_dirty",
+            "safe_git_branch",
+            "ensure_clean_commit",
+            "code_fingerprint",
+            "build_run_manifest",
+            "_discover_files",
+        ):
+            assert getattr(shim, name) is getattr(canonical, name), (
+                f"{name} in shim is not the same object as in canonical"
+            )

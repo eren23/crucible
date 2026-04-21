@@ -64,17 +64,6 @@ def make_masks_permanent(model: nn.Module, masks: dict[str, Tensor]) -> None:
             named[name].weight.data.mul_(mask)
 
 
-def remove_all_masks(model: nn.Module) -> None:
-    """Remove all forward pre-hooks that look like pruning masks."""
-    for module in model.modules():
-        hooks_to_remove = []
-        for handle_id, hook in module._forward_pre_hooks.items():
-            # Our mask hooks are closures referencing 'mask'
-            if hasattr(hook, "__name__") and hook.__name__ == "_hook":
-                hooks_to_remove.append(handle_id)
-        for hid in hooks_to_remove:
-            del module._forward_pre_hooks[hid]
-
 
 # ---------------------------------------------------------------------------
 # Compression metrics

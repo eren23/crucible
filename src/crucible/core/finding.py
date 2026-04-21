@@ -9,8 +9,6 @@ import hashlib
 import re
 from typing import Any
 
-import yaml
-
 from crucible.core.log import log_warn, utc_now_iso
 from crucible.core.types import Finding
 
@@ -92,46 +90,6 @@ def can_promote(from_scope: str, to_scope: str) -> bool:
     if from_scope not in SCOPE_ORDER or to_scope not in SCOPE_ORDER:
         return False
     return SCOPE_ORDER.index(from_scope) < SCOPE_ORDER.index(to_scope)
-
-
-# ---------------------------------------------------------------------------
-# Markdown serialization
-# ---------------------------------------------------------------------------
-
-def render_finding_markdown(finding: Finding) -> str:
-    """Render a finding as markdown with YAML frontmatter."""
-    frontmatter: dict[str, Any] = {}
-    for key in ("id", "title", "scope", "status", "confidence", "tags",
-                "source_project", "source_experiments", "supersedes",
-                "superseded_by", "track", "created_at", "created_by",
-                "promoted_from", "category"):
-        if key in finding and finding[key] is not None:
-            frontmatter[key] = finding[key]
-
-    fm_text = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False, allow_unicode=True).rstrip()
-    body = finding.get("body", "")
-    return f"---\n{fm_text}\n---\n\n{body}\n"
-
-
-def parse_finding_markdown(text: str) -> Finding:
-    """Parse markdown-with-frontmatter back to a Finding dict."""
-    finding: dict[str, Any] = {}
-
-    text = text.strip()
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            fm_raw = parts[1].strip()
-            body = parts[2].strip()
-            frontmatter = yaml.safe_load(fm_raw) or {}
-            finding.update(frontmatter)
-            finding["body"] = body
-        else:
-            finding["body"] = text
-    else:
-        finding["body"] = text
-
-    return finding
 
 
 # ---------------------------------------------------------------------------

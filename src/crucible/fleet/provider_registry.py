@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from crucible.core.plugin_registry import PluginRegistry
-from crucible.core.types import PluginFactory
+from crucible.core.types import JsonDict, PluginFactory
 
 if TYPE_CHECKING:
     from crucible.fleet.provider import FleetProvider
@@ -67,7 +67,7 @@ def _runpod_factory(
     ssh_key: str = "",
     image_name: str = "",
     gpu_type_ids: list[str] | None = None,
-    defaults: dict[str, Any] | None = None,
+    defaults: JsonDict | None = None,
     gpu_count: int = 1,
     network_volume_id: str = "",
     template_id: str = "",
@@ -89,7 +89,7 @@ def _runpod_factory(
 def _ssh_factory(
     *,
     ssh_key: str = "",
-    defaults: dict[str, Any] | None = None,
+    defaults: JsonDict | None = None,
     **kwargs: Any,
 ) -> FleetProvider:
     from crucible.fleet.providers.ssh import SSHProvider

@@ -43,6 +43,19 @@ def _get_hub_store() -> HubStore:
     return HubStore(hub_dir=hub_dir)
 
 
+def _get_fleet_manager(config: ProjectConfig | None = None):
+    """Return a FleetManager for the current project config.
+
+    Lazy-imports FleetManager to avoid loading fleet code at module level.
+    Accepts an optional pre-loaded config to avoid double-loading.
+    """
+    from crucible.fleet.manager import FleetManager
+
+    if config is None:
+        config = _get_config()
+    return FleetManager(config)
+
+
 def _queue_contract_fields(config: ProjectConfig) -> dict[str, Any]:
     metadata = validate_experiment_contract(
         config,
@@ -95,7 +108,6 @@ def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
 
         result: dict[str, Any] = {"node": name}
 
-        # Parse nvidia-smi
         if len(parts) >= 1 and parts[0].strip():
             gpu_parts = parts[0].strip().split(",")
             if len(gpu_parts) >= 4:
@@ -104,14 +116,12 @@ def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
                 result["gpu_memory_total_mb"] = int(gpu_parts[2].strip())
                 result["gpu_temperature_c"] = int(gpu_parts[3].strip())
 
-        # Parse free
         if len(parts) >= 2 and parts[1].strip():
             mem_parts = parts[1].strip().split()
             if len(mem_parts) >= 3:
                 result["ram_total_mb"] = int(mem_parts[1])
                 result["ram_used_mb"] = int(mem_parts[2])
 
-        # Parse df
         if len(parts) >= 3 and parts[2].strip():
             disk_parts = parts[2].strip().split()
             if len(disk_parts) >= 5:
@@ -190,99 +200,85 @@ def get_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
     top_n = args.get("top_n", 20)
     primary = config.metrics.primary
     secondary = config.metrics.secondary or ""
-    try:
-        from crucible.analysis.leaderboard import leaderboard
-        from crucible.analysis.results import completed_results
+    from crucible.analysis.leaderboard import leaderboard
+    from crucible.analysis.results import completed_results
 
-        results = completed_results(config)
-        top = leaderboard(results, top_n=top_n, cfg=config)
-        entries = []
-        for i, r in enumerate(top, 1):
-            res = r.get("result", {})
-            entry: dict[str, Any] = {
-                "rank": i,
-                "name": r.get("name", ""),
-                "primary_metric": primary,
-                primary: res.get(primary),
-                "steps_completed": res.get("steps_completed"),
-                "model_bytes": r.get("model_bytes"),
-                "contract_status": r.get("contract_status", "legacy_missing_contract"),
-            }
-            if secondary:
-                entry[secondary] = res.get(secondary)
-            entries.append(entry)
-        return {"total_completed": len(results), "primary_metric": primary, "top": entries}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}", "top": []}
+    results = completed_results(config)
+    top = leaderboard(results, top_n=top_n, cfg=config)
+    entries = []
+    for i, r in enumerate(top, 1):
+        res = r.get("result", {})
+        entry: dict[str, Any] = {
+            "rank": i,
+            "name": r.get("name", ""),
+            "primary_metric": primary,
+            primary: res.get(primary),
+            "steps_completed": res.get("steps_completed"),
+            "model_bytes": r.get("model_bytes"),
+            "contract_status": r.get("contract_status", "legacy_missing_contract"),
+        }
+        if secondary:
+            entry[secondary] = res.get(secondary)
+        entries.append(entry)
+    return {"total_completed": len(results), "primary_metric": primary, "top": entries}
 
 
 def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
     """Fleet queue state: counts of queued, running, and completed experiments."""
     config = _get_config()
-    try:
-        from crucible.fleet.queue import load_queue, summarize_queue
+    from crucible.fleet.queue import load_queue, summarize_queue
 
-        rows = load_queue(config.project_root / "fleet_queue.jsonl")
-        summary = summarize_queue(rows)
-        return {"total": len(rows), "summary": summary}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    rows = load_queue(config.project_root / "fleet_queue.jsonl")
+    summary = summarize_queue(rows)
+    return {"total": len(rows), "summary": summary}
 
 
 def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
     """Add an experiment configuration to the fleet queue."""
     config = _get_config()
-    try:
-        from crucible.fleet.queue import enqueue_experiments
-        from crucible.runner.fingerprint import build_run_manifest
+    from crucible.fleet.queue import enqueue_experiments
+    from crucible.core.fingerprint import build_run_manifest
 
-        contract = _queue_contract_fields(config)
-        manifest = build_run_manifest(config.project_root)
-        experiment = {
-            "name": args["name"],
-            "config": args["config"],
-            "tier": args.get("tier", "proxy"),
-            "backend": args.get("backend", "torch"),
-            "tags": args.get("tags", []),
-            "run_manifest": manifest,
-            **contract,
-        }
-        added = enqueue_experiments(
-            config.project_root / "fleet_queue.jsonl",
-            [experiment],
-            limit=1,
-        )
-        if added:
-            return {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
-        return {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    contract = _queue_contract_fields(config)
+    manifest = build_run_manifest(config.project_root)
+    experiment = {
+        "name": args["name"],
+        "config": args["config"],
+        "tier": args.get("tier", "proxy"),
+        "backend": args.get("backend", "torch"),
+        "tags": args.get("tags", []),
+        "run_manifest": manifest,
+        **contract,
+    }
+    added = enqueue_experiments(
+        config.project_root / "fleet_queue.jsonl",
+        [experiment],
+        limit=1,
+    )
+    if added:
+        return {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
+    return {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
 
 
 def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
     """Get the result for a specific experiment run_id."""
     config = _get_config()
     run_id = args["run_id"]
-    try:
-        from crucible.analysis.results import merged_results
+    from crucible.analysis.results import merged_results
 
-        for row in merged_results(config):
-            if row.get("id") == run_id or row.get("run_id") == run_id:
-                row = dict(row)
-                row["contract_status"] = row.get("contract_status", "legacy_missing_contract")
-                return {"found": True, "result": row}
-        return {"found": False, "run_id": run_id}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    for row in merged_results(config):
+        if row.get("id") == run_id or row.get("run_id") == run_id:
+            row = dict(row)
+            row["contract_status"] = row.get("contract_status", "legacy_missing_contract")
+            return {"found": True, "result": row}
+    return {"found": False, "run_id": run_id}
 
 
 def provision_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Create N new compute nodes."""
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fleet = FleetManager(config)
+        fleet = _get_fleet_manager(config)
         kwargs: dict[str, Any] = {}
         if args.get("network_volume_id"):
             kwargs["network_volume_id"] = args["network_volume_id"]
@@ -309,9 +305,7 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Tear down nodes. Supports names, pod IDs, or destroy-all."""
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fleet = FleetManager(config)
+        fleet = _get_fleet_manager(config)
         node_names = args.get("node_names") or None
         pod_ids = args.get("pod_ids") or None
         selected = set(node_names) if node_names else None
@@ -378,9 +372,7 @@ def cleanup_orphans(args: dict[str, Any]) -> dict[str, Any]:
     """
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fleet = FleetManager(config)
+        fleet = _get_fleet_manager(config)
         result = fleet.cleanup_orphans(destroy=bool(args.get("destroy", False)))
         return {
             "orphans": result["orphans"],
@@ -396,9 +388,7 @@ def stop_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Stop running pods to save cost.  Disk and bootstrap state are preserved."""
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fleet = FleetManager(config)
+        fleet = _get_fleet_manager(config)
         node_names = args.get("node_names") or None
         selected = set(node_names) if node_names else None
         updated = fleet.stop(selected_names=selected)
@@ -412,9 +402,7 @@ def start_nodes(args: dict[str, Any]) -> dict[str, Any]:
     """Start stopped pods and wait for SSH readiness."""
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fleet = FleetManager(config)
+        fleet = _get_fleet_manager(config)
         node_names = args.get("node_names") or None
         selected = set(node_names) if node_names else None
         updated = fleet.start(selected_names=selected)
@@ -548,9 +536,7 @@ def fleet_refresh(args: dict[str, Any]) -> dict[str, Any]:
     """Refresh node states from the cloud provider API (updates SSH hosts, GPU info, state)."""
     config = _get_config()
     try:
-        from crucible.fleet.manager import FleetManager
-
-        fm = FleetManager(config)
+        fm = _get_fleet_manager(config)
         nodes = fm.refresh()
         return {
             "refreshed": len(nodes),
@@ -582,9 +568,7 @@ def bootstrap_nodes(args: dict[str, Any]) -> dict[str, Any]:
         if not ssh_nodes:
             return {"error": "No nodes with SSH connectivity found. Run fleet_refresh first (wait ~60s after provision_nodes).", "total": 0, "bootstrapped": 0, "nodes": []}
 
-        from crucible.fleet.manager import FleetManager
-
-        fm = FleetManager(config)
+        fm = _get_fleet_manager(config)
         train_shards = args.get("train_shards", 1)
         skip_install = args.get("skip_install", False)
         skip_data = args.get("skip_data", False)
@@ -626,9 +610,7 @@ def dispatch_experiments(args: dict[str, Any]) -> dict[str, Any]:
         if not bootstrapped:
             return {"error": "No bootstrapped nodes found. Run bootstrap_nodes first (after provision_nodes + fleet_refresh).", "dispatched": 0, "assignments": []}
 
-        from crucible.fleet.manager import FleetManager
-
-        fm = FleetManager(config)
+        fm = _get_fleet_manager(config)
         max_assignments = args.get("max_assignments", 8)
         assignments = fm.dispatch(max_assignments=max_assignments)
         return {
@@ -652,11 +634,10 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
         if not nodes_check:
             return {"error": "No fleet nodes found. Run provision_nodes + fleet_refresh first.", "collected": False, "total_results": 0, "completed": 0}
 
-        from crucible.fleet.manager import FleetManager
         from crucible.analysis.results import merged_results
         from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
 
-        fm = FleetManager(config)
+        fm = _get_fleet_manager(config)
         fm.collect()
         results = merged_results(config)
         completed = [r for r in results if r.get("status") == "completed"]
@@ -682,33 +663,27 @@ def get_research_state(args: dict[str, Any]) -> dict[str, Any]:
     state_path = config.project_root / config.research_state_file
     if not state_path.exists():
         return {"available": False}
-    try:
-        from crucible.researcher.state import ResearchState
+    from crucible.researcher.state import ResearchState
 
-        state = ResearchState(state_path)
-        return {
-            "available": True,
-            "hypotheses_count": len(state.hypotheses),
-            "history_count": len(state.history),
-            "beliefs": state.beliefs,
-            "budget_remaining": state.budget_remaining,
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    state = ResearchState(state_path)
+    return {
+        "available": True,
+        "hypotheses_count": len(state.hypotheses),
+        "history_count": len(state.history),
+        "beliefs": state.beliefs,
+        "budget_remaining": state.budget_remaining,
+    }
 
 
 def get_sensitivity(args: dict[str, Any]) -> dict[str, Any]:
     """Parameter sensitivity analysis."""
     config = _get_config()
-    try:
-        from crucible.analysis.leaderboard import sensitivity_analysis
-        from crucible.analysis.results import completed_results
+    from crucible.analysis.leaderboard import sensitivity_analysis
+    from crucible.analysis.results import completed_results
 
-        results = completed_results(config)
-        sens = sensitivity_analysis(results, cfg=config)
-        return {"parameters": {k: v for k, v in list(sens.items())[:20]}}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    results = completed_results(config)
+    sens = sensitivity_analysis(results, cfg=config)
+    return {"parameters": {k: v for k, v in list(sens.items())[:20]}}
 
 
 # ---------------------------------------------------------------------------
@@ -728,67 +703,63 @@ def _get_store():
 def design_browse_experiments(args: dict[str, Any]) -> dict[str, Any]:
     """Browse experiments with filtering across local, project, and fleet sources."""
     config = _get_config()
-    try:
-        from crucible.analysis.results import merged_results
+    from crucible.analysis.results import merged_results
 
-        results = merged_results(config)
-        primary = config.metrics.primary
+    results = merged_results(config)
+    primary = config.metrics.primary
 
-        # Apply filters
-        name_pattern = args.get("name_pattern", "")
-        family = args.get("family", "")
-        tag = args.get("tag", "")
-        metric_below = args.get("metric_below")
-        metric_above = args.get("metric_above")
-        config_filter = args.get("config_filter", {})
-        limit = args.get("limit", 50)
-        sort_by = args.get("sort_by", "metric")
+    # Apply filters
+    name_pattern = args.get("name_pattern", "")
+    family = args.get("family", "")
+    tag = args.get("tag", "")
+    metric_below = args.get("metric_below")
+    metric_above = args.get("metric_above")
+    config_filter = args.get("config_filter", {})
+    limit = args.get("limit", 50)
+    sort_by = args.get("sort_by", "metric")
 
-        filtered = []
-        for r in results:
-            if name_pattern and name_pattern not in r.get("name", ""):
+    filtered = []
+    for r in results:
+        if name_pattern and name_pattern not in r.get("name", ""):
+            continue
+        if family and r.get("config", {}).get("MODEL_FAMILY", "") != family:
+            continue
+        if tag and tag not in r.get("tags", []):
+            continue
+        metric_val = r.get("result", {}).get(primary)
+        if metric_below is not None and isinstance(metric_val, (int, float)) and metric_val >= metric_below:
+            continue
+        if metric_above is not None and isinstance(metric_val, (int, float)) and metric_val <= metric_above:
+            continue
+        if config_filter:
+            exp_config = r.get("config", {})
+            if not all(exp_config.get(k) == v for k, v in config_filter.items()):
                 continue
-            if family and r.get("config", {}).get("MODEL_FAMILY", "") != family:
-                continue
-            if tag and tag not in r.get("tags", []):
-                continue
-            metric_val = r.get("result", {}).get(primary)
-            if metric_below is not None and isinstance(metric_val, (int, float)) and metric_val >= metric_below:
-                continue
-            if metric_above is not None and isinstance(metric_val, (int, float)) and metric_val <= metric_above:
-                continue
-            if config_filter:
-                exp_config = r.get("config", {})
-                if not all(exp_config.get(k) == v for k, v in config_filter.items()):
-                    continue
-            filtered.append(r)
+        filtered.append(r)
 
-        # Sort
-        if sort_by == "metric":
-            filtered.sort(key=lambda r: r.get("result", {}).get(primary, float("inf")))
-        elif sort_by == "name":
-            filtered.sort(key=lambda r: r.get("name", ""))
-        elif sort_by == "timestamp":
-            filtered.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    # Sort
+    if sort_by == "metric":
+        filtered.sort(key=lambda r: r.get("result", {}).get(primary, float("inf")))
+    elif sort_by == "name":
+        filtered.sort(key=lambda r: r.get("name", ""))
+    elif sort_by == "timestamp":
+        filtered.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
 
-        # Trim and format
-        trimmed = []
-        for r in filtered[:limit]:
-            trimmed.append({
-                "name": r.get("name"),
-                "config": r.get("config", {}),
-                primary: r.get("result", {}).get(primary),
-                "model_bytes": r.get("model_bytes"),
-                "tags": r.get("tags", []),
-                "status": r.get("status"),
-                "timestamp": r.get("timestamp"),
-                "project": r.get("project"),
-                "launcher": r.get("launcher"),
-                "remote_node": r.get("remote_node"),
-            })
-        return {"total_matched": len(filtered), "experiments": trimmed}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    trimmed = []
+    for r in filtered[:limit]:
+        trimmed.append({
+            "name": r.get("name"),
+            "config": r.get("config", {}),
+            primary: r.get("result", {}).get(primary),
+            "model_bytes": r.get("model_bytes"),
+            "tags": r.get("tags", []),
+            "status": r.get("status"),
+            "timestamp": r.get("timestamp"),
+            "project": r.get("project"),
+            "launcher": r.get("launcher"),
+            "remote_node": r.get("remote_node"),
+        })
+    return {"total_matched": len(filtered), "experiments": trimmed}
 
 
 def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
@@ -797,48 +768,45 @@ def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
     names = args.get("experiment_names", [])
     if len(names) < 2 or len(names) > 5:
         return {"error": "Provide 2-5 experiment names."}
-    try:
-        from crucible.analysis.results import merged_results
+    from crucible.analysis.results import merged_results
 
-        all_results = merged_results(config)
-        by_name = {r["name"]: r for r in all_results if r.get("name") in names}
-        missing = [n for n in names if n not in by_name]
-        if missing:
-            return {"error": f"Experiments not found: {missing}"}
+    all_results = merged_results(config)
+    by_name = {r["name"]: r for r in all_results if r.get("name") in names}
+    missing = [n for n in names if n not in by_name]
+    if missing:
+        return {"error": f"Experiments not found: {missing}"}
 
-        primary = config.metrics.primary
-        experiments = [by_name[n] for n in names]
+    primary = config.metrics.primary
+    experiments = [by_name[n] for n in names]
 
-        # Config diffs: find keys that differ
-        all_keys = set()
-        for exp in experiments:
-            all_keys.update(exp.get("config", {}).keys())
+    # Config diffs: find keys that differ
+    all_keys = set()
+    for exp in experiments:
+        all_keys.update(exp.get("config", {}).keys())
 
-        config_diff = {}
-        for key in sorted(all_keys):
-            values = [exp.get("config", {}).get(key, "<not set>") for exp in experiments]
-            if len(set(values)) > 1:
-                config_diff[key] = dict(zip(names, values))
+    config_diff = {}
+    for key in sorted(all_keys):
+        values = [exp.get("config", {}).get(key, "<not set>") for exp in experiments]
+        if len(set(values)) > 1:
+            config_diff[key] = dict(zip(names, values))
 
-        # Metric comparison
-        metric_comparison = {}
-        for name in names:
-            exp = by_name[name]
-            res = exp.get("result", {})
-            metric_comparison[name] = {
-                primary: res.get(primary),
-                "model_bytes": exp.get("model_bytes"),
-                "status": exp.get("status"),
-            }
-
-        return {
-            "experiments": names,
-            "config_diff": config_diff,
-            "config_same_keys": sorted(all_keys - set(config_diff.keys())),
-            "metrics": metric_comparison,
+    # Metric comparison
+    metric_comparison = {}
+    for name in names:
+        exp = by_name[name]
+        res = exp.get("result", {})
+        metric_comparison[name] = {
+            primary: res.get(primary),
+            "model_bytes": exp.get("model_bytes"),
+            "status": exp.get("status"),
         }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+    return {
+        "experiments": names,
+        "config_diff": config_diff,
+        "config_same_keys": sorted(all_keys - set(config_diff.keys())),
+        "metrics": metric_comparison,
+    }
 
 
 def design_generate_hypotheses(args: dict[str, Any]) -> dict[str, Any]:
@@ -924,7 +892,7 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
     config = _get_config()
     try:
         from crucible.fleet.queue import enqueue_experiments
-        from crucible.runner.fingerprint import build_run_manifest
+        from crucible.core.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
         manifest = build_run_manifest(config.project_root)
@@ -991,41 +959,35 @@ def context_get_analysis(args: dict[str, Any]) -> dict[str, Any]:
 def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
     """Record a research finding in the context store."""
     config = _get_config()
-    try:
-        from crucible.researcher.state import ResearchState
+    from crucible.researcher.state import ResearchState
 
-        state_path = config.project_root / config.research_state_file
-        state = ResearchState(state_path)
+    state_path = config.project_root / config.research_state_file
+    state = ResearchState(state_path)
 
-        entry = state.add_finding(
-            finding=args["finding"],
-            category=args.get("category", "observation"),
-            source_experiments=args.get("source_experiments", []),
-            confidence=args.get("confidence", 0.7),
-            created_by=args.get("created_by", "mcp-agent"),
-        )
-        state.save()
+    entry = state.add_finding(
+        finding=args["finding"],
+        category=args.get("category", "observation"),
+        source_experiments=args.get("source_experiments", []),
+        confidence=args.get("confidence", 0.7),
+        created_by=args.get("created_by", "mcp-agent"),
+    )
+    state.save()
 
-        return {"status": "recorded", "entry": entry}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {"status": "recorded", "entry": entry}
 
 
 def context_get_findings(args: dict[str, Any]) -> dict[str, Any]:
     """Query accumulated research findings."""
     config = _get_config()
-    try:
-        from crucible.researcher.state import ResearchState
+    from crucible.researcher.state import ResearchState
 
-        state_path = config.project_root / config.research_state_file
-        state = ResearchState(state_path)
+    state_path = config.project_root / config.research_state_file
+    state = ResearchState(state_path)
 
-        category = args.get("category", "")
-        limit = args.get("limit", 50)
-        findings = state.get_findings(category=category or None, limit=limit)
-        return {"findings": findings, "total": len(findings)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    category = args.get("category", "")
+    limit = args.get("limit", 50)
+    findings = state.get_findings(category=category or None, limit=limit)
+    return {"findings": findings, "total": len(findings)}
 
 
 # ---------------------------------------------------------------------------
@@ -1046,17 +1008,14 @@ def version_save_design(args: dict[str, Any]) -> dict[str, Any]:
         store = _get_store()
         name = args["name"]
 
-        # Validate name is a slug
         if not re.match(r'^[a-z0-9][a-z0-9_-]*$', name):
             return {"error": f"Invalid design name '{name}'. Use lowercase letters, numbers, hyphens, underscores. Must start with letter or number."}
 
-        # Start from existing content if this is an update
         current = store.get_current("experiment_design", name)
         if current is not None:
             _, prev_content = current
             content = dict(prev_content)
         else:
-            # Defaults for new designs
             content = {
                 "name": name,
                 "description": "",
@@ -1104,94 +1063,83 @@ def version_save_design(args: dict[str, Any]) -> dict[str, Any]:
 
 def version_list_designs(args: dict[str, Any]) -> dict[str, Any]:
     """List all versioned experiment designs."""
-    try:
-        store = _get_store()
+    store = _get_store()
 
-        status_filter = args.get("status_filter")
-        tag_filter = args.get("tag_filter")
+    status_filter = args.get("status_filter")
+    tag_filter = args.get("tag_filter")
 
-        resources = store.list_resources(
-            "experiment_design",
-            status=status_filter,
-            tag=tag_filter,
-        )
+    resources = store.list_resources(
+        "experiment_design",
+        status=status_filter,
+        tag=tag_filter,
+    )
 
-        # Enrich with current content status
-        designs = []
-        for meta in resources:
-            entry = dict(meta)
-            current = store.get_current("experiment_design", meta["resource_name"])
-            if current:
-                _, content = current
-                entry["design_status"] = content.get("status", "unknown")
-                entry["family"] = content.get("family", "")
-                entry["base_preset"] = content.get("base_preset", "")
-            designs.append(entry)
+    designs = []
+    for meta in resources:
+        entry = dict(meta)
+        current = store.get_current("experiment_design", meta["resource_name"])
+        if current:
+            _, content = current
+            entry["design_status"] = content.get("status", "unknown")
+            entry["family"] = content.get("family", "")
+            entry["base_preset"] = content.get("base_preset", "")
+        designs.append(entry)
 
-        return {"designs": designs, "total": len(designs)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {"designs": designs, "total": len(designs)}
 
 
 def version_diff(args: dict[str, Any]) -> dict[str, Any]:
     """Compare two versions of a design."""
-    try:
-        store = _get_store()
+    store = _get_store()
 
-        resource_name = args["resource_name"]
-        va = args["version_a"]
-        vb = args["version_b"]
+    resource_name = args["resource_name"]
+    va = args["version_a"]
+    vb = args["version_b"]
 
-        result_a = store.get_version_number("experiment_design", resource_name, va)
-        result_b = store.get_version_number("experiment_design", resource_name, vb)
+    result_a = store.get_version_number("experiment_design", resource_name, va)
+    result_b = store.get_version_number("experiment_design", resource_name, vb)
 
-        if result_a is None:
-            return {"error": f"Version {va} not found for {resource_name}"}
-        if result_b is None:
-            return {"error": f"Version {vb} not found for {resource_name}"}
+    if result_a is None:
+        return {"error": f"Version {va} not found for {resource_name}"}
+    if result_b is None:
+        return {"error": f"Version {vb} not found for {resource_name}"}
 
-        meta_a, content_a = result_a
-        meta_b, content_b = result_b
+    meta_a, content_a = result_a
+    meta_b, content_b = result_b
 
-        # Compute diffs
-        all_keys = set(content_a.keys()) | set(content_b.keys())
-        changes = {}
-        for key in sorted(all_keys):
-            val_a = content_a.get(key)
-            val_b = content_b.get(key)
-            if val_a != val_b:
-                changes[key] = {f"v{va}": val_a, f"v{vb}": val_b}
+    all_keys = set(content_a.keys()) | set(content_b.keys())
+    changes = {}
+    for key in sorted(all_keys):
+        val_a = content_a.get(key)
+        val_b = content_b.get(key)
+        if val_a != val_b:
+            changes[key] = {f"v{va}": val_a, f"v{vb}": val_b}
 
-        return {
-            "resource_name": resource_name,
-            "version_a": {"version": va, "created_at": meta_a.get("created_at"), "summary": meta_a.get("summary")},
-            "version_b": {"version": vb, "created_at": meta_b.get("created_at"), "summary": meta_b.get("summary")},
-            "changes": changes,
-            "unchanged_keys": sorted(all_keys - set(changes.keys())),
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {
+        "resource_name": resource_name,
+        "version_a": {"version": va, "created_at": meta_a.get("created_at"), "summary": meta_a.get("summary")},
+        "version_b": {"version": vb, "created_at": meta_b.get("created_at"), "summary": meta_b.get("summary")},
+        "changes": changes,
+        "unchanged_keys": sorted(all_keys - set(changes.keys())),
+    }
 
 
 def version_get_design(args: dict[str, Any]) -> dict[str, Any]:
     """Get full content and metadata for a versioned design."""
-    try:
-        store = _get_store()
-        design_name = args["design_name"]
-        version = args.get("version")
+    store = _get_store()
+    design_name = args["design_name"]
+    version = args.get("version")
 
-        if version is not None:
-            result = store.get_version_number("experiment_design", design_name, version)
-        else:
-            result = store.get_current("experiment_design", design_name)
+    if version is not None:
+        result = store.get_version_number("experiment_design", design_name, version)
+    else:
+        result = store.get_current("experiment_design", design_name)
 
-        if result is None:
-            return {"error": f"Design '{design_name}' not found" + (f" at version {version}" if version else "")}
+    if result is None:
+        return {"error": f"Design '{design_name}' not found" + (f" at version {version}" if version else "")}
 
-        meta, content = result
-        return {"version_meta": meta, "design": content}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    meta, content = result
+    return {"version_meta": meta, "design": content}
 
 
 def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
@@ -1200,7 +1148,7 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.fleet.queue import enqueue_experiments
         from crucible.runner.design import design_to_experiment_config
-        from crucible.runner.fingerprint import build_run_manifest
+        from crucible.core.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
         manifest = build_run_manifest(config.project_root)
@@ -1242,7 +1190,6 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
 
         run_id = added[0]["run_id"]
 
-        # Update design status to "running" and link run_id
         content["status"] = "running"
         linked = list(content.get("linked_run_ids", []))
         linked.append(run_id)
@@ -1305,49 +1252,40 @@ def _get_note_store():
 
 def note_add(args: dict[str, Any]) -> dict[str, Any]:
     """Attach a note to an experiment run."""
-    try:
-        store = _get_note_store()
-        entry = store.add(
-            run_id=args["run_id"],
-            body=args["text"],
-            stage=args.get("stage", ""),
-            tags=args.get("tags", []),
-            confidence=args.get("confidence"),
-            created_by=args.get("created_by", "mcp-agent"),
-        )
-        return {"status": "added", "note": entry}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    store = _get_note_store()
+    entry = store.add(
+        run_id=args["run_id"],
+        body=args["text"],
+        stage=args.get("stage", ""),
+        tags=args.get("tags", []),
+        confidence=args.get("confidence"),
+        created_by=args.get("created_by", "mcp-agent"),
+    )
+    return {"status": "added", "note": entry}
 
 
 def note_get(args: dict[str, Any]) -> dict[str, Any]:
     """Get all notes for a run."""
-    try:
-        store = _get_note_store()
-        run_id = args["run_id"]
-        stage = args.get("stage", "")
-        entries = store.get_for_run(run_id)
-        if stage:
-            entries = [e for e in entries if e.get("stage") == stage]
-        return {"run_id": run_id, "notes": entries, "total": len(entries)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    store = _get_note_store()
+    run_id = args["run_id"]
+    stage = args.get("stage", "")
+    entries = store.get_for_run(run_id)
+    if stage:
+        entries = [e for e in entries if e.get("stage") == stage]
+    return {"run_id": run_id, "notes": entries, "total": len(entries)}
 
 
 def note_search(args: dict[str, Any]) -> dict[str, Any]:
     """Search notes across runs."""
-    try:
-        store = _get_note_store()
-        entries = store.search(
-            query=args.get("query", ""),
-            tags=args.get("tags"),
-            stage=args.get("stage", ""),
-            run_id=args.get("run_id", ""),
-            limit=args.get("limit", 50),
-        )
-        return {"notes": entries, "total": len(entries)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    store = _get_note_store()
+    entries = store.search(
+        query=args.get("query", ""),
+        tags=args.get("tags"),
+        stage=args.get("stage", ""),
+        run_id=args.get("run_id", ""),
+        limit=args.get("limit", 50),
+    )
+    return {"notes": entries, "total": len(entries)}
 
 
 # ---------------------------------------------------------------------------
@@ -1373,7 +1311,6 @@ def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
         except ImportError:
             return {"error": "wandb not installed"}
 
-        # Parse entity/project/run_id from URL
         parts = wandb_url.rstrip("/").split("/")
         runs_idx = parts.index("runs")
         wb_run_id = parts[runs_idx + 1]
@@ -1446,28 +1383,25 @@ def _get_hub():
 
 def hub_status(args: dict[str, Any]) -> dict[str, Any]:
     """Hub info, active track, linked projects."""
-    try:
-        hub = _get_hub()
-        if hub is None:
-            return {"initialized": False, "message": "Hub not initialized. Run hub init first."}
+    hub = _get_hub()
+    if hub is None:
+        return {"initialized": False, "message": "Hub not initialized. Run hub init first."}
 
-        active_track = hub.get_active_track()
-        projects = hub.list_projects()
-        tracks = hub.list_tracks()
+    active_track = hub.get_active_track()
+    projects = hub.list_projects()
+    tracks = hub.list_tracks()
 
-        return {
-            "initialized": True,
-            "hub_dir": str(hub.hub_dir),
-            "active_track": active_track,
-            "projects": projects,
-            "tracks_count": len(tracks),
-            "tracks": [
-                {"name": t.get("name"), "description": t.get("description", ""), "active": t.get("active", True)}
-                for t in tracks
-            ],
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {
+        "initialized": True,
+        "hub_dir": str(hub.hub_dir),
+        "active_track": active_track,
+        "projects": projects,
+        "tracks_count": len(tracks),
+        "tracks": [
+            {"name": t.get("name"), "description": t.get("description", ""), "active": t.get("active", True)}
+            for t in tracks
+        ],
+    }
 
 
 def hub_sync(args: dict[str, Any]) -> dict[str, Any]:
@@ -1486,70 +1420,58 @@ def hub_sync(args: dict[str, Any]) -> dict[str, Any]:
 
 def track_create(args: dict[str, Any]) -> dict[str, Any]:
     """Create a new research track."""
-    try:
-        hub = _get_hub()
-        if hub is None:
-            return {"error": "Hub not initialized."}
+    hub = _get_hub()
+    if hub is None:
+        return {"error": "Hub not initialized."}
 
-        name = args["name"]
-        description = args.get("description", "")
-        tags = args.get("tags", [])
+    name = args["name"]
+    description = args.get("description", "")
+    tags = args.get("tags", [])
 
-        track = hub.create_track(name, description=description, tags=tags)
-        return {"status": "created", "track": track}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    track = hub.create_track(name, description=description, tags=tags)
+    return {"status": "created", "track": track}
 
 
 def track_list(args: dict[str, Any]) -> dict[str, Any]:
     """List all research tracks."""
-    try:
-        hub = _get_hub()
-        if hub is None:
-            return {"error": "Hub not initialized."}
+    hub = _get_hub()
+    if hub is None:
+        return {"error": "Hub not initialized."}
 
-        tracks = hub.list_tracks()
-        active = hub.get_active_track()
-        return {
-            "active_track": active,
-            "tracks": tracks,
-            "total": len(tracks),
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    tracks = hub.list_tracks()
+    active = hub.get_active_track()
+    return {
+        "active_track": active,
+        "tracks": tracks,
+        "total": len(tracks),
+    }
 
 
 def track_switch(args: dict[str, Any]) -> dict[str, Any]:
     """Switch the active research track."""
-    try:
-        hub = _get_hub()
-        if hub is None:
-            return {"error": "Hub not initialized."}
+    hub = _get_hub()
+    if hub is None:
+        return {"error": "Hub not initialized."}
 
-        name = args["name"]
-        hub.activate_track(name)
-        return {"status": "switched", "active_track": name}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    name = args["name"]
+    hub.activate_track(name)
+    return {"status": "switched", "active_track": name}
 
 
 def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
     """Query findings across hub scopes."""
-    try:
-        hub = _get_hub()
-        if hub is None:
-            return {"error": "Hub not initialized."}
+    hub = _get_hub()
+    if hub is None:
+        return {"error": "Hub not initialized."}
 
-        scope = args.get("scope", "global")
-        track = args.get("track")
-        status = args.get("status")
-        tags = args.get("tags")
-        limit = args.get("limit", 50)
+    scope = args.get("scope", "global")
+    track = args.get("track")
+    status = args.get("status")
+    tags = args.get("tags")
+    limit = args.get("limit", 50)
 
-        findings = hub.list_findings(scope, track=track, status=status, tags=tags)
-        return {"findings": findings[:limit], "total": len(findings)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    findings = hub.list_findings(scope, track=track, status=status, tags=tags)
+    return {"findings": findings[:limit], "total": len(findings)}
 
 
 def _research_finding_to_hub_finding(finding: dict[str, Any], config: ProjectConfig) -> dict[str, Any]:
@@ -2164,11 +2086,9 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     if not spec or not isinstance(spec, dict):
         return {"error": "spec must be a non-empty dict with block, stack, etc."}
 
-    # Validate name is a valid Python identifier
     if not name.isidentifier():
         return {"error": f"name must be a valid Python identifier, got: {name!r}"}
 
-    # Build full spec dict
     spec_dict = {
         "name": name,
         "version": spec.get("version", 1),
@@ -2184,14 +2104,12 @@ def model_compose(args: dict[str, Any]) -> dict[str, Any]:
     if "augmentations" in spec:
         spec_dict["augmentations"] = spec["augmentations"]
 
-    # Validate using ArchitectureSpec.from_dict
     try:
         from crucible.models.composer import ArchitectureSpec
         ArchitectureSpec.from_dict(spec_dict)
     except (CrucibleError, KeyError, ValueError, TypeError) as exc:
         return {"error": f"Spec validation failed: {exc}"}
 
-    # Determine save path
     config = _get_config()
     if scope == "global":
         try:
@@ -2249,7 +2167,6 @@ def model_from_template(args: dict[str, Any]) -> dict[str, Any]:
     if base_spec is None:
         return {"error": f"No YAML spec found for base family {base!r}. Only spec-based families can be forked."}
 
-    # Deep-merge overrides
     merged = _deep_merge(base_spec, overrides)
     merged["name"] = name
 
@@ -2426,58 +2343,52 @@ def model_get_spec(args: dict[str, Any]) -> dict[str, Any]:
 def config_get_presets(args: dict[str, Any]) -> dict[str, Any]:
     """All presets with resolved config values."""
     config = _get_config()
-    try:
-        from crucible.runner.presets import get_preset, list_presets
+    from crucible.runner.presets import get_preset, list_presets
 
-        preset_name = args.get("preset_name", "")
-        if preset_name:
-            resolved = get_preset(preset_name, project_config=config)
-            return {"preset": preset_name, "config": resolved}
-        else:
-            all_presets = {}
-            for name in list_presets(project_config=config):
-                all_presets[name] = get_preset(name, project_config=config)
-            return {"presets": all_presets}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    preset_name = args.get("preset_name", "")
+    if preset_name:
+        resolved = get_preset(preset_name, project_config=config)
+        return {"preset": preset_name, "config": resolved}
+    else:
+        all_presets = {}
+        for name in list_presets(project_config=config):
+            all_presets[name] = get_preset(name, project_config=config)
+        return {"presets": all_presets}
 
 
 def config_get_project(args: dict[str, Any]) -> dict[str, Any]:
     """Get the full configuration of a project spec."""
     config = _get_config()
-    try:
-        from crucible.core.config import load_project_spec
-        project_name = args["project_name"]
-        spec = load_project_spec(project_name, config.project_root)
-        result: dict[str, Any] = {
-            "name": spec.name,
-            "repo": getattr(spec, "repo", ""),
-            "branch": getattr(spec, "branch", ""),
-            "workspace": getattr(spec, "workspace", ""),
-            "launcher": getattr(spec, "launcher", ""),
-            "launcher_entry": getattr(spec, "launcher_entry", ""),
+    from crucible.core.config import load_project_spec
+    project_name = args["project_name"]
+    spec = load_project_spec(project_name, config.project_root)
+    result: dict[str, Any] = {
+        "name": spec.name,
+        "repo": getattr(spec, "repo", ""),
+        "branch": getattr(spec, "branch", ""),
+        "workspace": getattr(spec, "workspace", ""),
+        "launcher": getattr(spec, "launcher", ""),
+        "launcher_entry": getattr(spec, "launcher_entry", ""),
+    }
+    if spec.pod:
+        result["pod"] = {
+            "gpu_type": getattr(spec.pod, "gpu_type", ""),
+            "container_disk": getattr(spec.pod, "container_disk", 0),
+            "volume_disk": getattr(spec.pod, "volume_disk", 0),
+            "interruptible": getattr(spec.pod, "interruptible", False),
+            "image": getattr(spec.pod, "image", ""),
         }
-        if spec.pod:
-            result["pod"] = {
-                "gpu_type": getattr(spec.pod, "gpu_type", ""),
-                "container_disk": getattr(spec.pod, "container_disk", 0),
-                "volume_disk": getattr(spec.pod, "volume_disk", 0),
-                "interruptible": getattr(spec.pod, "interruptible", False),
-                "image": getattr(spec.pod, "image", ""),
-            }
-        result["env_set"] = dict(getattr(spec, "env_set", {}) or {})
-        result["env_forward"] = list(getattr(spec, "env_forward", []) or [])
-        if spec.metrics:
-            result["metrics"] = {
-                "source": getattr(spec.metrics, "source", ""),
-                "primary": getattr(spec.metrics, "primary", ""),
-                "direction": getattr(spec.metrics, "direction", ""),
-            }
-        result["install"] = list(getattr(spec, "install", []) or [])
-        result["timeout"] = getattr(spec, "timeout", 0)
-        return result
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    result["env_set"] = dict(getattr(spec, "env_set", {}) or {})
+    result["env_forward"] = list(getattr(spec, "env_forward", []) or [])
+    if spec.metrics:
+        result["metrics"] = {
+            "source": getattr(spec.metrics, "source", ""),
+            "primary": getattr(spec.metrics, "primary", ""),
+            "direction": getattr(spec.metrics, "direction", ""),
+        }
+    result["install"] = list(getattr(spec, "install", []) or [])
+    result["timeout"] = getattr(spec, "timeout", 0)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2788,97 +2699,88 @@ def _get_tree_dir(config, name: str):
 def tree_create(args: dict[str, Any]) -> dict[str, Any]:
     """Create a new search tree over experiments."""
     config = _get_config()
-    try:
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.researcher.search_tree import SearchTree
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        roots = args.get("roots", [])
-        tree = SearchTree.create(
-            tree_dir=tree_dir,
-            name=name,
-            description=args.get("description", ""),
-            roots=roots if roots else None,
-            expansion_policy=args.get("expansion_policy", "agent_directed"),
-            pruning_policy=args.get("pruning_policy", "agent_directed"),
-            expansion_config=args.get("expansion_config", {}),
-            pruning_config=args.get("pruning_config", {}),
-            primary_metric=args.get("primary_metric", config.metrics.primary),
-            metric_direction=args.get("metric_direction", "minimize"),
-            max_depth=args.get("max_depth", 10),
-            max_nodes=args.get("max_nodes", 500),
-            max_expansions_per_node=args.get("max_expansions_per_node", 5),
-        )
-        return {
-            "status": "created",
-            "name": name,
-            "root_node_ids": tree.meta["root_node_ids"],
-            "total_nodes": tree.meta["total_nodes"],
-            "tree_dir": str(tree_dir),
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    roots = args.get("roots", [])
+    tree = SearchTree.create(
+        tree_dir=tree_dir,
+        name=name,
+        description=args.get("description", ""),
+        roots=roots if roots else None,
+        expansion_policy=args.get("expansion_policy", "agent_directed"),
+        pruning_policy=args.get("pruning_policy", "agent_directed"),
+        expansion_config=args.get("expansion_config", {}),
+        pruning_config=args.get("pruning_config", {}),
+        primary_metric=args.get("primary_metric", config.metrics.primary),
+        metric_direction=args.get("metric_direction", "minimize"),
+        max_depth=args.get("max_depth", 10),
+        max_nodes=args.get("max_nodes", 500),
+        max_expansions_per_node=args.get("max_expansions_per_node", 5),
+    )
+    return {
+        "status": "created",
+        "name": name,
+        "root_node_ids": tree.meta["root_node_ids"],
+        "total_nodes": tree.meta["total_nodes"],
+        "tree_dir": str(tree_dir),
+    }
 
 
 def tree_get(args: dict[str, Any]) -> dict[str, Any]:
     """Get tree structure and ASCII visualization."""
     config = _get_config()
-    try:
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.researcher.search_tree import SearchTree
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
 
-        summary = tree.get_tree_summary()
-        ascii_tree = tree.render_ascii(max_depth=args.get("max_depth"))
+    summary = tree.get_tree_summary()
+    ascii_tree = tree.render_ascii(max_depth=args.get("max_depth"))
 
-        result: dict[str, Any] = {
-            "summary": summary,
-            "ascii_tree": ascii_tree,
-        }
+    result: dict[str, Any] = {
+        "summary": summary,
+        "ascii_tree": ascii_tree,
+    }
 
-        best_path = tree.get_best_path()
-        if best_path:
-            result["best_path"] = [
-                {
-                    "node_id": n["node_id"],
-                    "experiment_name": n["experiment_name"],
-                    "depth": n["depth"],
-                    "status": n["status"],
-                    "result_metric": n.get("result_metric"),
-                    "hypothesis": n.get("hypothesis", ""),
-                }
-                for n in best_path
-            ]
+    best_path = tree.get_best_path()
+    if best_path:
+        result["best_path"] = [
+            {
+                "node_id": n["node_id"],
+                "experiment_name": n["experiment_name"],
+                "depth": n["depth"],
+                "status": n["status"],
+                "result_metric": n.get("result_metric"),
+                "hypothesis": n.get("hypothesis", ""),
+            }
+            for n in best_path
+        ]
 
-        return result
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return result
 
 
 def tree_expand_node(args: dict[str, Any]) -> dict[str, Any]:
     """Add children to a completed node in the search tree."""
     config = _get_config()
-    try:
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.researcher.search_tree import SearchTree
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
 
-        parent_id = args["parent_node_id"]
-        children = args["children"]
-        new_ids = tree.expand_node(parent_id, children)
+    parent_id = args["parent_node_id"]
+    children = args["children"]
+    new_ids = tree.expand_node(parent_id, children)
 
-        return {
-            "status": "expanded",
-            "parent_node_id": parent_id,
-            "new_node_ids": new_ids,
-            "total_nodes": tree.meta["total_nodes"],
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {
+        "status": "expanded",
+        "parent_node_id": parent_id,
+        "new_node_ids": new_ids,
+        "total_nodes": tree.meta["total_nodes"],
+    }
 
 
 def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
@@ -2990,34 +2892,31 @@ def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
 def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
     """Prune a node or entire branch in the search tree."""
     config = _get_config()
-    try:
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.researcher.search_tree import SearchTree
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
 
-        node_id = args["node_id"]
-        reason = args.get("reason", "")
-        prune_branch = args.get("prune_branch", False)
+    node_id = args["node_id"]
+    reason = args.get("reason", "")
+    prune_branch = args.get("prune_branch", False)
 
-        if prune_branch:
-            count = tree.prune_branch(node_id, reason)
-            return {
-                "status": "branch_pruned",
-                "node_id": node_id,
-                "nodes_pruned": count,
-                "total_pruned": tree.meta["pruned_nodes"],
-            }
-        else:
-            tree.prune_node(node_id, reason)
-            return {
-                "status": "node_pruned",
-                "node_id": node_id,
-                "total_pruned": tree.meta["pruned_nodes"],
-            }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    if prune_branch:
+        count = tree.prune_branch(node_id, reason)
+        return {
+            "status": "branch_pruned",
+            "node_id": node_id,
+            "nodes_pruned": count,
+            "total_pruned": tree.meta["pruned_nodes"],
+        }
+    else:
+        tree.prune_node(node_id, reason)
+        return {
+            "status": "node_pruned",
+            "node_id": node_id,
+            "total_pruned": tree.meta["pruned_nodes"],
+        }
 
 
 def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
@@ -3091,40 +2990,37 @@ def tree_enqueue_pending(args: dict[str, Any]) -> dict[str, Any]:
 def tree_sync_results(args: dict[str, Any]) -> dict[str, Any]:
     """Match completed queue results to tree nodes."""
     config = _get_config()
-    try:
-        from crucible.analysis.results import merged_results
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.analysis.results import merged_results
+    from crucible.researcher.search_tree import SearchTree
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
 
-        all_results = merged_results(config)
-        results_by_id = {r.get("id", r.get("run_id", "")): r for r in all_results}
+    all_results = merged_results(config)
+    results_by_id = {r.get("id", r.get("run_id", "")): r for r in all_results}
 
-        synced = []
-        for node in tree.nodes.values():
-            if node["status"] in ("queued", "running") and node.get("run_id"):
-                result = results_by_id.get(node["run_id"])
-                if result and result.get("status") == "completed":
-                    result_data = result.get("result", {})
-                    result_data["run_id"] = node["run_id"]
-                    tree.record_result(node["node_id"], result_data)
-                    synced.append({
-                        "node_id": node["node_id"],
-                        "run_id": node["run_id"],
-                        "metric": node.get("result_metric"),
-                    })
+    synced = []
+    for node in tree.nodes.values():
+        if node["status"] in ("queued", "running") and node.get("run_id"):
+            result = results_by_id.get(node["run_id"])
+            if result and result.get("status") == "completed":
+                result_data = result.get("result", {})
+                result_data["run_id"] = node["run_id"]
+                tree.record_result(node["node_id"], result_data)
+                synced.append({
+                    "node_id": node["node_id"],
+                    "run_id": node["run_id"],
+                    "metric": node.get("result_metric"),
+                })
 
-        return {
-            "status": "synced",
-            "synced_count": len(synced),
-            "synced_nodes": synced,
-            "best_node_id": tree.meta.get("best_node_id"),
-            "best_metric": tree.meta.get("best_metric"),
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    return {
+        "status": "synced",
+        "synced_count": len(synced),
+        "synced_nodes": synced,
+        "best_node_id": tree.meta.get("best_node_id"),
+        "best_metric": tree.meta.get("best_metric"),
+    }
 
 
 def tree_list(args: dict[str, Any]) -> dict[str, Any]:
@@ -3358,8 +3254,7 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
         _project_contract_env(config, spec)
 
         from crucible.fleet.inventory import load_nodes_if_exists, next_node_index
-        from crucible.fleet.manager import FleetManager
-        fm = FleetManager(config)
+        fm = _get_fleet_manager(config)
         name_prefix = project_name[:12]
         existing_nodes = load_nodes_if_exists(config.project_root / config.nodes_file)
 
@@ -3713,7 +3608,6 @@ def run_project_chain(args: dict[str, Any]) -> dict[str, Any]:
 
         spec = load_project_spec(project_name, config.project_root)
 
-        # Validate all variants exist before starting
         missing = [v for v in variants if v not in spec.variants]
         if missing:
             available = sorted(spec.variants.keys()) or ["(none)"]
@@ -3721,7 +3615,6 @@ def run_project_chain(args: dict[str, Any]) -> dict[str, Any]:
                 "error": f"Unknown variants: {missing}. Available: {', '.join(available)}",
             }
 
-        # Find the target node
         nodes_file = config.project_root / config.nodes_file
         all_nodes = load_nodes_if_exists(nodes_file) or []
         node = next((n for n in all_nodes if n["name"] == node_name), None)
@@ -4192,14 +4085,11 @@ def plugin_list(args: dict[str, Any]) -> dict[str, Any]:
     if plugin_type not in _PLUGIN_LIST_DISPATCH:
         return {"error": f"Unknown plugin type {plugin_type!r}. Valid: {_VALID_PLUGIN_TYPES}"}
     module_path, attr_name, key = _PLUGIN_LIST_DISPATCH[plugin_type]
-    try:
-        mod = importlib.import_module(module_path)
-        attr = getattr(mod, attr_name)
-        # attr is either a function (list_*_detailed) or a PluginRegistry instance
-        items = attr() if callable(attr) else attr.list_plugins_detailed()
-        return {key: items}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    mod = importlib.import_module(module_path)
+    attr = getattr(mod, attr_name)
+    # attr is either a function (list_*_detailed) or a PluginRegistry instance
+    items = attr() if callable(attr) else attr.list_plugins_detailed()
+    return {key: items}
 
 
 def plugin_add(args: dict[str, Any]) -> dict[str, Any]:
@@ -4219,12 +4109,9 @@ def plugin_get_schema(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"Schema not available for {plugin_type!r}. Supported: {supported}"}
     module_path, registry_name = _PLUGIN_SCHEMA_DISPATCH[plugin_type]
     name = args.get("name", "")
-    try:
-        mod = importlib.import_module(module_path)
-        registry = getattr(mod, registry_name)
-        return {"type": plugin_type, "name": name, "schema": registry.get_schema(name)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    mod = importlib.import_module(module_path)
+    registry = getattr(mod, registry_name)
+    return {"type": plugin_type, "name": name, "schema": registry.get_schema(name)}
 
 
 # ---------------------------------------------------------------------------
@@ -4817,14 +4704,11 @@ def harness_propose(args: dict[str, Any]) -> dict[str, Any]:
     RETURNS: List of candidate dicts (not yet validated or dispatched).
     NEXT: harness_validate, harness_iterate.
     """
-    try:
-        opt = _get_harness_optimizer(args["tree_name"])
-        if opt is None:
-            return {"error": "[StateError] call harness_init first"}
-        cands = opt.propose_candidates(args.get("n"))
-        return {"status": "ok", "candidates": cands, "count": len(cands)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    opt = _get_harness_optimizer(args["tree_name"])
+    if opt is None:
+        return {"error": "[StateError] call harness_init first"}
+    cands = opt.propose_candidates(args.get("n"))
+    return {"status": "ok", "candidates": cands, "count": len(cands)}
 
 
 def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
@@ -4833,20 +4717,17 @@ def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
     REQUIRES: harness_init called, ``candidates`` list with ``code`` fields.
     RETURNS: Annotated candidates (each with ``validation`` and ``valid``).
     """
-    try:
-        opt = _get_harness_optimizer(args["tree_name"])
-        if opt is None:
-            return {"error": "[StateError] call harness_init first"}
-        candidates = list(args.get("candidates") or [])
-        kept = opt.validate_candidates(candidates)
-        return {
-            "status": "ok",
-            "candidates": candidates,
-            "valid_count": len(kept),
-            "rejected_count": len(candidates) - len(kept),
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    opt = _get_harness_optimizer(args["tree_name"])
+    if opt is None:
+        return {"error": "[StateError] call harness_init first"}
+    candidates = list(args.get("candidates") or [])
+    kept = opt.validate_candidates(candidates)
+    return {
+        "status": "ok",
+        "candidates": candidates,
+        "valid_count": len(kept),
+        "rejected_count": len(candidates) - len(kept),
+    }
 
 
 def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
@@ -4856,97 +4737,76 @@ def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
     RETURNS: Iteration summary (counts, frontier snapshot, log record).
     NEXT: harness_frontier, harness_evolution_log.
     """
-    try:
-        opt = _get_harness_optimizer(args["tree_name"])
-        if opt is None:
-            return {"error": "[StateError] call harness_init first"}
-        summary = opt.run_iteration(
-            cost=args.get("cost"),
-            notes=args.get("notes", ""),
-        )
-        return {"status": "ok", **summary}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    opt = _get_harness_optimizer(args["tree_name"])
+    if opt is None:
+        return {"error": "[StateError] call harness_init first"}
+    summary = opt.run_iteration(
+        cost=args.get("cost"),
+        notes=args.get("notes", ""),
+    )
+    return {"status": "ok", **summary}
 
 
 def harness_frontier(args: dict[str, Any]) -> dict[str, Any]:
     """Return the current Pareto frontier snapshot for a harness tree."""
-    try:
-        opt = _get_harness_optimizer(args["tree_name"])
-        if opt is None:
-            # Allow reading without an initialized optimizer.
-            from crucible.researcher.search_tree import SearchTree
+    opt = _get_harness_optimizer(args["tree_name"])
+    if opt is None:
+        # Allow reading without an initialized optimizer.
+        from crucible.researcher.search_tree import SearchTree
 
-            config = _get_config()
-            tree_dir = _get_tree_dir(config, args["tree_name"])
-            tree = SearchTree.load(tree_dir)
-            return {"status": "ok", **tree.frontier_summary()}
-        return {"status": "ok", **opt.frontier()}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+        config = _get_config()
+        tree_dir = _get_tree_dir(config, args["tree_name"])
+        tree = SearchTree.load(tree_dir)
+        return {"status": "ok", **tree.frontier_summary()}
+    return {"status": "ok", **opt.frontier()}
 
 
 def harness_evolution_log(args: dict[str, Any]) -> dict[str, Any]:
     """Return the evolution log for a harness tree."""
-    try:
-        from crucible.researcher.evolution_log import read_log
+    from crucible.researcher.evolution_log import read_log
 
-        config = _get_config()
-        tree_dir = _get_tree_dir(config, args["tree_name"])
-        records = read_log(tree_dir)
-        return {"status": "ok", "records": records, "count": len(records)}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    config = _get_config()
+    tree_dir = _get_tree_dir(config, args["tree_name"])
+    records = read_log(tree_dir)
+    return {"status": "ok", "records": records, "count": len(records)}
 
 
 def tree_pareto(args: dict[str, Any]) -> dict[str, Any]:
     """Return the Pareto frontier for any search tree (not harness-specific)."""
-    try:
-        from crucible.researcher.search_tree import SearchTree
+    from crucible.researcher.search_tree import SearchTree
 
-        config = _get_config()
-        tree_dir = _get_tree_dir(config, args["name"])
-        tree = SearchTree.load(tree_dir)
-        return {"status": "ok", **tree.frontier_summary()}
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    config = _get_config()
+    tree_dir = _get_tree_dir(config, args["name"])
+    tree = SearchTree.load(tree_dir)
+    return {"status": "ok", **tree.frontier_summary()}
 
 
 # ─── Eval watcher (auto-eval daemon for running pods) ──────────────────────
 
 def eval_watch_start(args: dict[str, Any]) -> dict[str, Any]:
     """Start the eval-watcher daemon for a project."""
-    try:
-        from crucible.runner import eval_watcher
-        return eval_watcher.start(
-            project_name=args["project_name"],
-            interval=int(args.get("interval", 300)),
-            remote_pattern=args.get(
-                "remote_pattern",
-                "/workspace/project/checkpoints/*.pt",
-            ),
-            env=args.get("env") or None,
-        )
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    from crucible.runner import eval_watcher
+    return eval_watcher.start(
+        project_name=args["project_name"],
+        interval=int(args.get("interval", 300)),
+        remote_pattern=args.get(
+            "remote_pattern",
+            "/workspace/project/checkpoints/*.pt",
+        ),
+        env=args.get("env") or None,
+    )
 
 
 def eval_watch_stop(args: dict[str, Any]) -> dict[str, Any]:
     """Stop the eval-watcher daemon."""
-    try:
-        from crucible.runner import eval_watcher
-        return eval_watcher.stop()
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    from crucible.runner import eval_watcher
+    return eval_watcher.stop()
 
 
 def eval_watch_status(args: dict[str, Any]) -> dict[str, Any]:
     """Return current state + most recent N eval rows."""
-    try:
-        from crucible.runner import eval_watcher
-        return eval_watcher.status(recent=int(args.get("recent", 10)))
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+    from crucible.runner import eval_watcher
+    return eval_watcher.status(recent=int(args.get("recent", 10)))
 
 
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {

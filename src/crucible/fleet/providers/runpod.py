@@ -18,6 +18,7 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 from crucible.core.errors import FleetError
+from crucible.core.types import JsonDict, JsonValue
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
 from crucible.core.types import NodeRecord
 from crucible.fleet.provider import FleetProvider
@@ -61,9 +62,9 @@ def runpod_request(
     method: str,
     path: str,
     *,
-    payload: dict[str, Any] | None = None,
-    query: dict[str, Any] | None = None,
-) -> Any:
+    payload: JsonDict | None = None,
+    query: dict[str, str] | None = None,
+) -> JsonValue:
     """Perform a single RunPod REST API call."""
     api_key = runpod_api_key()
     url = RUNPOD_REST_BASE.rstrip("/") + path
@@ -647,7 +648,7 @@ def inventory_record_from_api(
     return {
         "name": raw.get("name") or previous.get("name") or raw["id"],
         "node_id": raw["id"],
-        "pod_id": raw["id"],  # backward compat
+        "pod_id": raw["id"],  # alias for node_id (RunPod API compatibility)
         "gpu": gpu.get("displayName") or previous.get("gpu") or "-",
         "gpu_count": raw.get("gpuCount") or previous.get("gpu_count") or 1,
         "interruptible": interruptible_val,
@@ -885,7 +886,7 @@ class RunPodProvider(FleetProvider):
                     record = inventory_record_from_api(pod, previous=None, defaults=self.defaults)
                     record["state"] = "reconciled_orphan"
                     refreshed.append(record)
-        except Exception as exc:
+        except (FleetError, OSError) as exc:
             log_warn(f"Orphan reconciliation failed (non-fatal): {exc}")
 
         return refreshed

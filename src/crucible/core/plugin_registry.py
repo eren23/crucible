@@ -45,8 +45,8 @@ class PluginRegistry(Generic[T]):
 
     def __init__(self, plugin_type: str) -> None:
         self.plugin_type = plugin_type
-        self._registry: dict[str, Any] = {}
-        self._meta: dict[str, dict[str, Any]] = {}
+        self._registry: dict[str, T] = {}
+        self._meta: dict[str, dict[str, str]] = {}
         self._schemas: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
@@ -57,7 +57,7 @@ class PluginRegistry(Generic[T]):
     def register(
         self,
         name: str,
-        factory: Any,
+        factory: T,
         *,
         source: str = "builtin",
     ) -> None:

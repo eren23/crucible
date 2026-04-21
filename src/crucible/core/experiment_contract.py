@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import ConfigError
+from crucible.core.types import JsonDict
 
 
-def _cfg_attr(obj: object, name: str, default: object) -> Any:
+def _cfg_attr(obj: object, name: str, default: object) -> object:
+    """Safely get an attribute from an object with a default.
+
+    Returns ``object`` rather than ``Any`` because callers always narrow the
+    result via ``str()``, ``bool()``, or further ``_cfg_attr`` calls.
+    """
     return getattr(obj, name, default)
 
 
@@ -17,7 +22,7 @@ def resolve_wandb_settings(
     config: ProjectConfig,
     *,
     env: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, str | bool | None]:
     """Resolve W&B settings from config with environment fallbacks."""
     env_map = env or os.environ
     wandb_cfg = _cfg_attr(config, "wandb", None)
@@ -39,7 +44,7 @@ def contract_metadata(
     *,
     env: Mapping[str, str] | None = None,
     remote_node: str | None = None,
-) -> dict[str, Any]:
+) -> JsonDict:
     """Build persistable execution-contract metadata."""
     wandb = resolve_wandb_settings(config, env=env)
     return {
@@ -61,7 +66,7 @@ def validate_experiment_contract(
     action: str,
     execution_mode: str,
     env: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
+) -> JsonDict:
     """Validate the user-facing experiment contract and return resolved metadata.
 
     execution_mode:

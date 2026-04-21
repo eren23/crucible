@@ -19,7 +19,8 @@ from typing import Any
 
 from crucible.core.io import atomic_write_json, _json_ready
 from crucible.core.log import log_warn, utc_now_iso
-from crucible.runner.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
+from crucible.core.types import JsonDict, JsonValue
+from crucible.core.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
 
 
 class RunTracker:
@@ -58,7 +59,7 @@ class RunTracker:
                 self.status_path.read_text(encoding="utf-8")
             )
         else:
-            self._status: dict[str, Any] = {
+            self._status: JsonDict = {
                 "run_id": run_id,
                 "state": "created",
                 "phase": "created",
@@ -76,7 +77,7 @@ class RunTracker:
         self,
         state: str | None = None,
         heartbeat: bool = True,
-        **fields: Any,
+        **fields: JsonValue,
     ) -> None:
         """Update the status sidecar with new fields.
 
@@ -95,11 +96,11 @@ class RunTracker:
         self._status = payload
         atomic_write_json(self.status_path, payload)
 
-    def heartbeat(self, phase: str, **fields: Any) -> None:
+    def heartbeat(self, phase: str, **fields: JsonValue) -> None:
         """Shorthand for update with a phase change and heartbeat bump."""
         self.update(phase=phase, heartbeat=True, **fields)
 
-    def finalize(self, state: str, **fields: Any) -> None:
+    def finalize(self, state: str, **fields: JsonValue) -> None:
         """Mark the run as finished with a terminal state."""
         self.update(state=state, ended_at=utc_now_iso(), **fields)
 
@@ -108,9 +109,9 @@ class RunTracker:
         *,
         backend: str,
         script_path: str | Path,
-        config: dict[str, Any],
+        config: JsonDict,
         tags: list[str] | None = None,
-        extra: dict[str, Any] | None = None,
+        extra: JsonDict | None = None,
     ) -> None:
         """Write (or update) the immutable run manifest.
 
@@ -118,7 +119,7 @@ class RunTracker:
         script path, config, git state, code fingerprint, etc.
         """
         extra = extra or {}
-        manifest: dict[str, Any] = {
+        manifest: JsonDict = {
             "run_id": self.run_id,
             "backend": backend,
             "script_path": str(Path(script_path).resolve()),
@@ -157,6 +158,6 @@ class RunTracker:
         return self._status.get("state", "unknown")
 
     @property
-    def status(self) -> dict[str, Any]:
+    def status(self) -> JsonDict:
         """Full current status dict (read-only copy)."""
         return dict(self._status)

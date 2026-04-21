@@ -477,7 +477,7 @@ def load_project_spec(name: str, project_root: Path | None = None) -> ProjectSpe
         try:
             from crucible.core.hub import HubStore
             hub_dir = HubStore.resolve_hub_dir()
-        except Exception:
+        except (ImportError, OSError):
             hub_dir = None
         if hub_dir is not None:
             candidates.append(hub_dir / "projects" / f"{name}.yaml")
@@ -563,7 +563,7 @@ def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]
                 "train": raw.get("train", ""),
                 "metrics_primary": raw.get("metrics", {}).get("primary", "val_loss"),
             })
-        except Exception as exc:
+        except (OSError, ValueError, KeyError, TypeError) as exc:
             from crucible.core.log import log_warn
             log_warn(f"Failed to parse project spec {p.name}: {exc}")
             continue

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+
+from crucible.core.types import JsonValue
 
 # Patterns to redact
 _SECRET_KEYS = frozenset({
@@ -22,7 +23,7 @@ _SECRET_VALUE_PATTERNS = [
 ]
 
 
-def redact_secrets(data: Any) -> Any:
+def redact_secrets(data: JsonValue) -> JsonValue:
     """Deep-copy data with secret values replaced by '<REDACTED>'."""
     if isinstance(data, dict):
         result = {}

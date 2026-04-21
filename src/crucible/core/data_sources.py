@@ -54,12 +54,16 @@ class PreparationResult:
 
 
 @dataclass
-class ValidationResult:
+class DataValidationResult:
     """Result of validating a data source configuration."""
 
     valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+#: Backward-compatible alias -- external code may still import the old name.
+ValidationResult = DataValidationResult
 
 
 @dataclass
@@ -100,7 +104,7 @@ class DataSourcePlugin(ABC):
         ...
 
     @abstractmethod
-    def validate(self) -> ValidationResult:
+    def validate(self) -> DataValidationResult:
         """Validate the data source configuration and accessibility."""
         ...
 

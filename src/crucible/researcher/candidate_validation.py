@@ -23,7 +23,7 @@ from crucible.researcher.domain_spec import DomainSpec
 
 
 @dataclass
-class ValidationResult:
+class CandidateValidationResult:
     """Outcome of validating a single candidate."""
 
     valid: bool
@@ -38,6 +38,10 @@ class ValidationResult:
             "warnings": list(self.warnings),
             "code_hash": self.code_hash,
         }
+
+
+#: Backward-compatible alias -- external code may still import the old name.
+ValidationResult = CandidateValidationResult
 
 
 def _hash_code(code: str) -> str:
@@ -159,7 +163,7 @@ def validate_candidate(
     *,
     config: dict[str, Any] | None = None,
     seen_hashes: set[str] | None = None,
-) -> ValidationResult:
+) -> CandidateValidationResult:
     """Validate a candidate against a domain spec.
 
     Parameters
@@ -189,7 +193,7 @@ def validate_candidate(
     if seen_hashes is not None and code_hash in seen_hashes:
         warnings.append(f"Duplicate of previously seen candidate ({code_hash[:12]})")
 
-    return ValidationResult(
+    return CandidateValidationResult(
         valid=not errors,
         errors=errors,
         warnings=warnings,

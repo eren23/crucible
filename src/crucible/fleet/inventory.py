@@ -75,7 +75,7 @@ def load_nodes_snapshot(path: Path) -> list[NodeRecord]:
 def upsert_node_record(path: Path, node: NodeRecord) -> list[NodeRecord]:
     """Insert or update a single node in the on-disk list.
 
-    Matching is by ``node_id`` (or ``pod_id`` for backward compat) then ``name``.
+    Matching is by ``node_id`` (or ``pod_id`` for RunPod nodes) then ``name``.
     """
     with NODES_LOCK:
         nodes = load_nodes_if_exists(path)

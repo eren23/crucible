@@ -19,6 +19,16 @@ from typing import Any
 
 from crucible.core.plugin_registry import PluginRegistry
 
+# Training state dict passed to callbacks.  Contains at minimum ``"model"``
+# (nn.Module) and ``"optimizer"`` (Optimizer).  Additional keys vary by
+# training backend.  ``Any`` for values is correct here because the state
+# bag is intentionally extensible.
+TrainingState = dict[str, Any]
+
+# Metrics dict: step-level scalars.  Values are typically float, but
+# may be torch.Tensor before calling .item().
+MetricsDict = dict[str, float | Any]
+
 CALLBACK_REGISTRY = PluginRegistry("callback")
 
 
@@ -35,7 +45,7 @@ class TrainingCallback(ABC):
 
     priority: int = 100
 
-    def on_model_ready(self, state: dict[str, Any]) -> None:
+    def on_model_ready(self, state: TrainingState) -> None:
         """Called after model creation but BEFORE torch.compile.
 
         This is the correct hook for registering forward pre-hooks
@@ -43,25 +53,25 @@ class TrainingCallback(ABC):
         be visible to the compiled graph.
         """
 
-    def on_train_begin(self, state: dict[str, Any]) -> None:
+    def on_train_begin(self, state: TrainingState) -> None:
         """Called once before the training loop starts (AFTER torch.compile)."""
 
-    def on_step_begin(self, step: int, state: dict[str, Any]) -> None:
+    def on_step_begin(self, step: int, state: TrainingState) -> None:
         """Called at the start of each training step."""
 
-    def on_after_backward(self, step: int, state: dict[str, Any]) -> None:
+    def on_after_backward(self, step: int, state: TrainingState) -> None:
         """Called after loss.backward() but BEFORE optimizer.step().
 
         This is the correct hook for gradient clipping/manipulation.
         """
 
-    def on_step_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+    def on_step_end(self, step: int, metrics: MetricsDict, state: TrainingState) -> None:
         """Called after each training step (forward + backward + optimize)."""
 
-    def on_validation_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+    def on_validation_end(self, step: int, metrics: MetricsDict, state: TrainingState) -> None:
         """Called after a validation pass."""
 
-    def on_train_end(self, state: dict[str, Any]) -> None:
+    def on_train_end(self, state: TrainingState) -> None:
         """Called once after the training loop finishes."""
 
 
@@ -77,7 +87,7 @@ class GradClipCallback(TrainingCallback):
     def __init__(self, *, max_grad_norm: float = 1.0, **kwargs: Any) -> None:
         self.max_grad_norm = max_grad_norm
 
-    def on_after_backward(self, step: int, state: dict[str, Any]) -> None:
+    def on_after_backward(self, step: int, state: TrainingState) -> None:
         model = state.get("model")
         if model is None:
             return
@@ -90,7 +100,7 @@ class NaNDetectorCallback(TrainingCallback):
 
     priority = 20
 
-    def on_step_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+    def on_step_end(self, step: int, metrics: MetricsDict, state: TrainingState) -> None:
         import math
         loss = metrics.get("train_loss")
         if loss is not None and (math.isnan(loss) or math.isinf(loss)):
@@ -109,7 +119,7 @@ class EarlyStoppingCallback(TrainingCallback):
         self._best: float | None = None
         self._wait = 0
 
-    def on_validation_end(self, step: int, metrics: dict[str, Any], state: dict[str, Any]) -> None:
+    def on_validation_end(self, step: int, metrics: MetricsDict, state: TrainingState) -> None:
         val = metrics.get(self.metric)
         if val is None:
             return

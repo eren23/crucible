@@ -343,7 +343,7 @@ class HubStore:
                         tracks.append(raw)
                     else:
                         log_warn(f"Malformed track.yaml in {child.name}: expected dict")
-                except Exception as exc:
+                except (OSError, ValueError, KeyError) as exc:
                     log_warn(f"Failed to parse track.yaml in {child.name}: {exc}")
         return tracks
 
@@ -417,7 +417,6 @@ class HubStore:
         existing = sorted(fdir.glob("v*.yaml"))
         if not existing:
             return 1
-        # Extract version numbers
         versions = []
         for p in existing:
             m = re.match(r"v(\d+)\.yaml", p.name)
@@ -472,18 +471,15 @@ class HubStore:
         """Store a new finding. Returns the enriched finding dict."""
         self._require_init()
 
-        # Validate
         errors = validate_finding(finding)
         if errors:
             raise HubError(f"Invalid finding: {'; '.join(errors)}")
 
-        # Generate ID and version
         finding_id = finding.get("id") or make_finding_id(
             finding["title"], scope, track
         )
         version = self._next_finding_version(finding_id, scope, track)
 
-        # Enrich the finding
         enriched = dict(finding)
         enriched.setdefault("id", finding_id)
         enriched.setdefault("status", "active")
@@ -497,10 +493,8 @@ class HubStore:
         if track:
             enriched["track"] = track
 
-        # Write YAML version files
         self._write_finding_yaml(enriched, finding_id, version, scope, track)
 
-        # Append to ledger
         ledger_entry = {
             "kind": "finding",
             "ts": enriched["created_at"],
@@ -564,7 +558,6 @@ class HubStore:
 
             results.append(full)
 
-        # Sort by created_at
         results.sort(key=lambda f: f.get("created_at", ""))
         return results
 
@@ -586,12 +579,10 @@ class HubStore:
         if old is None:
             raise HubError(f"Finding '{finding_id}' not found in scope '{scope}'.")
 
-        # Mark old as superseded
         old["status"] = "superseded"
         old_version = old.get("version", 1)
         self._write_finding_yaml(old, finding_id, old_version, scope, track)
 
-        # Create new version
         version = self._next_finding_version(finding_id, scope, track)
         enriched = dict(new_finding)
         enriched["id"] = finding_id
@@ -652,12 +643,10 @@ class HubStore:
                 f"Finding '{finding_id}' not found in scope '{from_scope}'."
             )
 
-        # Mark source as promoted
         source["status"] = "promoted"
         source_version = source.get("version", 1)
         self._write_finding_yaml(source, finding_id, source_version, from_scope, from_track)
 
-        # Update source ledger
         ledger_entry = {
             "kind": "finding",
             "ts": utc_now_iso(),
@@ -693,7 +682,7 @@ class HubStore:
     # ------------------------------------------------------------------
 
     def _normalize_architecture_record(self, entry: dict[str, Any]) -> dict[str, Any]:
-        """Return a backward-compatible architecture metadata record."""
+        """Normalize an architecture metadata record, filling defaults for missing fields."""
         record = dict(entry)
         kind = record.get("kind", "code")
         if kind not in {"code", "spec"}:
@@ -749,7 +738,6 @@ class HubStore:
         plugin_path = target_dir / f"{name}{suffix}"
         plugin_path.write_text(code, encoding="utf-8")
 
-        # Build metadata record
         record: dict[str, Any] = {
             "name": name,
             "kind": kind,
@@ -759,7 +747,6 @@ class HubStore:
             "tags": tags or [],
         }
 
-        # Append to the registry ledger
         append_jsonl(self._arch_registry_path, record)
 
         return record
@@ -818,7 +805,6 @@ class HubStore:
         """
         self._require_init()
 
-        # Remove from ledger
         existing = self._read_architecture_registry()
         target = next((e for e in existing if e.get("name") == name), None)
         updated = [e for e in existing if e.get("name") != name]
@@ -826,7 +812,6 @@ class HubStore:
             return False
         write_jsonl(self._arch_registry_path, updated)
 
-        # Delete the stored asset file
         plugin_path = self._architecture_path_from_record(target or {"name": name, "kind": "code"})
         if plugin_path.exists():
             plugin_path.unlink()
@@ -865,7 +850,6 @@ class HubStore:
                 f["_source_scope"] = "global"
             findings.extend(global_findings)
 
-        # Sort newest first
         findings.sort(key=lambda f: f.get("created_at", ""), reverse=True)
 
         return findings[:max_findings]
@@ -894,7 +878,7 @@ class HubStore:
                 self._git_run("remote", "set-url", "origin", remote_url)
             else:
                 self._git_run("remote", "add", "origin", remote_url)
-        except Exception as exc:
+        except (subprocess.CalledProcessError, OSError) as exc:
             raise HubError(f"Failed to set remote: {exc}") from exc
 
     def sync(self, remote: str | None = None) -> dict[str, Any]:
@@ -915,10 +899,8 @@ class HubStore:
         remote_name = remote or "origin"
 
         try:
-            # Stage all changes
             self._git_run("add", "-A")
 
-            # Check if there are changes to commit
             status = self._git_run("status", "--porcelain", check=False)
             if status.stdout.strip():
                 self._git_run(
@@ -936,10 +918,9 @@ class HubStore:
                     # Remote may not exist yet — not an error
                     if "No remote" not in pull.stderr and "does not appear" not in pull.stderr:
                         result["errors"].append(f"pull: {pull.stderr.strip()}")
-            except Exception as exc:
+            except (subprocess.CalledProcessError, OSError) as exc:
                 result["errors"].append(f"pull: {exc}")
 
-            # Push
             try:
                 push = self._git_run("push", remote_name, "HEAD", check=False)
                 if push.returncode == 0:
@@ -947,10 +928,10 @@ class HubStore:
                 else:
                     if "No remote" not in push.stderr and "does not appear" not in push.stderr:
                         result["errors"].append(f"push: {push.stderr.strip()}")
-            except Exception as exc:
+            except (subprocess.CalledProcessError, OSError) as exc:
                 result["errors"].append(f"push: {exc}")
 
-        except Exception as exc:
+        except (subprocess.CalledProcessError, OSError) as exc:
             result["errors"].append(str(exc))
 
         return result

@@ -12,9 +12,9 @@ from crucible.core.data_sources import (
     DataSourcePlugin,
     DataStatus,
     DataStatusResult,
+    DataValidationResult,
     PreparationResult,
     SearchResult,
-    ValidationResult,
     register_data_source,
 )
 
@@ -129,11 +129,11 @@ class WandBArtifactSource(DataSourcePlugin):
                 success=False, job_id=job_id, message=str(e), shards_downloaded=0
             )
 
-    def validate(self) -> ValidationResult:
+    def validate(self) -> DataValidationResult:
         """Validate W&B artifact integrity."""
         artifact_path = self._get_local_artifact_path()
         if not artifact_path.exists():
-            return ValidationResult(valid=False, errors=["Artifact not downloaded"], warnings=[])
+            return DataValidationResult(valid=False, errors=["Artifact not downloaded"], warnings=[])
 
         errors = []
         warnings = []
@@ -146,7 +146,7 @@ class WandBArtifactSource(DataSourcePlugin):
         if len(shard_files) == 0:
             warnings.append("No .bin shard files found")
 
-        return ValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
+        return DataValidationResult(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
     def search(
         self, query: str, entity: str | None = None, project: str | None = None

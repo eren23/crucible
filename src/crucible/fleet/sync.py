@@ -105,14 +105,6 @@ def remote_exec(
     return _run(ssh_base(node) + [command], check=check, timeout=timeout)
 
 
-def remote_python(node: NodeRecord, code: str) -> subprocess.CompletedProcess[str]:
-    """Execute a Python snippet on a remote node."""
-    py = shlex.quote(node.get("python_bin", "python3"))
-    workspace = shlex.quote(node.get("workspace_path", "/workspace/project"))
-    command = f"cd {workspace} && {py} - <<'PY'\n{code}\nPY"
-    return remote_exec(node, command)
-
-
 def checked_remote_exec(
     node: NodeRecord,
     label: str,
@@ -294,7 +286,7 @@ def sync_repo(
     """
     git_sha: str | None = None
     if enforce_clean:
-        from crucible.runner.fingerprint import ensure_clean_commit
+        from crucible.core.fingerprint import ensure_clean_commit
 
         git_sha = ensure_clean_commit(project_root, auto_commit=auto_commit)
 
@@ -333,7 +325,7 @@ def sync_taps(
         return
     # Verify tap SHAs if expected
     if expected_shas:
-        from crucible.runner.fingerprint import safe_git_sha
+        from crucible.core.fingerprint import safe_git_sha
 
         for tap_name, expected in expected_shas.items():
             tap_dir = taps_dir / tap_name

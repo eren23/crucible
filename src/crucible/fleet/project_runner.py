@@ -21,10 +21,11 @@ from crucible.fleet.sync import remote_exec, rsync_base, _run
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectSpec
+    from crucible.core.types import NodeRecord
 
 
 def launch_project(
-    node: dict[str, Any],
+    node: NodeRecord,
     spec: ProjectSpec,
     run_id: str,
     *,
@@ -130,7 +131,7 @@ def launch_project(
 
 
 def chain_project_variants(
-    node: dict[str, Any],
+    node: NodeRecord,
     spec: ProjectSpec,
     variants: list[str],
     *,
@@ -240,14 +241,14 @@ def chain_project_variants(
     return results
 
 
-def check_project_running(node: dict[str, Any], pid: int) -> bool:
+def check_project_running(node: NodeRecord, pid: int) -> bool:
     """Check if a training process is still running on the pod."""
     probe = probe_project_process(node, pid)
     return bool(probe.get("running"))
 
 
 def probe_project_process(
-    node: dict[str, Any],
+    node: NodeRecord,
     pid: int,
     run_id: str | None = None,
     workspace: str = "/workspace/project",
@@ -288,7 +289,7 @@ def probe_project_process(
     }
 
 
-def _node_state_label(node: dict[str, Any]) -> str:
+def _node_state_label(node: NodeRecord) -> str:
     api_state = str(node.get("api_state") or "").lower()
     state = str(node.get("state") or "").lower()
     return api_state or state or "unknown"
@@ -299,7 +300,7 @@ def _classify_project_status(
     process_probe: dict[str, Any],
     parsed: dict[str, Any] | None,
     log_text: str,
-    node: dict[str, Any],
+    node: NodeRecord,
     wandb_info: dict[str, Any],
 ) -> tuple[str, str | None]:
     """Resolve the best status/failure_class for an external project run."""
@@ -330,7 +331,7 @@ def _classify_project_status(
 
 
 def collect_project_result(
-    node: dict[str, Any],
+    node: NodeRecord,
     spec: ProjectSpec,
     run_id: str,
     pid: int,
@@ -385,7 +386,6 @@ def collect_project_result(
     except Exception as exc:
         log_warn(f"{name}: failed to rsync checkpoints: {exc}")
 
-    # Parse stdout metrics from log
     parser = OutputParser()
     log_text = ""
     stdout_metrics: dict[str, Any] = {}

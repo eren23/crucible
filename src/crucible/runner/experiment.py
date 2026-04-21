@@ -244,7 +244,7 @@ def run_experiment(
     # -- Verify code version if expected SHA was set by dispatcher --
     expected_sha = env.get("CRUCIBLE_EXPECTED_GIT_SHA")
     if expected_sha:
-        from crucible.runner.fingerprint import safe_git_sha
+        from crucible.core.fingerprint import safe_git_sha
 
         actual_sha = safe_git_sha(root)
         if actual_sha and actual_sha != expected_sha:

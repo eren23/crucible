@@ -8,7 +8,7 @@ from typing import Any
 
 from crucible.core.io import atomic_write_json, _json_ready
 from crucible.core.log import utc_now_iso, utc_stamp
-from crucible.core.types import ExperimentResult, NodeRecord, QueueItem
+from crucible.core.types import ExperimentResult, JsonDict, JsonValue, NodeRecord, QueueItem
 
 # Thread lock for event file appends
 EVENTS_LOCK = threading.Lock()
@@ -34,7 +34,7 @@ def day_tag(day_dir: Path) -> str:
 # Events
 # ---------------------------------------------------------------------------
 
-def append_event(day_dir: Path, event_type: str, **fields: Any) -> None:
+def append_event(day_dir: Path, event_type: str, **fields: JsonValue) -> None:
     """Append a single event record to the day's events.jsonl."""
     event = {"ts": utc_now_iso(), "event": event_type, **_json_ready(fields)}
     path = day_dir / "events.jsonl"
@@ -48,12 +48,12 @@ def append_event(day_dir: Path, event_type: str, **fields: Any) -> None:
 # Summary
 # ---------------------------------------------------------------------------
 
-def write_day_summary(day_dir: Path, summary: dict[str, Any]) -> None:
+def write_day_summary(day_dir: Path, summary: JsonDict) -> None:
     """Write (or overwrite) the day summary JSON file."""
     atomic_write_json(day_dir / "summary.json", summary)
 
 
-def update_day_summary(day_dir: Path, summary: dict[str, Any], **updates: Any) -> None:
+def update_day_summary(day_dir: Path, summary: JsonDict, **updates: JsonValue) -> None:
     """Merge *updates* into *summary*, set ``last_updated_at``, and persist."""
     summary.update(updates)
     summary["last_updated_at"] = utc_now_iso()

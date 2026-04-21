@@ -22,6 +22,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from crucible.core.env import load_env_files
+from crucible.core.types import JsonDict, JsonValue
 from crucible.mcp.tools import TOOL_DISPATCH
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ _tracer: SessionTracer | None = None
 # ---------------------------------------------------------------------------
 
 
-def _json_text(obj: Any) -> list[TextContent]:
+def _json_text(obj: JsonValue) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(obj, indent=2, default=str))]
 
 
@@ -77,7 +78,7 @@ def _error_text(msg: str) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps({"error": msg}))]
 
 
-def _format_error(exc: BaseException, tb: str | None = None) -> dict[str, Any]:
+def _format_error(exc: BaseException, tb: str | None = None) -> JsonDict:
     """Build a structured error response with full context.
 
     Returns a dict that will be JSON-serialized as the tool response.
@@ -94,7 +95,7 @@ def _format_error(exc: BaseException, tb: str | None = None) -> dict[str, Any]:
     }
 
 
-def _safe_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
+def _safe_call(fn: Callable[..., JsonValue], *args: Any, **kwargs: Any) -> tuple[list[TextContent], bool, BaseException | None]:
     """Call a tool handler and return (result, is_error, exception).
 
     Never raises for normal tool failures (Exception). KeyboardInterrupt, SystemExit,
@@ -110,9 +111,9 @@ def _safe_call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[list[
         return (_json_text(_format_error(exc, tb)), True, exc)
 
 
-def _extract_trace_identifiers(name: str, arguments: dict[str, Any], raw: Any) -> dict[str, Any]:
+def _extract_trace_identifiers(name: str, arguments: dict[str, Any], raw: JsonValue) -> dict[str, list[str]]:
     """Extract stable run/design identifiers for traceability across MCP calls."""
-    identifiers: dict[str, Any] = {}
+    identifiers: dict[str, list[str]] = {}
     if not isinstance(arguments, dict):
         arguments = {}
     raw_dict = raw if isinstance(raw, dict) else {}
@@ -213,8 +214,8 @@ async def _run_with_keepalive(
     handler: Callable[..., Any],
     arguments: dict[str, Any],
     tool_name: str,
-    session: Any,
-    request_id: Any,
+    session: object,  # mcp.server.Session — typed as object to avoid coupling to MCP internals
+    request_id: object,  # MCP request identifier — opaque to Crucible
 ) -> tuple[list[TextContent], bool, BaseException | None]:  # type: ignore[type-arg]
     """Run a tool handler in a thread while sending periodic log messages.
 

@@ -163,7 +163,6 @@ class ResearchDAGBridge:
             self.state.update_mapping(crucible_id, status, result_metric=metric_val)
             return existing_canvas_id
 
-        # Create new node
         canvas_node_id = ""
         if fid and self.canvas_connected:
             canvas_node_id = self._try_create_canvas_node(
