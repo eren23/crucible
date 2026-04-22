@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from crucible.core.config import ProjectConfig
+from crucible.core.doom_loop import detect_research_loop
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
 from crucible.researcher.batch_design import DEFAULT_TIER_COSTS, design_batch
@@ -32,12 +33,14 @@ class AutonomousResearcher:
         dry_run: bool = False,
         llm: LLMClient | None = None,
         baseline_config: dict[str, str] | None = None,
+        doom_loop_threshold: int = 3,
     ) -> None:
         self.config = config
         self.tier = tier
         self.backend = backend
         self.dry_run = dry_run
         self.baseline_config = baseline_config
+        self.doom_loop_threshold = doom_loop_threshold
 
         budget = budget_hours or config.researcher.budget_hours
         self.max_iterations = max_iterations or config.researcher.max_iterations
@@ -73,6 +76,21 @@ class AutonomousResearcher:
 
             try:
                 analysis = self.analyze()
+
+                # Doom-loop guard: if the researcher has been repeating itself,
+                # inject a corrective prompt into the next hypothesis analysis
+                # so the LLM is forced to change course. Best-effort — a
+                # detector failure never blocks the loop.
+                try:
+                    correction = detect_research_loop(
+                        self.state, threshold=self.doom_loop_threshold
+                    )
+                except Exception as dl_exc:  # noqa: BLE001
+                    log_warn(f"doom-loop detector failed (non-fatal): {dl_exc}")
+                    correction = None
+                if correction:
+                    print(f"  ⚠ Doom-loop detected — injecting corrective prompt")
+                    analysis = f"{analysis}\n\n### Corrective guidance\n{correction}"
 
                 # Literature awareness (best-effort, never blocks the loop)
                 literature_context = ""

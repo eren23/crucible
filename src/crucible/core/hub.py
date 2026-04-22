@@ -49,6 +49,43 @@ _DEFAULT_HUB_DIR = Path.home() / ".crucible-hub"
 _HUB_VERSION = "1"
 
 
+_REMOTE_UNREACHABLE_PATTERNS = (
+    "not found",               # repository '<url>' not found
+    "could not read from remote",
+    "could not resolve host",
+    "connection refused",
+    "network is unreachable",
+    "operation timed out",
+    "permission denied",
+    "authentication failed",
+    "unable to access",
+)
+_REMOTE_NOT_CONFIGURED_PATTERNS = (
+    "no remote",
+    "does not appear",
+    "no such remote",
+)
+
+
+def _classify_remote_failure(stderr: str) -> str:
+    """Return 'unreachable', 'not_configured', or 'other' from git stderr."""
+    low = stderr.lower()
+    for p in _REMOTE_NOT_CONFIGURED_PATTERNS:
+        if p in low:
+            return "not_configured"
+    for p in _REMOTE_UNREACHABLE_PATTERNS:
+        if p in low:
+            return "unreachable"
+    return "other"
+
+
+def _condense(stderr: str, limit: int = 120) -> str:
+    """Single-line condensation of git stderr for user-facing notes."""
+    lines = [l.strip() for l in stderr.splitlines() if l.strip() and not l.startswith("remote:")]
+    s = " | ".join(lines)[:limit]
+    return s or stderr.strip()[:limit]
+
+
 def _slugify(name: str) -> str:
     """Convert a name to a filesystem-safe slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
@@ -884,15 +921,28 @@ class HubStore:
     def sync(self, remote: str | None = None) -> dict[str, Any]:
         """Sync hub state with git remote.
 
-        Stages all changes, commits if dirty, then pulls and pushes.
-        Returns a dict with sync status info.
+        Stages all changes, commits if dirty, then pulls and pushes if a
+        reachable remote is configured. A missing or unreachable remote is
+        NOT an error — the hub works fine local-only (e.g. tap-only users).
+
+        Returns a dict with explicit status fields:
+
+        - ``committed``: a commit was made for dirty working tree
+        - ``remote_configured``: ``origin`` (or *remote*) exists
+        - ``remote_reachable``: remote responded (vs 404, auth fail, net down)
+        - ``pushed`` / ``pulled``: push/pull succeeded
+        - ``notes``: human-readable lines explaining skipped / degraded cases
+        - ``errors``: only unexpected failures (local git problems)
         """
         self._require_init()
 
         result: dict[str, Any] = {
             "committed": False,
+            "remote_configured": False,
+            "remote_reachable": False,
             "pushed": False,
             "pulled": False,
+            "notes": [],
             "errors": [],
         }
 
@@ -909,27 +959,50 @@ class HubStore:
                 )
                 result["committed"] = True
 
-            # Pull (with rebase to keep history linear)
-            try:
-                pull = self._git_run("pull", "--rebase", remote_name, "HEAD", check=False)
-                if pull.returncode == 0:
-                    result["pulled"] = True
-                else:
-                    # Remote may not exist yet — not an error
-                    if "No remote" not in pull.stderr and "does not appear" not in pull.stderr:
-                        result["errors"].append(f"pull: {pull.stderr.strip()}")
-            except (subprocess.CalledProcessError, OSError) as exc:
-                result["errors"].append(f"pull: {exc}")
+            # Is a remote even configured? No → local-only mode, return clean.
+            remote_check = self._git_run("remote", "get-url", remote_name, check=False)
+            if remote_check.returncode != 0:
+                result["notes"].append(
+                    f"no git remote '{remote_name}' configured — local-only hub (taps/findings stored on this machine)"
+                )
+                return result
+            result["remote_configured"] = True
+            remote_url = remote_check.stdout.strip()
 
-            try:
+            # Pull (with rebase to keep history linear)
+            pull = self._git_run("pull", "--rebase", remote_name, "HEAD", check=False)
+            if pull.returncode == 0:
+                result["pulled"] = True
+                result["remote_reachable"] = True
+            else:
+                reason = _classify_remote_failure(pull.stderr)
+                if reason == "not_configured":
+                    result["notes"].append(f"pull skipped: no remote tracking for '{remote_name}'")
+                elif reason == "unreachable":
+                    result["notes"].append(
+                        f"remote '{remote_url}' unreachable: {_condense(pull.stderr)}"
+                    )
+                else:
+                    result["errors"].append(f"pull: {pull.stderr.strip()}")
+
+            # Only attempt push if pull confirmed the remote is actually there.
+            if result["remote_reachable"] or _classify_remote_failure(pull.stderr) == "not_configured":
                 push = self._git_run("push", remote_name, "HEAD", check=False)
                 if push.returncode == 0:
                     result["pushed"] = True
+                    result["remote_reachable"] = True
                 else:
-                    if "No remote" not in push.stderr and "does not appear" not in push.stderr:
+                    reason = _classify_remote_failure(push.stderr)
+                    if reason == "unreachable":
+                        result["notes"].append(
+                            f"push skipped: remote '{remote_url}' unreachable"
+                        )
+                    elif reason != "not_configured":
                         result["errors"].append(f"push: {push.stderr.strip()}")
-            except (subprocess.CalledProcessError, OSError) as exc:
-                result["errors"].append(f"push: {exc}")
+            else:
+                result["notes"].append(
+                    f"push skipped: remote '{remote_url}' is unreachable (fix the URL or `git remote remove {remote_name}`)"
+                )
 
         except (subprocess.CalledProcessError, OSError) as exc:
             result["errors"].append(str(exc))

@@ -1217,21 +1217,26 @@ TOOLS: list[Tool] = [
     Tool(
         name="finding_promote",
         description=(
-            "Promote a finding from track scope to global scope (or track to track).\n\n"
-            "REQUIRES: Finding ID from hub_findings_query.\n"
-            "RETURNS: {status, finding_id, from_scope, to_scope}\n"
+            "Promote a finding across scopes: project→track, track→global, or track→track.\n\n"
+            "REQUIRES:\n"
+            "- project→*: finding_index (0-indexed into ResearchState.findings, from context_get_findings)\n"
+            "- track→*: finding_id (from hub_findings_query)\n"
+            "- to_track when to_scope='track'; from_track when from_scope='track'\n"
+            "Confidence gates: project→track ≥0.6, track→global ≥0.8.\n"
+            "RETURNS: {status: 'promoted', finding: {...}}\n"
             "NEXT: hub_sync to persist, hub_findings_query to verify."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "finding_id": {"type": "string", "description": "The finding ID to promote."},
-                "from_scope": {"type": "string", "description": "Source scope (e.g. 'track')."},
-                "to_scope": {"type": "string", "description": "Destination scope (e.g. 'global')."},
-                "from_track": {"type": "string", "description": "Source track name (if from_scope='track')."},
-                "to_track": {"type": "string", "description": "Destination track name (if to_scope='track')."},
+                "finding_id": {"type": "string", "description": "Finding ID (required when from_scope='track')."},
+                "finding_index": {"type": "integer", "description": "Index into project ResearchState.findings (required when from_scope='project'). Use context_get_findings to list."},
+                "from_scope": {"type": "string", "enum": ["project", "track"], "description": "Source scope."},
+                "to_scope": {"type": "string", "enum": ["track", "global"], "description": "Destination scope."},
+                "from_track": {"type": "string", "description": "Source track name (required when from_scope='track')."},
+                "to_track": {"type": "string", "description": "Destination track name (required when to_scope='track')."},
             },
-            "required": ["finding_id", "from_scope", "to_scope"],
+            "required": ["from_scope", "to_scope"],
             "additionalProperties": False,
         },
     ),
@@ -2755,6 +2760,242 @@ TOOLS: list[Tool] = [
                     "default": 10,
                 },
             },
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
+    # Plan tools (LLM-facing todo list)
+    # ------------------------------------------------------------------
+    Tool(
+        name="plan_get",
+        description=(
+            "Return the current plan: a flat list of todo items with statuses "
+            "'pending', 'in_progress', or 'completed'. Backed by .crucible/plan.json.\n\n"
+            "REQUIRES: Nothing (empty plan if file missing).\n"
+            "RETURNS: {items: [{id, description, status, created_at, updated_at}]}\n"
+            "NEXT: plan_set to replace, plan_update_item to flip a single status."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="plan_set",
+        description=(
+            "Replace the entire plan with a new list of items. Use for work with "
+            "3+ steps. Each call sends the COMPLETE updated list — never partial.\n\n"
+            "Invariant: at most ONE item may be 'in_progress' at a time.\n\n"
+            "REQUIRES: items list.\n"
+            "RETURNS: {status: 'set', items: [...]}\n"
+            "NEXT: plan_update_item to flip statuses as you make progress."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "Full replacement plan.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Optional; auto-assigned if omitted."},
+                            "description": {"type": "string", "description": "What needs doing."},
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed"],
+                                "default": "pending",
+                            },
+                        },
+                        "required": ["description"],
+                    },
+                },
+            },
+            "required": ["items"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="plan_update_item",
+        description=(
+            "Flip one plan item's status. Enforces the one-in-progress rule.\n\n"
+            "REQUIRES: id of existing item, new status.\n"
+            "RETURNS: {status: 'updated', item: {...}}\n"
+            "NEXT: plan_get to review, plan_update_item to flip the next item."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Plan item id."},
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "completed"],
+                },
+            },
+            "required": ["id", "status"],
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
+    # HF ecosystem search (datasets / models / spaces / docs)
+    # ------------------------------------------------------------------
+    Tool(
+        name="research_hf_search",
+        description=(
+            "Search HuggingFace datasets, models, spaces, or docs.\n\n"
+            "REQUIRES: kind in {datasets, models, spaces, docs}, query. "
+            "multi_angle=true triggers LLM-driven cross-domain query expansion (slower, broader).\n"
+            "RETURNS: {kind, query, count, results: [...]}\n"
+            "NEXT: research_hf_search with a different kind, or data_prepare / model_fetch_architecture."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": ["datasets", "models", "spaces", "docs"],
+                    "description": "Which HF hub to search.",
+                },
+                "query": {"type": "string", "description": "Natural language or keyword query."},
+                "limit": {"type": "integer", "default": 10},
+                "multi_angle": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Expand the query via LLM and dedup across angles.",
+                },
+            },
+            "required": ["kind", "query"],
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
+    # GitHub search
+    # ------------------------------------------------------------------
+    Tool(
+        name="research_github_code",
+        description=(
+            "Search GitHub code. Requires GITHUB_TOKEN env (unauthenticated /search/code is disabled).\n\n"
+            "REQUIRES: GITHUB_TOKEN env var.\n"
+            "RETURNS: {query, language, count, results: [{repo, path, url, sha, match_snippets}]}\n"
+            "NEXT: research_github_read_file to fetch a matching file."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "GitHub code-search query."},
+                "language": {"type": "string", "description": "Optional language filter (e.g. 'python')."},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_github_list_repos",
+        description=(
+            "Search GitHub repositories. Auth optional (but avoids rate limits).\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {query, count, results: [{full_name, description, stars, forks, language, url, updated_at}]}\n"
+            "NEXT: research_github_read_file to inspect files."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Repository search query."},
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_github_read_file",
+        description=(
+            "Fetch a single file from a GitHub repo.\n\n"
+            "REQUIRES: repo ('owner/name'), path. Optional ref (default 'main').\n"
+            "RETURNS: {path, ref, size, encoding, content, url}\n"
+            "NEXT: model_add_architecture / paste snippet as hypothesis input."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "owner/name"},
+                "path": {"type": "string", "description": "File path within the repo."},
+                "ref": {"type": "string", "default": "main", "description": "Branch, tag, or sha."},
+            },
+            "required": ["repo", "path"],
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
+    # Orchestrator-driven research loop (Crucible is infra; you are the LLM)
+    # ------------------------------------------------------------------
+    Tool(
+        name="research_request_prompt",
+        description=(
+            "Build the orchestrator-facing prompt + JSON schema for the requested "
+            "research stage. Crucible ships the prompts and context; you (the "
+            "orchestrator) call your own LLM, parse per schema, then submit via "
+            "research_submit. No API keys needed inside Crucible.\n\n"
+            "Stages:\n"
+            "- 'hypothesis': propose N experiment hypotheses given current state + literature.\n"
+            "- 'reflection': digest recent results, update beliefs, pick promote/kill.\n"
+            "- 'briefing': read-only markdown summary of project state (no submit needed).\n\n"
+            "REQUIRES: Nothing. Works with empty state (returns baseline prompt).\n"
+            "RETURNS: {stage, system, user, schema, state_snapshot}\n"
+            "NEXT: call your LLM with {system, user} — expect JSON matching {schema}. Then research_submit."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "stage": {
+                    "type": "string",
+                    "enum": ["hypothesis", "reflection", "briefing"],
+                    "description": "Which stage to build prompts for.",
+                },
+                "focus_family": {
+                    "type": "string",
+                    "description": "Optional — bias hypothesis generation toward a specific model family.",
+                },
+                "extra_context": {
+                    "type": "string",
+                    "description": "Extra free-form context appended to the analysis section.",
+                },
+                "literature_context": {
+                    "type": "string",
+                    "description": "Optional formatted literature section (see research_literature_search).",
+                },
+                "iteration": {"type": "integer", "default": 0},
+            },
+            "required": ["stage"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_submit",
+        description=(
+            "Apply an orchestrator-supplied response for the given stage. Response "
+            "can be a parsed object (matching the schema from research_request_prompt) "
+            "or a raw JSON string.\n\n"
+            "Hypothesis: adds items to state.hypotheses (ready for design_batch_from_hypotheses).\n"
+            "Reflection: updates state.beliefs + returns promote/kill lists the orchestrator "
+            "can then apply via existing fleet tools.\n\n"
+            "REQUIRES: stage + response matching the schema from research_request_prompt.\n"
+            "RETURNS: {applied, summary, counts...}\n"
+            "NEXT: (hypothesis) design_batch_from_hypotheses → design_enqueue_batch → dispatch_experiments.\n"
+            "      (reflection) examine promote_names/kill_names; add promoted hypotheses if desired."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "stage": {
+                    "type": "string",
+                    "enum": ["hypothesis", "reflection"],
+                    "description": "Which stage the response is for. (briefing has no submit.)",
+                },
+                "response": {
+                    "description": "Parsed response object OR raw JSON string. Shape matches the schema from research_request_prompt.",
+                },
+                "iteration": {"type": "integer", "default": 0},
+            },
+            "required": ["stage", "response"],
             "additionalProperties": False,
         },
     ),

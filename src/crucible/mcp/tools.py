@@ -1289,6 +1289,167 @@ def note_search(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Plan tools (LLM-facing todo list; see core/plan.py)
+# ---------------------------------------------------------------------------
+
+
+def _get_plan_store():
+    from crucible.core.plan import PlanStore
+
+    config = _get_config()
+    return PlanStore(config.project_root / ".crucible" / "plan.json")
+
+
+def plan_get(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the current plan as a list of items."""
+    store = _get_plan_store()
+    return {"items": store.as_dicts()}
+
+
+def plan_set(args: dict[str, Any]) -> dict[str, Any]:
+    """Replace the entire plan with a new list of items.
+
+    At most one item may have status 'in_progress'. Each item needs a
+    'description'; 'id' and 'status' are optional (auto-assigned).
+    """
+    store = _get_plan_store()
+    items = args.get("items") or []
+    if not isinstance(items, list):
+        raise CrucibleError("plan_set: 'items' must be a list")
+    written = store.set(items)
+    return {"status": "set", "items": [i.to_dict() for i in written]}
+
+
+def plan_update_item(args: dict[str, Any]) -> dict[str, Any]:
+    """Flip one plan item's status. Enforces the exactly-one-in-progress rule."""
+    store = _get_plan_store()
+    item_id = args.get("id") or args.get("item_id")
+    status = args.get("status")
+    if not item_id:
+        raise CrucibleError("plan_update_item: 'id' is required")
+    if not status:
+        raise CrucibleError("plan_update_item: 'status' is required")
+    updated = store.update_item(str(item_id), status)
+    return {"status": "updated", "item": updated.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace ecosystem search (datasets, models, spaces, docs)
+# ---------------------------------------------------------------------------
+
+
+def research_hf_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search HuggingFace datasets, models, spaces, or docs."""
+    from crucible.researcher import hf_search as hfs
+
+    kind = args.get("kind", "datasets")
+    query = args.get("query", "")
+    limit = int(args.get("limit", 10))
+    multi_angle = bool(args.get("multi_angle", False))
+    results = hfs.search(kind=kind, query=query, limit=limit, multi_angle=multi_angle)
+    return {"kind": kind, "query": query, "count": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# GitHub search
+# ---------------------------------------------------------------------------
+
+
+def research_github_code(args: dict[str, Any]) -> dict[str, Any]:
+    """Search GitHub code (requires GITHUB_TOKEN env)."""
+    from crucible.researcher import github_search as ghs
+
+    query = args.get("query", "")
+    language = args.get("language")
+    limit = int(args.get("limit", 10))
+    results = ghs.search_code(query=query, language=language, limit=limit)
+    return {"query": query, "language": language, "count": len(results), "results": results}
+
+
+def research_github_list_repos(args: dict[str, Any]) -> dict[str, Any]:
+    """Search GitHub repositories."""
+    from crucible.researcher import github_search as ghs
+
+    query = args.get("query", "")
+    limit = int(args.get("limit", 10))
+    results = ghs.list_repos(query=query, limit=limit)
+    return {"query": query, "count": len(results), "results": results}
+
+
+def research_github_read_file(args: dict[str, Any]) -> dict[str, Any]:
+    """Read a single file from a GitHub repo."""
+    from crucible.researcher import github_search as ghs
+
+    repo = args.get("repo", "")
+    path = args.get("path", "")
+    ref = args.get("ref", "main")
+    if not repo or not path:
+        raise CrucibleError("research_github_read_file: 'repo' and 'path' are required")
+    return ghs.read_file(repo=repo, path=path, ref=ref)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator-driven research loop (default path — no LLM keys in Crucible)
+# ---------------------------------------------------------------------------
+
+
+def research_request_prompt(args: dict[str, Any]) -> dict[str, Any]:
+    """Build the system+user prompt + JSON schema for the requested stage.
+
+    The orchestrator (Claude Code, another agent, or a human) feeds the
+    prompts to its own LLM, parses per schema, then calls
+    research_submit with the result.
+    """
+    from crucible.researcher import orchestrator_api as oa
+    from crucible.researcher.state import ResearchState
+
+    stage = args.get("stage", "briefing")
+    config = _get_config()
+    state_path = config.project_root / config.research_state_file
+    state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
+
+    return oa.request_prompt(
+        stage=stage,
+        config=config,
+        state=state,
+        focus_family=args.get("focus_family", ""),
+        extra_context=args.get("extra_context", ""),
+        literature_context=args.get("literature_context", ""),
+        iteration=int(args.get("iteration", 0)),
+    )
+
+
+def research_submit(args: dict[str, Any]) -> dict[str, Any]:
+    """Parse and apply an orchestrator-supplied response for the given stage.
+
+    Accepts either a parsed response dict (matching the schema returned
+    by research_request_prompt) or a raw JSON string. Mutations persist
+    to ResearchState.
+    """
+    from crucible.researcher import orchestrator_api as oa
+    from crucible.researcher.state import ResearchState
+
+    stage = args.get("stage", "")
+    response = args.get("response")
+    if not stage:
+        raise CrucibleError("research_submit: 'stage' is required")
+    if response is None:
+        raise CrucibleError("research_submit: 'response' is required")
+
+    config = _get_config()
+    state_path = config.project_root / config.research_state_file
+    state = ResearchState(state_path, budget_hours=config.researcher.budget_hours)
+
+    return oa.submit_response(
+        stage=stage,
+        response=response,
+        config=config,
+        state=state,
+        iteration=int(args.get("iteration", 0)),
+    )
+
+
+# ---------------------------------------------------------------------------
 # W&B tools
 # ---------------------------------------------------------------------------
 
@@ -4856,6 +5017,19 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "note_add": note_add,
     "note_get": note_get,
     "note_search": note_search,
+    # Plan tools (LLM-facing todo list)
+    "plan_get": plan_get,
+    "plan_set": plan_set,
+    "plan_update_item": plan_update_item,
+    # HF ecosystem search
+    "research_hf_search": research_hf_search,
+    # GitHub search
+    "research_github_code": research_github_code,
+    "research_github_list_repos": research_github_list_repos,
+    "research_github_read_file": research_github_read_file,
+    # Orchestrator-driven research loop (default path — no LLM keys in Crucible)
+    "research_request_prompt": research_request_prompt,
+    "research_submit": research_submit,
     # W&B tools
     "wandb_log_image": wandb_log_image,
     "wandb_get_url": wandb_get_url,

@@ -83,6 +83,43 @@ External training scripts interface with Crucible via:
 - Subcommands: `fleet`, `run`, `analyze`, `research`, `data`, `mcp`, `models`, `hub`, `tap`, `track`, `note`, `serve`, `tui`, `store`
 - Each subcommand group has its own file in `cli/`
 
+## Orchestrator contract (default path — no LLM keys in Crucible)
+
+Crucible is **infrastructure** — pods, fleet, experiments, data, notes,
+findings, plan, search. Taste (hypothesis generation, reflection,
+planning) is supplied by an **external orchestrator** — Claude Code via
+MCP, another agent, or a human. The orchestrator supplies its own LLM.
+
+**No `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `litellm` needed inside
+Crucible.** The only creds it consumes are infrastructure creds
+(`RUNPOD_API_KEY`, `WANDB_API_KEY`).
+
+### The loop
+
+```
+1. research_request_prompt(stage="hypothesis")    → {system, user, schema}
+2. Orchestrator calls its own LLM with that prompt, parses per schema.
+3. research_submit(stage="hypothesis", response)  → hypotheses land in state.
+4. design_batch_from_hypotheses → design_enqueue_batch →
+   dispatch_experiments → collect_results                (pure fleet ops)
+5. research_request_prompt(stage="reflection")    → next prompt + schema.
+6. Orchestrator reflects, then research_submit(stage="reflection", ...) →
+   beliefs updated, promote/kill lists returned.
+7. Loop.
+```
+
+`stage="briefing"` is a read-only probe — returns a markdown summary of
+project state (no schema, no submit needed). Useful as a periodic
+sanity check.
+
+### Legacy autonomous mode (opt-in)
+
+The pre-existing `AutonomousResearcher` (`crucible research start`)
+still runs a closed-loop agent with an internal Anthropic SDK call. It
+requires `ANTHROPIC_API_KEY`. It is **NOT the default** — it exists for
+users who explicitly want it. New work should use the orchestrator
+contract above.
+
 ## Reference docs (read BEFORE debugging config / fleet issues)
 
 - **`docs/crucible-config-hierarchy.md`** — definitive map of which config layer wins for `provision_project` / `bootstrap_project` / `run_project`. Documents the full precedence table (ranks 0–12), the `nodes.json` interruptible echo bug, the correct playbook for running a project variant (pass `variant_name` to `run_project` or inline env via `overrides`), and 10 common gotchas. **If you are about to edit a project spec yaml or debug a RunPod pod that "looks stuck", read §3 and §4 of that doc first.**

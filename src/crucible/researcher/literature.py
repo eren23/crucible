@@ -175,10 +175,9 @@ def expand_query(query: str) -> list[str]:
     except ImportError:
         pass  # anthropic not installed
     except Exception as exc:  # noqa: BLE001
-        # Query expansion is strictly best-effort: Anthropic SDK errors
-        # (AnthropicError subclasses — not imported at module scope because
-        # anthropic is an optional dep), malformed-JSON responses, and network
-        # hiccups must all degrade to "use original query only".
+        # Query expansion is strictly best-effort: Anthropic SDK errors,
+        # malformed-JSON responses, and network hiccups all degrade to
+        # "use original query only".
         log_warn(f"Query expansion failed (non-fatal): {exc}")
 
     _expansion_cache[query] = (now, angles)
@@ -194,16 +193,44 @@ def multi_angle_search(
     searches each angle independently via search_papers(). Results are
     deduplicated by paper ID and capped at limit.
     """
+    return multi_angle_dedup(
+        query,
+        search_fn=search_papers,
+        dedup_key=lambda p: p.get("id", ""),
+        limit=limit,
+        per_angle_limit=per_angle_limit,
+    )
+
+
+def multi_angle_dedup(
+    query: str,
+    search_fn: Any,
+    dedup_key: Any,
+    limit: int = 10,
+    per_angle_limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Generic multi-angle search + dedup helper.
+
+    Factored out of :func:`multi_angle_search` so that other searchers
+    (HF datasets/models/spaces, GitHub code) can reuse the LLM-driven
+    query-expansion + dedup logic without duplicating it.
+
+    ``search_fn(query, limit)`` should return a list of result dicts.
+    ``dedup_key(result)`` returns the string key used to dedupe.
+    """
     angles = expand_query(query)
-    all_papers: list[dict[str, Any]] = []
     seen: set[str] = set()
+    out: list[dict[str, Any]] = []
     for angle in angles:
-        for p in search_papers(angle, limit=per_angle_limit):
-            pid = p.get("id", "")
-            if pid and pid not in seen:
-                seen.add(pid)
-                all_papers.append(p)
-    return all_papers[:limit]
+        for r in search_fn(angle, limit=per_angle_limit):
+            k = dedup_key(r)
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(r)
+            if len(out) >= limit:
+                return out
+    return out
 
 
 def format_literature_context(

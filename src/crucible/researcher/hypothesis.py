@@ -10,69 +10,66 @@ if TYPE_CHECKING:
     from crucible.researcher.search_tree import SearchTree
 
 
-def generate_hypotheses(
+HYPOTHESIS_SYSTEM_PROMPT = (
+    "You are an autonomous ML research agent. "
+    "Your goal is to minimize the primary metric (e.g., validation loss or bits-per-byte) "
+    "for a model within the given constraints.\n\n"
+    "Given the current research state and results, propose 3-5 experiment hypotheses "
+    "ranked by expected impact. Each hypothesis should test ONE change at a time "
+    "unless you have strong evidence a combination helps.\n\n"
+    "Return a JSON object with a single key \"hypotheses\" containing a list of objects, "
+    "each with:\n"
+    "- \"hypothesis\": string describing what you expect\n"
+    "- \"name\": short experiment name (no spaces, lowercase + underscores)\n"
+    "- \"expected_impact\": float, expected improvement (positive = better)\n"
+    "- \"confidence\": float 0-1, your confidence this will help\n"
+    "- \"config\": dict of env var overrides (all values must be strings)\n"
+    "- \"rationale\": 1-2 sentence explanation\n"
+    "- \"family\": which model family this tests\n\n"
+    "IMPORTANT: All config values must be strings. The config dict contains environment "
+    "variable overrides like {\"MODEL_FAMILY\": \"looped\", \"RECURRENCE_STEPS\": \"12\"}.\n\n"
+    "If related literature is provided, use it to ground your hypotheses in established "
+    "methods. Cite specific papers when relevant. Prefer directions with published "
+    "evidence over pure speculation.\n\n"
+    "Focus on the research priorities in the program document. "
+    "Mix exploitation (refine what works) with exploration (test new ideas)."
+)
+
+
+def build_hypothesis_prompt(
     context: str,
     program_text: str,
-    state: ResearchState,
-    llm: LLMClient,
-    iteration: int,
     literature_context: str = "",
-) -> list[dict[str, Any]]:
-    """Use an LLM to generate ranked experiment hypotheses from the current research state."""
+) -> tuple[str, str]:
+    """Assemble system + user prompts for hypothesis generation.
 
-    system_prompt = (
-        "You are an autonomous ML research agent. "
-        "Your goal is to minimize the primary metric (e.g., validation loss or bits-per-byte) "
-        "for a model within the given constraints.\n\n"
-        "Given the current research state and results, propose 3-5 experiment hypotheses "
-        "ranked by expected impact. Each hypothesis should test ONE change at a time "
-        "unless you have strong evidence a combination helps.\n\n"
-        "Return a JSON object with a single key \"hypotheses\" containing a list of objects, "
-        "each with:\n"
-        "- \"hypothesis\": string describing what you expect\n"
-        "- \"name\": short experiment name (no spaces, lowercase + underscores)\n"
-        "- \"expected_impact\": float, expected improvement (positive = better)\n"
-        "- \"confidence\": float 0-1, your confidence this will help\n"
-        "- \"config\": dict of env var overrides (all values must be strings)\n"
-        "- \"rationale\": 1-2 sentence explanation\n"
-        "- \"family\": which model family this tests\n\n"
-        "IMPORTANT: All config values must be strings. The config dict contains environment "
-        "variable overrides like {\"MODEL_FAMILY\": \"looped\", \"RECURRENCE_STEPS\": \"12\"}.\n\n"
-        "If related literature is provided, use it to ground your hypotheses in established "
-        "methods. Cite specific papers when relevant. Prefer directions with published "
-        "evidence over pure speculation.\n\n"
-        "Focus on the research priorities in the program document. "
-        "Mix exploitation (refine what works) with exploration (test new ideas)."
-    )
+    Pure — no LLM call, no state mutation. Used by both the autonomous
+    researcher loop (``generate_hypotheses``) and the orchestrator-driven
+    MCP path (``orchestrator_api.request_prompt("hypothesis")``).
 
+    Returns ``(system_prompt, user_prompt)``.
+    """
     user_prompt = f"{program_text}\n\n---\n\n{context}"
     if literature_context:
         user_prompt += f"\n\n---\n\n{literature_context}"
-
-    response_text = llm.complete(system_prompt, user_prompt)
-    if response_text is None:
-        return []
-
-    hypotheses = _parse_hypotheses(response_text, iteration)
-    for hyp in hypotheses:
-        state.add_hypothesis(hyp)
-
-    print(f"  Generated {len(hypotheses)} hypotheses:")
-    for h in hypotheses:
-        print(
-            f"    - {h.get('name', '?')}: {h.get('hypothesis', '?')[:80]}  "
-            f"(impact={h.get('expected_impact', 0):.4f}, conf={h.get('confidence', 0):.2f})"
-        )
-
-    return hypotheses
+    return HYPOTHESIS_SYSTEM_PROMPT, user_prompt
 
 
-def _parse_hypotheses(text: str, iteration: int) -> list[dict[str, Any]]:
-    """Extract hypotheses list from LLM response text."""
+def parse_hypotheses(text: str, iteration: int) -> list[dict[str, Any]]:
+    """Extract hypotheses list from LLM response text.
+
+    Pure — accepts a JSON string or a JSON-in-prose blob, returns the
+    validated list of hypothesis dicts.  Callers are responsible for
+    applying them to state.
+    """
     parsed = parse_json_from_text(text)
     if parsed is None:
         return []
-    hypotheses = parsed.get("hypotheses", [])
+    return _validate_hypotheses(parsed.get("hypotheses", []), iteration)
+
+
+def _validate_hypotheses(hypotheses: Any, iteration: int) -> list[dict[str, Any]]:
+    """Shared validation for both LLM-response and orchestrator-submitted hypotheses."""
     if not isinstance(hypotheses, list):
         return []
     valid = []
@@ -90,6 +87,53 @@ def _parse_hypotheses(text: str, iteration: int) -> list[dict[str, Any]]:
         h.setdefault("family", config.get("MODEL_FAMILY", "unknown"))
         valid.append(h)
     return valid
+
+
+def apply_hypotheses(state: ResearchState, hypotheses: list[dict[str, Any]]) -> int:
+    """Add parsed+validated hypotheses to a ResearchState. Returns count added."""
+    for hyp in hypotheses:
+        state.add_hypothesis(hyp)
+    return len(hypotheses)
+
+
+def generate_hypotheses(
+    context: str,
+    program_text: str,
+    state: ResearchState,
+    llm: LLMClient,
+    iteration: int,
+    literature_context: str = "",
+) -> list[dict[str, Any]]:
+    """Use an LLM to generate ranked experiment hypotheses from the current research state.
+
+    Thin wrapper around the pure helpers used by the orchestrator path —
+    builds the prompt, calls the LLM, parses the response, applies to
+    state, prints a progress line. Existing autonomous-mode callers see
+    no behaviour change.
+    """
+    system_prompt, user_prompt = build_hypothesis_prompt(
+        context, program_text, literature_context=literature_context
+    )
+
+    response_text = llm.complete(system_prompt, user_prompt)
+    if response_text is None:
+        return []
+
+    hypotheses = parse_hypotheses(response_text, iteration)
+    apply_hypotheses(state, hypotheses)
+
+    print(f"  Generated {len(hypotheses)} hypotheses:")
+    for h in hypotheses:
+        print(
+            f"    - {h.get('name', '?')}: {h.get('hypothesis', '?')[:80]}  "
+            f"(impact={h.get('expected_impact', 0):.4f}, conf={h.get('confidence', 0):.2f})"
+        )
+
+    return hypotheses
+
+
+# Backwards-compat shim — a few tests / external callers may import the old name.
+_parse_hypotheses = parse_hypotheses
 
 
 # ---------------------------------------------------------------------------

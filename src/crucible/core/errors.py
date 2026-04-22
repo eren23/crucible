@@ -100,3 +100,6 @@ class CandidateValidationError(CrucibleError):
 
 class HarnessOptimizerError(CrucibleError):
     """Harness optimizer orchestration failures."""
+
+class PlanError(CrucibleError):
+    """Plan store invariant violations (e.g. more than one in_progress item)."""
