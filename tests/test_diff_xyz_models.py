@@ -132,7 +132,24 @@ def test_openai_missing_key_raises(monkeypatch: pytest.MonkeyPatch):
         b.generate("sys", "usr")
 
 
-def test_hf_backend_raises_not_implemented():
-    b = HFBackend(model_id="Qwen/Qwen2.5-Coder-7B-Instruct")
-    with pytest.raises(ModelError, match="not yet wired"):
+def test_hf_backend_raises_without_transformers():
+    # Test env has no torch → _load() surfaces ModelError with an install hint.
+    # (When transformers IS installed, this test is skipped — different test path.)
+    try:
+        import transformers  # noqa: F401
+        import torch  # noqa: F401
+        pytest.skip("transformers+torch available; missing-dep path not exercised here")
+    except ImportError:
+        pass
+    b = HFBackend(model_id="Qwen/Qwen3-Coder-30B-A3B-Instruct")
+    with pytest.raises(ModelError, match="transformers"):
         b.generate("sys", "usr")
+
+
+def test_hf_backend_defaults():
+    # Just exercises construction + dataclass defaults without touching the model.
+    b = HFBackend(model_id="Qwen/Qwen3-Coder-30B-A3B-Instruct")
+    assert b.load_in_4bit is True
+    assert b.adapter_path == ""
+    assert b.dtype == "bfloat16"
+    assert b._model is None  # lazy

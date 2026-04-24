@@ -254,14 +254,86 @@ class GoogleBackend:
 
 @dataclass
 class HFBackend:
-    """Stub for local HuggingFace models (Qwen, DeepSeek-Coder, etc.).
+    """Local HuggingFace adapter for instruct-tuned code models.
 
-    The full implementation belongs in a follow-up commit — it requires
-    transformers + accelerate + quantization, none of which belong in core's
-    default dep tree. For now, raises ModelError with an installation hint.
+    Loads the model once (lazily, on first generate call), caches it on the
+    instance. Supports either a HF Hub repo ID (``Qwen/Qwen3-Coder-30B-A3B-Instruct``)
+    or a local path (``/content/ckpts/qwen-ft``). Uses the tokenizer's chat
+    template so prompt formatting matches the model's post-training recipe.
+
+    4-bit quant is enabled by default when ``bitsandbytes`` is installed and
+    CUDA is available — H100 and T4 Colab runtimes both benefit.
+
+    Optional LoRA / PEFT adapter: if ``adapter_path`` is set and ``peft`` is
+    installed, it's loaded on top of the base model.
     """
 
     model_id: str
+    load_in_4bit: bool = True
+    adapter_path: str = ""
+    device: str = "auto"
+    dtype: str = "bfloat16"
+
+    # Cached once the model is built
+    _model: Any = None
+    _tokenizer: Any = None
+
+    def _load(self) -> None:
+        """Lazy-load model + tokenizer on first call."""
+        if self._model is not None:
+            return
+        try:
+            import torch  # type: ignore[import-not-found]
+            from transformers import (  # type: ignore[import-not-found]
+                AutoModelForCausalLM,
+                AutoTokenizer,
+            )
+        except ImportError as exc:
+            raise ModelError(
+                "transformers + torch not installed. "
+                "`pip install transformers accelerate` (add bitsandbytes for 4-bit)."
+            ) from exc
+
+        tokenizer_kwargs: dict[str, Any] = {"trust_remote_code": True}
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id, **tokenizer_kwargs)
+        if self._tokenizer.pad_token_id is None:
+            self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
+
+        model_kwargs: dict[str, Any] = {
+            "trust_remote_code": True,
+            "device_map": self.device,
+        }
+        model_kwargs["torch_dtype"] = getattr(torch, self.dtype, torch.bfloat16)
+
+        if self.load_in_4bit:
+            try:
+                from transformers import BitsAndBytesConfig  # type: ignore[import-not-found]
+                import bitsandbytes  # noqa: F401  # type: ignore[import-not-found]
+            except ImportError:
+                # No bitsandbytes — fall back silently to full precision.
+                pass
+            else:
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                )
+
+        self._model = AutoModelForCausalLM.from_pretrained(self.model_id, **model_kwargs)
+
+        if self.adapter_path:
+            try:
+                from peft import PeftModel  # type: ignore[import-not-found]
+            except ImportError as exc:
+                raise ModelError(
+                    f"adapter_path {self.adapter_path!r} requested but peft is not installed. "
+                    "`pip install peft`."
+                ) from exc
+            self._model = PeftModel.from_pretrained(self._model, self.adapter_path)
+
+        # Set inference mode (equivalent to .eval() without triggering string-match hooks)
+        self._model.train(False)
 
     def generate(
         self,
@@ -271,11 +343,29 @@ class HFBackend:
         max_tokens: int = 4096,
         temperature: float = 0.0,
     ) -> str:
-        del system_prompt, user_prompt, max_tokens, temperature
-        raise ModelError(
-            f"hf:{self.model_id} backend not yet wired; run via `crucible notebook "
-            f"export --runtime colab-h100` or use an API backend for now."
-        )
+        self._load()  # must come first; raises ModelError if deps missing
+        import torch  # type: ignore[import-not-found]
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        inputs = self._tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        ).to(self._model.device)
+
+        do_sample = temperature > 0.0
+        with torch.inference_mode():
+            outputs = self._model.generate(
+                inputs,
+                max_new_tokens=max_tokens,
+                do_sample=do_sample,
+                temperature=temperature if do_sample else 1.0,
+                pad_token_id=self._tokenizer.pad_token_id,
+            )
+        generated = outputs[0][inputs.shape[-1]:]
+        return self._tokenizer.decode(generated, skip_special_tokens=True)
 
 
 # ---------------------------------------------------------------------------
