@@ -302,6 +302,10 @@ def _main() -> None:
     models_sub = models_parser.add_subparsers(dest="models_command")
     models_sub.add_parser("list", help="List registered model families")
 
+    # ── notebook ──
+    from crucible.cli.notebook_commands import add_parser as _add_notebook_parser
+    _add_notebook_parser(subparsers)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -380,6 +384,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.analyze_commands import handle_models
 
         handle_models(args)
+    elif args.command == "notebook":
+        from crucible.cli.notebook_commands import handle_notebook
+
+        handle_notebook(args)
     else:
         print(f"Unknown command: {args.command}", file=sys.stderr)
         sys.exit(1)

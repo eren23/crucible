@@ -2999,6 +2999,53 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # -----------------------------------------------------------------------
+    # Notebook exporter
+    # -----------------------------------------------------------------------
+    Tool(
+        name="notebook_export",
+        description=(
+            "Export a Crucible project spec as a standalone Colab-runnable notebook.\n\n"
+            "REQUIRES: a project name that resolves via load_project_spec "
+            "(local .crucible/projects/, hub, or tap).\n"
+            "RETURNS: {ok, project, runtime, preset, variant, out_path, source_path, cells, size_bytes, open_in_colab_url}\n"
+            "NEXT: commit the notebook to a repo and open the returned colab URL, "
+            "or upload the .ipynb to Google Drive."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Project spec name."},
+                "runtime": {
+                    "type": "string",
+                    "default": "colab-h100",
+                    "description": "Runtime profile; list via notebook_list_runtimes.",
+                },
+                "preset": {"type": "string", "default": "smoke"},
+                "variant": {"type": "string", "description": "Variant name from spec.variants (optional)."},
+                "overrides": {
+                    "type": "object",
+                    "description": "Extra env var overrides; wins over variant + env_set.",
+                    "additionalProperties": {"type": "string"},
+                },
+                "out_path": {"type": "string", "description": "Output path (.py or .ipynb). Default: <project>.ipynb."},
+                "inline_plugins": {"type": "boolean", "default": False, "description": "Reserved — not yet implemented."},
+                "crucible_install": {"type": "string", "description": "pip spec for Crucible itself (default: git+main)."},
+            },
+            "required": ["project"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="notebook_list_runtimes",
+        description=(
+            "List available notebook runtime profiles (Colab H100/A100/T4, local).\n\n"
+            "REQUIRES: nothing.\n"
+            "RETURNS: {ok, runtimes: [{name, description, gpu}]}\n"
+            "NEXT: pick one and pass its name as notebook_export(runtime=...)."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
 ]
 
 

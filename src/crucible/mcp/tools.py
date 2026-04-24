@@ -4970,6 +4970,42 @@ def eval_watch_status(args: dict[str, Any]) -> dict[str, Any]:
     return eval_watcher.status(recent=int(args.get("recent", 10)))
 
 
+# ---------------------------------------------------------------------------
+# Notebook exporter tools
+# ---------------------------------------------------------------------------
+
+
+def notebook_export(args: dict[str, Any]) -> dict[str, Any]:
+    """Export a Crucible project spec as a standalone Colab-runnable notebook."""
+    from crucible.notebook import export_project
+    from crucible.notebook.exporter import NotebookExportError
+
+    try:
+        result = export_project(
+            project=args["project"],
+            runtime=args.get("runtime", "colab-h100"),
+            preset=args.get("preset", "smoke"),
+            out_path=args.get("out_path") or None,
+            variant=args.get("variant") or None,
+            overrides=args.get("overrides") or {},
+            inline_plugins=bool(args.get("inline_plugins", False)),
+            crucible_install=args.get("crucible_install") or None,
+        )
+    except (FileNotFoundError, NotebookExportError) as exc:
+        return {"ok": False, "error": str(exc)}
+    out = result.to_dict()
+    out["ok"] = True
+    return out
+
+
+def notebook_list_runtimes(args: dict[str, Any]) -> dict[str, Any]:
+    """List available notebook runtime profiles."""
+    del args
+    from crucible.notebook.runtimes import list_runtimes
+
+    return {"ok": True, "runtimes": list_runtimes()}
+
+
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Fleet status & lifecycle
     "get_fleet_status": get_fleet_status,
@@ -5147,4 +5183,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "eval_watch_start": eval_watch_start,
     "eval_watch_stop": eval_watch_stop,
     "eval_watch_status": eval_watch_status,
+    # Notebook exporter
+    "notebook_export": notebook_export,
+    "notebook_list_runtimes": notebook_list_runtimes,
 }
