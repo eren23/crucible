@@ -91,3 +91,52 @@ def test_contract_metadata_includes_remote_node(monkeypatch):
     meta = contract_metadata(cfg, remote_node="gpu-1")
     assert meta["remote_node"] == "gpu-1"
     assert meta["contract_status"] == "compliant"
+
+
+def test_validate_contract_rejects_missing_wandb_api_key(monkeypatch):
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    cfg = ProjectConfig(
+        provider=ProviderConfig(type="runpod"),
+        wandb=WandbConfig(project="demo-project", mode="online"),
+    )
+    try:
+        validate_experiment_contract(
+            cfg,
+            action="enqueue",
+            execution_mode="remote",
+        )
+    except ConfigError as exc:
+        assert "WANDB_API_KEY" in str(exc)
+    else:
+        raise AssertionError("expected ConfigError when WANDB_API_KEY missing")
+
+
+def test_validate_contract_allows_disabled_wandb_mode(monkeypatch):
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    cfg = ProjectConfig(
+        provider=ProviderConfig(type="runpod"),
+        wandb=WandbConfig(project="demo-project", mode="disabled"),
+    )
+    # mode=disabled means the API key is not needed even if wandb.required=true
+    result = validate_experiment_contract(
+        cfg,
+        action="enqueue",
+        execution_mode="remote",
+    )
+    assert result["wandb"]["mode"] == "disabled"
+
+
+def test_validate_contract_skips_wandb_when_not_required(monkeypatch):
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    monkeypatch.delenv("WANDB_PROJECT", raising=False)
+    cfg = ProjectConfig(
+        provider=ProviderConfig(type="runpod"),
+        wandb=WandbConfig(required=False),
+    )
+    result = validate_experiment_contract(
+        cfg,
+        action="enqueue",
+        execution_mode="remote",
+    )
+    # wandb.required=false: missing project + key is not an error
+    assert result["wandb"]["required"] is False

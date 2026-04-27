@@ -296,6 +296,78 @@ class TestGetArchitectureGuide:
 
 
 # ---------------------------------------------------------------------------
+# get_wandb_guide
+# ---------------------------------------------------------------------------
+
+
+class TestGetWandbGuide:
+    def test_returns_decision_tree_branches(self):
+        from crucible.mcp.tools import get_wandb_guide
+
+        result = get_wandb_guide({})
+        assert "decision_tree" in result
+        for branch in ("first_run_in_project", "new_variant_in_existing_project", "disabling_wandb_intentionally"):
+            assert branch in result["decision_tree"]
+            assert isinstance(result["decision_tree"][branch], list)
+            assert len(result["decision_tree"][branch]) > 0
+
+    def test_returns_checklist_and_failures(self):
+        from crucible.mcp.tools import get_wandb_guide
+
+        result = get_wandb_guide({})
+        assert isinstance(result.get("checklist"), list) and len(result["checklist"]) >= 3
+        assert isinstance(result.get("common_failures"), list) and len(result["common_failures"]) >= 3
+        for failure in result["common_failures"]:
+            assert {"symptom", "cause", "fix"}.issubset(failure.keys())
+
+    def test_returns_workflow_and_verification(self):
+        from crucible.mcp.tools import get_wandb_guide
+
+        result = get_wandb_guide({})
+        assert "queue_path" in result["workflow"]
+        assert "external_project_path" in result["workflow"]
+        assert isinstance(result.get("verification"), list)
+        # Cross-reference to wandb_get_url so agents have a programmatic verification path
+        text_blob = " ".join(result["verification"])
+        assert "wandb_get_url" in text_blob
+
+    def test_listed_in_dispatch_table(self):
+        from crucible.mcp.tools import TOOL_DISPATCH
+
+        assert "get_wandb_guide" in TOOL_DISPATCH
+
+
+# ---------------------------------------------------------------------------
+# WANDB_RUN_NAME warning helper
+# ---------------------------------------------------------------------------
+
+
+class TestWandbRunNameWarnings:
+    def test_warns_when_unset(self):
+        from crucible.mcp.tools import _wandb_run_name_warnings
+
+        warnings = _wandb_run_name_warnings({"MODEL_FAMILY": "baseline"})
+        assert warnings
+        assert "CRUCIBLE_VARIANT_NAME" in warnings[0]
+
+    def test_silent_when_variant_name_set(self):
+        from crucible.mcp.tools import _wandb_run_name_warnings
+
+        assert _wandb_run_name_warnings({"CRUCIBLE_VARIANT_NAME": "v1"}) == []
+
+    def test_silent_when_run_name_set(self):
+        from crucible.mcp.tools import _wandb_run_name_warnings
+
+        assert _wandb_run_name_warnings({"WANDB_RUN_NAME": "explicit"}) == []
+
+    def test_handles_non_dict(self):
+        from crucible.mcp.tools import _wandb_run_name_warnings
+
+        assert _wandb_run_name_warnings(None) == []  # type: ignore[arg-type]
+        assert _wandb_run_name_warnings("not a dict") == []  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
 # get_fleet_status with metrics
 # ---------------------------------------------------------------------------
 

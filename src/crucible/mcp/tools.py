@@ -69,6 +69,25 @@ def _queue_contract_fields(config: ProjectConfig) -> dict[str, Any]:
     }
 
 
+def _wandb_run_name_warnings(exp_config: dict[str, Any]) -> list[str]:
+    """Return a soft warning when an experiment config has no distinguishable W&B run name.
+
+    Default WANDB_RUN_NAME falls back to exp_id (a UUID-ish string) inside
+    run_experiment, which collides across variants enqueued from the same
+    batch. We don't block on this -- just surface it in the tool response.
+    """
+    if not isinstance(exp_config, dict):
+        return []
+    keys = {k.upper() for k in exp_config.keys()}
+    if "WANDB_RUN_NAME" in keys or "CRUCIBLE_VARIANT_NAME" in keys:
+        return []
+    return [
+        "WANDB_RUN_NAME / CRUCIBLE_VARIANT_NAME unset in config -- the W&B run will use the "
+        "auto-generated exp_id, which is hard to find in the W&B UI and collides across "
+        "related variants. Set CRUCIBLE_VARIANT_NAME=<distinguishable-name> in config."
+    ]
+
+
 def _project_contract_env(config: ProjectConfig, spec: ProjectSpec) -> dict[str, str]:
     env = os.environ.copy()
     env.update({k: str(v) for k, v in getattr(spec, "env_set", {}).items()})
@@ -255,9 +274,16 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
         [experiment],
         limit=1,
     )
+    warnings = _wandb_run_name_warnings(args.get("config") or {})
     if added:
-        return {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
-    return {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
+        result = {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
+        if warnings:
+            result["warnings"] = warnings
+        return result
+    skipped: dict[str, Any] = {"status": "skipped", "reason": "Experiment with same name and tier already exists."}
+    if warnings:
+        skipped["warnings"] = warnings
+    return skipped
 
 
 def get_experiment_result(args: dict[str, Any]) -> dict[str, Any]:
@@ -911,11 +937,24 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
             experiments,
             limit=0,
         )
-        return {
+        warnings: list[str] = []
+        missing_named = sum(
+            1 for exp in batch if _wandb_run_name_warnings(exp.get("config") or {})
+        )
+        if missing_named:
+            warnings.append(
+                f"{missing_named}/{len(batch)} experiments in this batch have no "
+                "WANDB_RUN_NAME / CRUCIBLE_VARIANT_NAME -- the W&B runs will collide "
+                "on the auto-generated exp_id. Set CRUCIBLE_VARIANT_NAME per experiment."
+            )
+        result: dict[str, Any] = {
             "enqueued": len(added),
             "wave_name": wave_name,
             "run_ids": [item["run_id"] for item in added],
         }
+        if warnings:
+            result["warnings"] = warnings
+        return result
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
@@ -1205,11 +1244,15 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
         if config.auto_commit_versions:
             store.git_commit_version(new_meta)
 
-        return {
+        result_payload: dict[str, Any] = {
             "status": "enqueued",
             "run_id": run_id,
             "version_meta": new_meta,
         }
+        warnings = _wandb_run_name_warnings(exp_config.get("config") or {})
+        if warnings:
+            result_payload["warnings"] = warnings
+        return result_payload
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
@@ -2795,6 +2838,97 @@ def model_fetch_architecture(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Architecture guide tool
 # ---------------------------------------------------------------------------
+
+
+def get_wandb_guide(args: dict[str, Any]) -> dict[str, Any]:
+    """Decision guide + checklist for getting Weights & Biases tracking working.
+
+    Returned shape mirrors get_architecture_guide so agents have a stable
+    place to look up "how do I make my run actually appear in W&B".
+    """
+    return {
+        "decision_tree": {
+            "first_run_in_project": [
+                "Set wandb.project in crucible.yaml (or WANDB_PROJECT in env_set / .env*).",
+                "Put WANDB_API_KEY in the env file pointed at by provider.defaults.env_source (default: .env.runpod.local).",
+                "Pick a CRUCIBLE_VARIANT_NAME for the run -- it doubles as WANDB_RUN_NAME.",
+                "Leave wandb.required=true (default). The runner will fail loudly at startup if anything above is missing.",
+            ],
+            "new_variant_in_existing_project": [
+                "Reuse the same wandb.project across related variants -- the leaderboard is per-project.",
+                "Set CRUCIBLE_VARIANT_NAME (or WANDB_RUN_NAME) per variant so runs are distinguishable.",
+                "Do NOT create a new wandb.project per architecture variant -- that fragments the leaderboard.",
+            ],
+            "disabling_wandb_intentionally": [
+                "Set wandb.required=false in crucible.yaml -- this alone bypasses both the enqueue-time contract validator and the runtime gate.",
+                "CRUCIBLE_ENFORCE_CONTRACT=0 in env only bypasses the runtime gate; enqueue still rejects when wandb.required=true and project is unset. Don't rely on it as a full disable switch.",
+                "wandb.mode=disabled is independent: it lets wandb.required=true coexist with no API key, but you still need wandb.project unless required=false.",
+            ],
+        },
+        "checklist": [
+            "WANDB_API_KEY is in .env.runpod.local (or whatever provider.defaults.env_source points at).",
+            "wandb.project in crucible.yaml is non-empty OR WANDB_PROJECT is set in env_set / overrides.",
+            "WANDB_RUN_NAME or CRUCIBLE_VARIANT_NAME is set per variant -- not left at the default exp_id.",
+            "wandb.mode is 'online' (default) -- 'offline' won't appear in the W&B UI until synced.",
+            "If using the generic training backend: LOGGING_BACKEND env var includes 'wandb'. Crucible auto-defaults this to 'wandb,console' when both key and project are present. The torch backend ignores LOGGING_BACKEND and calls WandbLogger directly using WANDB_PROJECT / WANDB_API_KEY -- so no opt-in env var needed there.",
+        ],
+        "common_failures": [
+            {
+                "symptom": "Run never appears in the W&B UI despite training completing.",
+                "cause": "WANDB_PROJECT empty at training time -> WandbLogger went inert.",
+                "fix": "Set wandb.project in crucible.yaml or pass WANDB_PROJECT in overrides/env_set.",
+            },
+            {
+                "symptom": "Pod exits with code 101 during bootstrap or launch.",
+                "cause": "WANDB_API_KEY missing after sourcing .env on the pod.",
+                "fix": "Add WANDB_API_KEY=... to the file at provider.defaults.env_source; re-run bootstrap_nodes.",
+            },
+            {
+                "symptom": "Multiple runs share one display name and overwrite each other in W&B.",
+                "cause": "WANDB_RUN_NAME defaulted to exp_id and CRUCIBLE_VARIANT_NAME was unset.",
+                "fix": "Pass CRUCIBLE_VARIANT_NAME in overrides for run_project, or WANDB_RUN_NAME in env_set for queue runs.",
+            },
+            {
+                "symptom": "RunnerError 'W&B logging is required ... but failed to initialize'.",
+                "cause": "wandb.required=true and either project or api_key is missing in the resolved env.",
+                "fix": "Follow the checklist above. Or set wandb.required=false in crucible.yaml to opt out.",
+            },
+            {
+                "symptom": "Enqueue itself fails with ConfigError 'requires W&B'.",
+                "cause": "Contract validator caught the missing project at enqueue time -- working as intended.",
+                "fix": "Set wandb.project in crucible.yaml or WANDB_PROJECT in the environment before re-enqueuing.",
+            },
+        ],
+        "workflow": {
+            "queue_path": [
+                "1. Confirm wandb.project in crucible.yaml and WANDB_API_KEY in .env (call config_get_project).",
+                "2. enqueue_experiment(name, config={..., MODEL_FAMILY: 'foo'}) -- contract validates W&B at this step.",
+                "3. dispatch_experiments to assign to ready nodes.",
+                "4. After collect_results, call wandb_get_url(run_id) -- must return a non-null URL.",
+            ],
+            "external_project_path": [
+                "1. Configure spec.env_set.WANDB_PROJECT in the project YAML.",
+                "2. provision_project / bootstrap_project (preflight will exit 101 on a pod if WANDB_API_KEY is missing).",
+                "3. run_project(variant=...) -- variant name becomes WANDB_RUN_NAME automatically.",
+                "4. collect_project_results fetches W&B metrics via the project's WANDB_PROJECT.",
+            ],
+        },
+        "verification": [
+            "config_get_project -- check 'wandb' block has project and required.",
+            "wandb_get_url(run_id) -- non-null URL means the run actually registered.",
+            "context_get_findings -- look for any 'wandb_disabled' tracker notes.",
+        ],
+        "tips": [
+            "wandb.required=true is the default and the right default. Don't disable it to silence errors.",
+            "One W&B project per research direction; many runs per project; one CRUCIBLE_VARIANT_NAME per run.",
+            "If you see 'inert' or 'WANDB_PROJECT unset' in tracker output, env didn't propagate -- check env_set and provider.defaults.env_source.",
+        ],
+        "see_also": [
+            "wandb_get_url, wandb_log_image, wandb_annotate -- output-side W&B tools.",
+            "docs/recipes/wandb-tracked-experiment.yaml -- canonical step-by-step recipe (source-controlled). To enable recipe_get(name='wandb-tracked-experiment'), copy this file into .crucible/recipes/ in your project, or wait for tap-based distribution.",
+            "config_get_project -- inspect the active wandb config block.",
+        ],
+    }
 
 
 def get_architecture_guide(args: dict[str, Any]) -> dict[str, Any]:
@@ -5114,6 +5248,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "get_run_logs": get_run_logs,
     "model_fetch_architecture": model_fetch_architecture,
     "get_architecture_guide": get_architecture_guide,
+    "get_wandb_guide": get_wandb_guide,
     # Tree search tools
     "tree_create": tree_create,
     "tree_get": tree_get,

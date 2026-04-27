@@ -158,3 +158,43 @@ class TestDesignBatch:
         assert "proxy" in DEFAULT_TIER_COSTS
         assert "medium" in DEFAULT_TIER_COSTS
         assert "promotion" in DEFAULT_TIER_COSTS
+
+    def test_auto_derives_variant_name_for_hypothesis(self, tmp_path):
+        """design_batch should default CRUCIBLE_VARIANT_NAME so W&B runs are
+        distinguishable; otherwise WANDB_RUN_NAME falls back to exp_id and
+        all batch members collide in the W&B UI."""
+        state = _make_state(tmp_path)
+        hyps = [_make_hypothesis("contrast15k", config={"LR": "0.002"})]
+        batch = design_batch(
+            hyps, state, tier="proxy", backend="torch", iteration=7,
+            baseline_config=None,
+        )
+        # Find the hypothesis entry
+        entry = next(e for e in batch if e["name"] == "contrast15k")
+        assert entry["config"]["CRUCIBLE_VARIANT_NAME"] == "contrast15k_iter_7"
+
+    def test_auto_derives_variant_name_for_baseline(self, tmp_path):
+        state = _make_state(tmp_path)
+        batch = design_batch(
+            [], state, tier="proxy", backend="torch", iteration=3,
+            baseline_config={"LR": "0.001"},
+        )
+        baseline = next(e for e in batch if e["name"] == "baseline_control")
+        assert baseline["config"]["CRUCIBLE_VARIANT_NAME"] == "baseline_control_iter_3"
+
+    def test_caller_variant_name_wins(self, tmp_path):
+        """If the caller's config already has CRUCIBLE_VARIANT_NAME,
+        design_batch must not overwrite it."""
+        state = _make_state(tmp_path)
+        hyps = [
+            _make_hypothesis(
+                "exp1",
+                config={"LR": "0.001", "CRUCIBLE_VARIANT_NAME": "explicit_name"},
+            )
+        ]
+        batch = design_batch(
+            hyps, state, tier="proxy", backend="torch", iteration=1,
+            baseline_config=None,
+        )
+        entry = next(e for e in batch if e["name"] == "exp1")
+        assert entry["config"]["CRUCIBLE_VARIANT_NAME"] == "explicit_name"

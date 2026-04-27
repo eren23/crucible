@@ -1,0 +1,98 @@
+name: wandb-tracked-experiment
+title: Run a W&B-tracked experiment end-to-end via MCP
+created_at: '2026-04-27T00:00:00+00:00'
+created_by: crucible-core
+goal: |
+  Run a single MCP-driven experiment that reliably appears in the project's
+  W&B dashboard with a distinguishable run name. Catches the common silent
+  failure modes (missing project, missing API key, generic run name) before
+  they consume pod time.
+project_spec: ''
+environment:
+  notes: |
+    Replace project values below with your own. wandb.required=true is the
+    default and the right default -- runs will fail loudly at startup if
+    W&B is misconfigured rather than logging silently to nowhere.
+  required_env_files:
+    - path: .env.runpod.local
+      keys:
+        - WANDB_API_KEY
+    - path: .env  # local-only; not synced to pods
+      keys:
+        - RUNPOD_API_KEY
+  required_yaml:
+    - file: crucible.yaml
+      block: wandb
+      fields:
+        project: '<your-project>'
+        required: true
+        mode: online
+steps:
+  - tool: config_get_project
+    purpose: Confirm wandb block is populated and required=true.
+    expect:
+      'wandb.project': '<non-empty>'
+      'wandb.required': true
+  - tool: get_wandb_guide
+    purpose: Sanity-check the checklist and common_failures list before launch.
+  - tool: provision_nodes
+    args:
+      count: 1
+      name_prefix: wandb-recipe
+    purpose: Spin up one node.
+  - tool: fleet_refresh
+    purpose: Wait for SSH endpoints (~60s).
+  - tool: bootstrap_nodes
+    purpose: |
+      Sync code, install deps, source .env. Pod preflight will exit 101 if
+      WANDB_API_KEY is missing after the source step -- if you see that,
+      add the key to the file at provider.defaults.env_source and re-run
+      bootstrap_nodes.
+  - tool: enqueue_experiment
+    args:
+      name: wandb-recipe-smoke
+      tier: smoke
+      backend: torch
+      config:
+        MODEL_FAMILY: baseline
+        CRUCIBLE_VARIANT_NAME: wandb-recipe-v1   # distinguishes the W&B run
+    purpose: |
+      Contract validation rejects this call (ConfigError) if wandb.project
+      or WANDB_API_KEY is missing. Set CRUCIBLE_VARIANT_NAME so the run
+      appears in W&B with a name you can find again.
+  - tool: dispatch_experiments
+    purpose: Assign the queued run to the bootstrapped node.
+  - tool: get_queue_status
+    purpose: Poll until the run finishes.
+  - tool: collect_results
+    purpose: Rsync results back from the pod.
+  - tool: wandb_get_url
+    args:
+      run_id: <run_id from enqueue_experiment>
+    purpose: |
+      VERIFICATION STEP. wandb_url must be non-null. If null, the run did
+      not register -- check tracker output for 'WANDB_PROJECT unset' or
+      wandb.init failure messages. See get_wandb_guide common_failures.
+gotchas:
+  - symptom: 'enqueue_experiment returns ConfigError "requires W&B"'
+    fix: 'Set wandb.project in crucible.yaml or WANDB_PROJECT in env_set, then retry. This is the contract working as intended.'
+  - symptom: 'Pod exits with code 101 during bootstrap or launch'
+    fix: 'WANDB_API_KEY missing from the .env file at provider.defaults.env_source. Add it and re-run bootstrap_nodes.'
+  - symptom: 'Run completes but wandb_get_url returns null'
+    fix: 'Either WANDB_PROJECT did not propagate to the pod env, or wandb.init() failed. Check the run status sidecar and logs/<run_id>.out for WANDB_* values seen at training time.'
+  - symptom: 'All my variant runs share one display name in W&B'
+    fix: 'Set CRUCIBLE_VARIANT_NAME (or WANDB_RUN_NAME) per variant. The default exp_id collides across runs from the same enqueue.'
+  - symptom: 'I want to run an experiment without W&B (development)'
+    fix: 'Set wandb.required=false in crucible.yaml. That single setting bypasses both the enqueue-time validator and the runtime gate. wandb.mode=disabled is not required (and does not by itself disable the contract -- it only lets you skip WANDB_API_KEY). CRUCIBLE_ENFORCE_CONTRACT=0 in env only skips the runtime gate; enqueue still rejects if wandb.required=true and project is missing.'
+results:
+  expected_metrics_keys:
+    - val_loss
+    - steps_completed
+  expected_status_keys:
+    - 'wandb.url'
+    - 'wandb.run_name'
+tags:
+  - wandb
+  - canonical
+  - mcp
+  - onboarding

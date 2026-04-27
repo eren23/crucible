@@ -124,6 +124,23 @@ contract above.
 
 - **`docs/crucible-config-hierarchy.md`** — definitive map of which config layer wins for `provision_project` / `bootstrap_project` / `run_project`. Documents the full precedence table (ranks 0–12), the `nodes.json` interruptible echo bug, the correct playbook for running a project variant (pass `variant_name` to `run_project` or inline env via `overrides`), and 10 common gotchas. **If you are about to edit a project spec yaml or debug a RunPod pod that "looks stuck", read §3 and §4 of that doc first.**
 
+## W&B contract — default behavior
+
+`wandb.required=true` is the default in `crucible.yaml` (see `WandbConfig` in `src/crucible/core/config.py`). When `True`, both layers fail loudly:
+
+1. **Enqueue-time** (`validate_experiment_contract`): `enqueue_experiment` / `design_enqueue_batch` / `version_run_design` raise `ConfigError` if `wandb.project` is empty (in yaml or env) OR if `wandb.mode != "disabled"` and `WANDB_API_KEY` is unset.
+2. **Runtime** (`run_experiment`): the launcher raises `RunnerError` if `WandbLogger.create()` returned an inert logger. Gate condition: `CRUCIBLE_ENFORCE_CONTRACT=1` always enforces, `=0` always opts out, unset → honors `wandb.required`.
+
+**Opting out for development**: set `wandb.required=false` in `crucible.yaml`. That single setting bypasses both layers. `wandb.mode=disabled` alone is NOT a full opt-out — it only relaxes the API-key check while keeping `wandb.project` required. `CRUCIBLE_ENFORCE_CONTRACT=0` only relaxes the runtime gate; enqueue still rejects.
+
+**Discoverability**: agents can call `get_wandb_guide` (MCP) for the decision tree, checklist, common failures, and verification steps. The canonical workflow lives at `docs/recipes/wandb-tracked-experiment.yaml` (source-controlled). To make it accessible via `recipe_get(name='wandb-tracked-experiment')` in a project, copy the file into that project's `.crucible/recipes/` (the recipe system reads from there). Tap-based distribution is a follow-up so cross-project `recipe_get` works without the manual copy step.
+
+**Auto-defaults**:
+- If `WANDB_API_KEY` and `WANDB_PROJECT` are both present in env and `LOGGING_BACKEND` is unset, the runner sets `LOGGING_BACKEND=wandb,console` (generic backend only — `torch_backend.py` instantiates `WandbLogger` directly, so the env var is moot there).
+- If only one of the two is present, runner falls back to `console` and emits a warning.
+
+**Run-name policy**: `WANDB_RUN_NAME` defaults to `exp_id` (UUID-ish), which collides across variants in the same batch. `enqueue_experiment` and `design_enqueue_batch` return a `warnings` list when neither `WANDB_RUN_NAME` nor `CRUCIBLE_VARIANT_NAME` are set in the config. The `run_project` path auto-derives `WANDB_RUN_NAME` from the variant name.
+
 ## Common Commands
 
 ```bash

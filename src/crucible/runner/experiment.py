@@ -47,6 +47,33 @@ from crucible.runner.wandb_logger import WandbLogger
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _resolve_logging_backend_default(env: dict[str, str]) -> tuple[str, str | None]:
+    """Decide LOGGING_BACKEND based on env when caller hasn't pinned one.
+
+    Returns (backend, warning_message). warning_message is non-None when
+    one of the two W&B vars is set without the other.
+    """
+    if env.get("LOGGING_BACKEND"):
+        return env["LOGGING_BACKEND"], None
+    has_key = bool(env.get("WANDB_API_KEY", "").strip())
+    has_proj = bool(env.get("WANDB_PROJECT", "").strip())
+    if has_key and has_proj:
+        return "wandb,console", None
+    if has_proj and not has_key:
+        return (
+            "console",
+            "WANDB_PROJECT set but WANDB_API_KEY missing -- defaulting LOGGING_BACKEND=console. "
+            "Add WANDB_API_KEY to .env to enable W&B logging.",
+        )
+    if has_key and not has_proj:
+        return (
+            "console",
+            "WANDB_API_KEY set but WANDB_PROJECT missing -- defaulting LOGGING_BACKEND=console. "
+            "Set wandb.project in crucible.yaml or WANDB_PROJECT in env to enable W&B logging.",
+        )
+    return "", None
+
+
 def _resolve_python(project_root: Path) -> str:
     """Find the best Python interpreter: venv first, then sys.executable."""
     venv_python = project_root / ".venv" / "bin" / "python3"
@@ -230,6 +257,15 @@ def run_experiment(
     env.setdefault("WANDB_RUN_NAME", exp_id)
     env.setdefault("CRUCIBLE_EXECUTION_PROVIDER", project_config.provider.type.lower())
 
+    # Auto-enable W&B logging when both credentials and project are present.
+    # Users who deliberately want console-only can set LOGGING_BACKEND=console
+    # in env_set or set wandb.required=false in crucible.yaml.
+    backend_default, warning = _resolve_logging_backend_default(env)
+    if backend_default:
+        env["LOGGING_BACKEND"] = backend_default
+    if warning:
+        log_warn(warning)
+
     tracker.update(
         state="queued",
         phase="queued",
@@ -274,9 +310,23 @@ def run_experiment(
         tags=tags,
         env=env,
     )
-    if env.get("CRUCIBLE_ENFORCE_CONTRACT") == "1" and not wandb_logger.enabled:
+    enforce_flag = env.get("CRUCIBLE_ENFORCE_CONTRACT", "").strip()
+    if enforce_flag == "1":
+        enforce = True
+    elif enforce_flag == "0":
+        enforce = False
+    else:
+        # Unset: default to honoring wandb.required from project config.
+        enforce = bool(getattr(project_config.wandb, "required", True))
+    if enforce and not wandb_logger.enabled:
+        reason = wandb_logger.error or "WANDB_PROJECT unset"
         raise RunnerError(
-            f"RunPod+W&B contract required, but W&B initialization failed: {wandb_logger.error or 'WANDB_PROJECT unset'}"
+            f"W&B logging is required (wandb.required={getattr(project_config.wandb, 'required', True)}) "
+            f"but failed to initialize: {reason}. "
+            "Set wandb.project in crucible.yaml or WANDB_PROJECT in env, "
+            "ensure WANDB_API_KEY is exported, or set wandb.required=false in crucible.yaml "
+            "(or CRUCIBLE_ENFORCE_CONTRACT=0 in env) to opt out. "
+            "See get_wandb_guide for the full checklist."
         )
     if wandb_logger.enabled:
         wandb_logger.update_config({

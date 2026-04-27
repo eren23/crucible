@@ -337,9 +337,14 @@ TOOLS: list[Tool] = [
         name="enqueue_experiment",
         description=(
             "Add an experiment configuration to the fleet queue.\n\n"
-            "REQUIRES: Nothing. Skips if same name+tier already queued.\n"
+            "REQUIRES: wandb.project set in crucible.yaml OR WANDB_PROJECT in env_set; "
+            "WANDB_API_KEY exported (in .env*) when wandb.mode!=disabled. "
+            "Contract validation rejects this call (ConfigError) when missing. "
+            "See get_wandb_guide if you have not configured W&B for this project. "
+            "Skips if same name+tier already queued.\n"
             "RETURNS: {status: 'enqueued'|'skipped', run_id}\n"
-            "NEXT: dispatch_experiments to assign to nodes."
+            "NEXT: dispatch_experiments to assign to nodes. Set CRUCIBLE_VARIANT_NAME (or WANDB_RUN_NAME) "
+            "in config to give the W&B run a distinguishable name -- the default exp_id collides across variants."
         ),
         inputSchema={
             "type": "object",
@@ -379,7 +384,9 @@ TOOLS: list[Tool] = [
             "Create N new compute nodes via the configured provider (RunPod/SSH).\n\n"
             "REQUIRES: RUNPOD_API_KEY in .env (for RunPod provider).\n"
             "RETURNS: {created, new_nodes: [{name, node_id}]}\n"
-            "NEXT: fleet_refresh (wait ~60s for SSH), then bootstrap_nodes."
+            "NEXT: fleet_refresh (wait ~60s for SSH), then bootstrap_nodes. "
+            "If you have not configured W&B for this project yet, call get_wandb_guide before enqueueing -- "
+            "experiment runs require WANDB_API_KEY + WANDB_PROJECT or they will fail at startup."
         ),
         inputSchema={
             "type": "object",
@@ -633,9 +640,12 @@ TOOLS: list[Tool] = [
         name="bootstrap_nodes",
         description=(
             "Bootstrap fleet nodes: sync code, install deps, download data. Long-running (2-10 min).\n\n"
-            "REQUIRES: Nodes with SSH hosts (run fleet_refresh first after provision_nodes).\n"
+            "REQUIRES: Nodes with SSH hosts (run fleet_refresh first after provision_nodes). "
+            "The env file pointed at by provider.defaults.env_source (default: .env.runpod.local) "
+            "must contain WANDB_API_KEY when wandb.required=true; preflight on the pod exits with code 101 if it is missing.\n"
             "RETURNS: {total, bootstrapped, nodes: [{name, state, env_ready, dataset_ready}]}\n"
-            "NEXT: enqueue_experiment or design_enqueue_batch, then dispatch_experiments."
+            "NEXT: enqueue_experiment or design_enqueue_batch, then dispatch_experiments. "
+            "Call get_wandb_guide if uncertain about W&B configuration."
         ),
         inputSchema={
             "type": "object",
@@ -652,9 +662,12 @@ TOOLS: list[Tool] = [
         name="dispatch_experiments",
         description=(
             "Dispatch queued experiments to idle bootstrapped nodes. One experiment per node. Long-running.\n\n"
-            "REQUIRES: Bootstrapped nodes (env_ready=true) + queued experiments.\n"
+            "REQUIRES: Bootstrapped nodes (env_ready=true) + queued experiments. "
+            "Each pod must have WANDB_API_KEY in its sourced .env file when wandb.required=true; "
+            "the runner raises RunnerError at startup if W&B init fails. See get_wandb_guide.\n"
             "RETURNS: {dispatched, assignments: [{node, experiment}]}\n"
-            "NEXT: get_queue_status to monitor, collect_results when done."
+            "NEXT: get_queue_status to monitor, collect_results when done. "
+            "After collect_results, call wandb_get_url(run_id) to verify each run actually registered."
         ),
         inputSchema={
             "type": "object",
@@ -795,7 +808,10 @@ TOOLS: list[Tool] = [
         name="design_enqueue_batch",
         description=(
             "Enqueue a batch of experiment configs to the fleet queue.\n\n"
-            "REQUIRES: Batch of experiments (from design_batch_from_hypotheses or manually built).\n"
+            "REQUIRES: Batch of experiments (from design_batch_from_hypotheses or manually built); "
+            "wandb.project + WANDB_API_KEY configured (contract validates each enqueue). "
+            "Per-experiment config should set CRUCIBLE_VARIANT_NAME (or WANDB_RUN_NAME) for distinguishable W&B run names. "
+            "See get_wandb_guide.\n"
             "RETURNS: {enqueued, wave_name, run_ids: [...]}\n"
             "NEXT: dispatch_experiments to assign to nodes."
         ),
@@ -964,7 +980,8 @@ TOOLS: list[Tool] = [
         name="version_run_design",
         description=(
             "Execute a versioned design: enqueues to fleet queue and updates status to running. Does NOT dispatch.\n\n"
-            "REQUIRES: Design name from version_list_designs.\n"
+            "REQUIRES: Design name from version_list_designs; wandb.project + WANDB_API_KEY configured "
+            "(contract validates at enqueue time). See get_wandb_guide.\n"
             "RETURNS: {run_ids: [...], wave_name}\n"
             "NEXT: dispatch_experiments to assign to nodes, then collect_results, then version_link_result."
         ),
@@ -1703,6 +1720,19 @@ TOOLS: list[Tool] = [
         ),
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
+    Tool(
+        name="get_wandb_guide",
+        description=(
+            "Decision guide + checklist for wiring W&B correctly: how WANDB_PROJECT / WANDB_API_KEY / "
+            "CRUCIBLE_VARIANT_NAME flow into a run, common silent-failure modes, and a reproducible workflow.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {decision_tree, checklist, common_failures, workflow, verification, tips, see_also}\n"
+            "NEXT: config_get_project to inspect the active wandb config block; "
+            "recipe_get(name='wandb-tracked-experiment') for the canonical recipe; "
+            "wandb_get_url(run_id) to verify a registered run."
+        ),
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
     # -----------------------------------------------------------------------
     # Tree search tools
     # -----------------------------------------------------------------------
@@ -1905,11 +1935,15 @@ TOOLS: list[Tool] = [
             "that variant's env-var overrides. Caller's `overrides` dict still wins over variant values, "
             "so you can tweak individual knobs (e.g. `variant='phase5_contrast_15k_high', overrides={'WM_SEED': '43'}`). "
             "Passing an unknown variant name is a loud error.\n\n"
-            "NOTE: WANDB_PROJECT is set per spec in env_set. To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. "
-            "The variant name (CRUCIBLE_VARIANT_NAME / WANDB_RUN_NAME) distinguishes individual runs.\n\n"
+            "W&B: WANDB_PROJECT comes from spec.env_set; WANDB_API_KEY must be in the env file synced to the pod "
+            "(provider.defaults.env_source, default .env.runpod.local). The variant name becomes WANDB_RUN_NAME automatically. "
+            "To consolidate experiments across different specs into one W&B project, pass WANDB_PROJECT in overrides. "
+            "Contract enforcement is on (CRUCIBLE_ENFORCE_CONTRACT=1) -- runs fail at startup if W&B init fails. "
+            "See get_wandb_guide.\n\n"
             "REQUIRES: Nodes bootstrapped via bootstrap_project.\n"
             "RETURNS: {launch_id, run_id?(single-node), nodes: [{run_id, name, pid, status}]}\n"
-            "NEXT: get_project_run_status to monitor lifecycle, collect_project_results when done."
+            "NEXT: get_project_run_status to monitor lifecycle, collect_project_results when done. "
+            "wandb_get_url(run_id) verifies the run actually registered."
         ),
         inputSchema={
             "type": "object",
@@ -1929,7 +1963,9 @@ TOOLS: list[Tool] = [
             "Run a sequence of project variants on the same node, auto-chaining. "
             "Launches the first variant, polls until completion, then launches the next. "
             "Long-running (minutes to hours). Runs in background thread.\n\n"
-            "REQUIRES: Node bootstrapped via bootstrap_project.\n"
+            "REQUIRES: Node bootstrapped via bootstrap_project. "
+            "wandb.project + WANDB_API_KEY configured per the contract; each variant gets its own WANDB_RUN_NAME. "
+            "See get_wandb_guide.\n"
             "RETURNS: {chain_id, variants_total, results: [{variant, run_id, status, duration_s}]}\n"
             "NEXT: get_project_run_status for individual runs, collect_project_results when chain completes."
         ),

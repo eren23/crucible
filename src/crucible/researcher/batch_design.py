@@ -36,10 +36,14 @@ def design_batch(
     # Include baseline control if not run recently
     recent_names = {rec.get("experiment", {}).get("name") for rec in state.history[-20:]}
     if baseline_name not in recent_names and baseline_config:
+        baseline_cfg = dict(baseline_config)
+        # Auto-derive a distinguishable W&B run name unless caller already set one.
+        # Default WANDB_RUN_NAME=exp_id collides across batch members in the W&B UI.
+        baseline_cfg.setdefault("CRUCIBLE_VARIANT_NAME", f"{baseline_name}_iter_{iteration}")
         batch.append(
             {
                 "name": baseline_name,
-                "config": baseline_config,
+                "config": baseline_cfg,
                 "tags": ["autonomous", "baseline", f"iter_{iteration}"],
                 "tier": tier,
                 "backend": backend,
@@ -57,10 +61,14 @@ def design_batch(
         config = hyp.get("config", {})
         if not config:
             continue
+        hyp_name = hyp.get("name", f"hyp_{iteration}")
+        config_with_name = dict(config)
+        # Same auto-derivation as the baseline path.
+        config_with_name.setdefault("CRUCIBLE_VARIANT_NAME", f"{hyp_name}_iter_{iteration}")
         batch.append(
             {
-                "name": hyp.get("name", f"hyp_{iteration}"),
-                "config": config,
+                "name": hyp_name,
+                "config": config_with_name,
                 "tags": ["autonomous", hyp.get("family", "unknown"), f"iter_{iteration}"],
                 "tier": tier,
                 "backend": backend,
