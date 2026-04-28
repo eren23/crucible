@@ -93,10 +93,39 @@ def _write_state(state: dict[str, Any]) -> None:
     atomic_write_json(_state_path(), state)
 
 
+_seen_cache: dict[str, set[tuple[str, str]]] = {}
+_seen_cache_lock = threading.Lock()
+
+
+def _reset_seen_cache(path: Path | None = None) -> None:
+    """Drop the cached seen-set for a specific log path, or all paths.
+
+    Mostly useful for tests that mutate the JSONL on disk outside the
+    `_append_log` path. The daemon itself never needs to invalidate — every
+    write goes through `_append_log` which keeps the cache in sync.
+    """
+    with _seen_cache_lock:
+        if path is None:
+            _seen_cache.clear()
+        else:
+            _seen_cache.pop(str(path), None)
+
+
 def _append_log(row: dict[str, Any]) -> None:
     line = json.dumps(row, default=str)
-    with _log_path().open("a", encoding="utf-8") as f:
+    log = _log_path()
+    with log.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
+    # Keep the in-memory seen-set in sync so `_seen_runs` doesn't have to
+    # re-scan the entire log on every poll.
+    sha = row.get("ckpt_sha", "")
+    script = row.get("script", "")
+    if sha and script:
+        key = str(log)
+        with _seen_cache_lock:
+            cached = _seen_cache.get(key)
+            if cached is not None:
+                cached.add((sha, Path(script).name))
 
 
 def _read_log_tail(n: int = 50) -> list[dict[str, Any]]:
@@ -114,14 +143,49 @@ def _read_log_tail(n: int = 50) -> list[dict[str, Any]]:
 
 
 def _seen_runs() -> set[tuple[str, str]]:
-    """Set of (ckpt_sha, script_basename) already run."""
+    """Set of (ckpt_sha, script_basename) already evaluated.
+
+    Loads the full JSONL log on first call per log-path, then caches the
+    resulting set in memory. Subsequent calls return the cache; `_append_log`
+    keeps it in sync by adding each new row's (sha, script) pair as it
+    writes. This keeps the daemon's poll loop O(new rows) instead of
+    O(total log size), which matters: a long-lived project can accumulate
+    100k+ rows and the prior full-rescan-per-poll cost up to ~2s every 5 min
+    indefinitely.
+
+    Tests that pre-seed the JSONL on disk (bypassing `_append_log`) should
+    call `_reset_seen_cache()` first, or rely on the path-keyed cache
+    naturally giving each `tmp_path` its own slot.
+    """
+    path = _log_path()
+    key = str(path)
+    with _seen_cache_lock:
+        cached = _seen_cache.get(key)
+        if cached is not None:
+            return set(cached)
+
     seen: set[tuple[str, str]] = set()
-    for row in _read_log_tail(n=10000):
-        sha = row.get("ckpt_sha", "")
-        script = row.get("script", "")
-        if sha and script:
-            seen.add((sha, Path(script).name))
-    return seen
+    if path.exists():
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    sha = row.get("ckpt_sha", "")
+                    script = row.get("script", "")
+                    if sha and script:
+                        seen.add((sha, Path(script).name))
+        except OSError:
+            return seen
+
+    with _seen_cache_lock:
+        _seen_cache[key] = seen
+    return set(seen)
 
 
 def _sha256_of_file(path: Path, chunk: int = 1 << 16) -> str:
@@ -283,6 +347,39 @@ _stop_event: threading.Event | None = None
 _lock = threading.Lock()
 
 
+def _backfill_local_checkpoints(suite: list[EvalSpec],
+                                env: dict[str, str]) -> list[dict[str, Any]]:
+    """Replay every already-pulled local checkpoint against any (sha, script)
+    pair the JSONL log hasn't recorded yet.
+
+    Runs once on daemon start so adding a new script to ``ev*l_suite:`` after
+    checkpoints have already been collected does not strand them — the new
+    script gets backfilled across the existing local cache. Cheap because the
+    SHA-based seen-set skips anything already processed.
+    """
+    seen = _seen_runs()
+    appended: list[dict[str, Any]] = []
+    ckpt_dir = _ckpt_dir()
+    if not ckpt_dir.exists():
+        return appended
+    for ckpt_path in sorted(ckpt_dir.glob("*.pt")):
+        try:
+            sha = _sha256_of_file(ckpt_path)
+        except OSError:
+            continue
+        label = ckpt_path.stem
+        for spec in suite:
+            key = (sha, Path(spec.script).name)
+            if key in seen:
+                continue
+            row = _run_one_eval(ckpt_path, sha, label, spec, env)
+            row["backfilled"] = True
+            _append_log(row)
+            appended.append(row)
+            seen.add(key)
+    return appended
+
+
 def _poll_once(project_name: str, suite: list[EvalSpec],
                remote_pattern: str, env: dict[str, str]) -> list[dict[str, Any]]:
     nodes = _load_nodes(filter_prefix=project_name)
@@ -319,6 +416,27 @@ def _watcher_loop(project_name: str, interval: int,
             "stopped_at": utc_now_iso(),
         })
         return
+    # Backfill: any (existing local ckpt, script-from-current-suite) pair that
+    # the log doesn't already cover gets evaluated immediately. Cheap and
+    # idempotent — recovers gaps from daemon downtime or newly-added scripts.
+    try:
+        backfilled = _backfill_local_checkpoints(suite, env)
+        if backfilled:
+            s = _read_state()
+            s["last_backfill_at"] = utc_now_iso()
+            s["last_backfill_count"] = len(backfilled)
+            s["total_runs"] = s.get("total_runs", 0) + len(backfilled)
+            _write_state(s)
+    except (CrucibleError, OSError, subprocess.SubprocessError, ValueError) as exc:
+        _append_log({
+            "label": "_backfill_error",
+            "ckpt_sha": "",
+            "script": "",
+            "ok": False,
+            "result": None,
+            "stderr_tail": f"{type(exc).__name__}: {exc}",
+            "ran_at": utc_now_iso(),
+        })
     while _stop_event is not None and not _stop_event.is_set():
         try:
             appended = _poll_once(project_name, suite, remote_pattern, env)
@@ -359,6 +477,10 @@ def start(project_name: str, *, interval: int = 300,
             raise EvalWatcherError(
                 f"project {project_name!r} has no eval_suite: block; nothing to watch"
             )
+        # Drop any stale seen-set so the first poll re-loads from the
+        # current on-disk JSONL — covers the case where the log was edited
+        # while the daemon was stopped.
+        _reset_seen_cache(_log_path())
         _stop_event = threading.Event()
         _thread = threading.Thread(
             target=_watcher_loop,

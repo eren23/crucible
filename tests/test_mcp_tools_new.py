@@ -552,3 +552,120 @@ class TestConfigGetModalities:
         assert "objectives" in result
         assert "cross_entropy" in result["objectives"]
         assert "mse" in result["objectives"]
+
+
+# ---------------------------------------------------------------------------
+# get_run_logs redaction wiring
+# ---------------------------------------------------------------------------
+
+
+class TestGetRunLogsRedaction:
+    def test_log_text_strips_secrets(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Tokens that leak into stdout should be scrubbed before MCP returns them."""
+        from crucible.mcp.tools import get_run_logs
+
+        project = tmp_path / "project"
+        project.mkdir()
+        logs_dir = project / "logs"
+        logs_dir.mkdir()
+        leaky = (
+            "step:1/10 train_loss:5.0\n"
+            "WANDB_API_KEY=wandb_v2_aaaaaaaaaaaaaaaaaaaa\n"
+            "Authorization: Bearer abc123def456ghi789jkl012mno345\n"
+            "token sk-ant-api03-aBcD_eFgH-iJkLmNoPqRsTuVwX done\n"
+        )
+        (logs_dir / "leaky.txt").write_text(leaky)
+
+        class FakeConfig:
+            project_root = project
+            nodes_file = "nodes.json"
+
+        monkeypatch.setattr("crucible.mcp.tools._get_config", lambda: FakeConfig())
+        result = get_run_logs({"run_id": "leaky"})
+        assert result["found"] is True
+        text = result["log_text"]
+        # Real-line content stays
+        assert "step:1/10 train_loss:5.0" in text
+        # Every token form is gone
+        assert "wandb_v2_aaaaaaaaaaaaaaaaaaaa" not in text
+        assert "abc123def456ghi789jkl012mno345" not in text
+        assert "sk-ant-api03" not in text
+        # And got replaced
+        assert text.count("<REDACTED>") >= 3
+
+
+# ---------------------------------------------------------------------------
+# agent_health_check
+# ---------------------------------------------------------------------------
+
+
+class TestAgentHealthCheck:
+    def test_no_loop_returns_ok(self):
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({
+            "recent_calls": [
+                {"name": "get_fleet_status", "args": {}},
+                {"name": "dispatch_experiments", "args": {}},
+                {"name": "collect_results", "args": {}},
+            ]
+        })
+        assert out["ok"] is True
+        assert out["hint"] is None
+        assert out["inspected"] == 3
+
+    def test_identical_repeats_flag_loop(self):
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({
+            "recent_calls": [
+                {"name": "version_get_design", "args": {"name": "x"}}
+                for _ in range(4)
+            ],
+            "threshold": 3,
+        })
+        assert out["ok"] is False
+        assert out["pattern"] in ("identical", "repetition")
+        assert "version_get_design" in out["hint"]
+
+    def test_polling_with_varying_results_suppressed(self):
+        """Same call, varying results = legitimate polling, no warning."""
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({
+            "recent_calls": [
+                {"name": "get_queue_status", "args": {}, "result": {"running": i}}
+                for i in range(5)
+            ],
+            "threshold": 3,
+        })
+        assert out["ok"] is True
+
+    def test_cycle_pattern_detected(self):
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({
+            "recent_calls": [
+                {"name": "dispatch_experiments", "args": {}},
+                {"name": "get_queue_status", "args": {}},
+                {"name": "dispatch_experiments", "args": {}},
+                {"name": "get_queue_status", "args": {}},
+            ],
+            "threshold": 99,  # only the cycle rule should fire
+        })
+        assert out["ok"] is False
+        assert out["pattern"] == "cycle"
+
+    def test_empty_calls(self):
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({"recent_calls": []})
+        assert out["ok"] is True
+        assert out["inspected"] == 0
+
+    def test_malformed_input_does_not_crash(self):
+        from crucible.mcp.tools import agent_health_check
+
+        out = agent_health_check({"recent_calls": "not a list"})
+        assert out["ok"] is True
+        assert out["inspected"] == 0

@@ -44,28 +44,97 @@ def _args_hash(args: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
 
-def _extract_tool_calls(history: list[MessageDict]) -> list[tuple[str, str]]:
-    """Return (tool_name, args_hash) pairs from assistant messages."""
-    pairs: list[tuple[str, str]] = []
-    for msg in history:
-        if msg.get("role") != "assistant":
-            continue
+def _result_hash(result: Any) -> str:
+    """Stable hash of a tool-result payload, or empty string for None/missing."""
+    if result is None:
+        return ""
+    try:
+        blob = json.dumps(result, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        blob = repr(result)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def _extract_tool_signatures(
+    history: list[MessageDict],
+) -> list[tuple[str, str, str]]:
+    """Return (tool_name, args_hash, result_hash) triples from messages.
+
+    `result_hash` is the hash of the tool_result that follows each tool_use,
+    or "" when no result is available in the history slice (the typical case
+    for in-flight calls or sub-agent histories that drop result blocks).
+
+    Pairing logic: when a tool_use carries an ``id`` (Anthropic format) we
+    match by ``tool_use_id`` from any later ``tool_result`` block. Otherwise
+    we fall back to position — each user/tool message keeps a FIFO queue of
+    its tool_result hashes, so a message answering N prior id-less tool_uses
+    pairs them in order rather than stranding all but the first.
+    """
+    triples: list[tuple[str, str, str]] = []
+    pending: list[tuple[int, str, str, str | None]] = []  # (idx, name, args, tool_use_id)
+    results_by_id: dict[str, str] = {}
+    # FIFO queue of result-hashes per message index — handles the multi-
+    # tool_result-per-message case correctly.
+    positional_queues: list[list[str]] = [[] for _ in history]
+
+    for i, msg in enumerate(history):
+        role = msg.get("role")
         content = msg.get("content", "")
-        if isinstance(content, list):
-            for block in content:
+        if role == "assistant":
+            blocks = content if isinstance(content, list) else []
+            for block in blocks:
                 if not isinstance(block, dict):
                     continue
                 if block.get("type") == "tool_use":
                     name = str(block.get("name", ""))
-                    pairs.append((name, _args_hash(block.get("input", {}))))
-        # Some codepaths flatten tool calls onto the message directly.
-        for tc in msg.get("tool_calls", []) or []:
-            if isinstance(tc, dict):
-                name = str(tc.get("name") or tc.get("tool_name") or "")
-                args = tc.get("arguments") or tc.get("input") or tc.get("args") or {}
-                if name:
-                    pairs.append((name, _args_hash(args)))
-    return pairs
+                    args = block.get("input", {})
+                    tu_id = block.get("id")
+                    pending.append((i, name, _args_hash(args), str(tu_id) if tu_id else None))
+            for tc in msg.get("tool_calls", []) or []:
+                if isinstance(tc, dict):
+                    name = str(tc.get("name") or tc.get("tool_name") or "")
+                    args = tc.get("arguments") or tc.get("input") or tc.get("args") or {}
+                    tu_id = tc.get("id")
+                    if name:
+                        pending.append((i, name, _args_hash(args), str(tu_id) if tu_id else None))
+        elif role in ("user", "tool"):
+            blocks = content if isinstance(content, list) else []
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    rh = _result_hash(block.get("content"))
+                    tu_id = block.get("tool_use_id")
+                    if tu_id:
+                        results_by_id[str(tu_id)] = rh
+                    else:
+                        positional_queues[i].append(rh)
+            # `tool` role often carries a flat content field.
+            if role == "tool" and "content" in msg and not isinstance(content, list):
+                rh = _result_hash(content)
+                tu_id = msg.get("tool_call_id") or msg.get("tool_use_id")
+                if tu_id:
+                    results_by_id[str(tu_id)] = rh
+                else:
+                    positional_queues[i].append(rh)
+
+    # Stitch tool_use → tool_result.
+    for idx, name, ah, tu_id in pending:
+        rh = ""
+        if tu_id and tu_id in results_by_id:
+            rh = results_by_id[tu_id]
+        else:
+            for j in range(idx + 1, len(history)):
+                if positional_queues[j]:
+                    rh = positional_queues[j].pop(0)
+                    break
+        triples.append((name, ah, rh))
+    return triples
+
+
+def _extract_tool_calls(history: list[MessageDict]) -> list[tuple[str, str]]:
+    """Backward-compat shim: return (name, args_hash) pairs."""
+    return [(name, ah) for name, ah, _ in _extract_tool_signatures(history)]
 
 
 def detect(
@@ -77,8 +146,12 @@ def detect(
 
     Triggers on any of:
 
-    - Same ``(tool_name, args_hash)`` ≥ *threshold* times.
-    - Same ``tool_name`` (any args) ≥ *threshold* + 2 times.
+    - Same ``(tool_name, args_hash)`` ≥ *threshold* times **and** results
+      are not varying (varying results = legitimate polling, suppressed).
+    - Same ``tool_name`` (any args) ≥ *threshold* + 2 times **and** results
+      are not varying.
+    - A 2–5-step ``(tool, args)`` cycle that has fully repeated ≥ 2 times
+      back-to-back at the tail of the window.
     - Two identical consecutive assistant text messages.
 
     Returns a short corrective prompt (to inject before the next LLM
@@ -89,18 +162,33 @@ def detect(
     if not history:
         return None
 
-    # (a) + (b): tool-call repetition
     recent = history[-window:]
-    pairs = _extract_tool_calls(recent)
-    if pairs:
-        pair_counts = Counter(pairs)
+    triples = _extract_tool_signatures(recent)
+
+    if triples:
+        # (a) Same (name, args), suppress when result_hash is varying.
+        pair_counts: Counter[tuple[str, str]] = Counter((n, ah) for n, ah, _ in triples)
+        results_by_pair: dict[tuple[str, str], set[str]] = {}
+        for n, ah, rh in triples:
+            results_by_pair.setdefault((n, ah), set()).add(rh)
         for (name, ah), n in pair_counts.most_common(1):
-            if n >= threshold:
+            if n >= threshold and not _results_vary(results_by_pair[(name, ah)]):
                 return _prompt_tool_loop(name, n, specific=True)
-        name_counts = Counter(name for name, _ in pairs)
+
+        # (b) Same name (any args), suppress when results vary across the group.
+        name_counts: Counter[str] = Counter(n for n, _, _ in triples)
+        results_by_name: dict[str, set[str]] = {}
+        for n, _, rh in triples:
+            results_by_name.setdefault(n, set()).add(rh)
         for name, n in name_counts.most_common(1):
-            if n >= threshold + 2:
+            if n >= threshold + 2 and not _results_vary(results_by_name[name]):
                 return _prompt_tool_loop(name, n, specific=False)
+
+        # (b2) Cycle detection: pattern of length 2–5 repeated ≥ 2 times at tail.
+        pairs_only = [(n, ah) for n, ah, _ in triples]
+        cycle = _detect_cycle(pairs_only, max_len=5)
+        if cycle is not None:
+            return _prompt_cycle_loop(cycle)
 
     # (c): identical consecutive assistant text messages
     assistant_texts: list[str] = []
@@ -118,6 +206,39 @@ def detect(
     if len(assistant_texts) == 2 and assistant_texts[0] == assistant_texts[1]:
         return _prompt_repeat_message()
 
+    return None
+
+
+def _results_vary(result_hashes: set[str]) -> bool:
+    """True iff the results genuinely differ across calls.
+
+    A set of size ≥ 2 with at least one non-empty hash means the tool
+    returned different content across calls — suppress the loop.
+    Histories without tool_result blocks (all empty hashes) collapse to
+    {""} and are treated as non-varying so legacy callers still trigger.
+    """
+    non_empty = {r for r in result_hashes if r}
+    return len(non_empty) >= 2
+
+
+def _detect_cycle(
+    pairs: list[tuple[str, str]], *, max_len: int = 5
+) -> list[str] | None:
+    """Return the tool-name cycle if last 2N pairs match pattern of length N.
+
+    Checks N = 2..max_len. The most recent block of length N must equal
+    the block immediately before it AND contain ≥ 2 distinct tool names
+    (single-tool repetition is detected by Rule A, which honors
+    result-hash variation for legitimate polling).
+    """
+    n = len(pairs)
+    for seq_len in range(2, max_len + 1):
+        if n < seq_len * 2:
+            continue
+        tail = pairs[-seq_len:]
+        prev = pairs[-seq_len * 2 : -seq_len]
+        if tail == prev and len({name for name, _ in tail}) >= 2:
+            return [name for name, _ in tail]
     return None
 
 
@@ -176,6 +297,16 @@ def _prompt_tool_loop(tool_name: str, n: int, *, specific: bool) -> str:
         "(2) Is a different approach or tool needed? "
         "(3) Should you ask the user for clarification before continuing? "
         "Do NOT call this tool again until you can name a new reason."
+    )
+
+
+def _prompt_cycle_loop(cycle: list[str]) -> str:
+    chain = " → ".join(cycle)
+    return (
+        f"DOOM LOOP DETECTED: tool-call cycle [{chain}] has repeated back-to-back. "
+        "This is the agent equivalent of a stuck infinite loop. Stop, summarize "
+        "what these calls have established, and pick a different approach: "
+        "skip ahead, gather missing info, or ask the user."
     )
 
 

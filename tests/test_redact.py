@@ -74,6 +74,67 @@ class TestRedactString:
         s = "sk-short"
         assert _redact_string(s) == s
 
+    def test_anthropic_key_with_dashes(self):
+        """Real sk-ant- keys contain internal dashes; pattern must capture them."""
+        s = "API key sk-ant-api03-aBcD_eFgH-iJkLmNoPqRsTuVwXyZ123 done"
+        result = _redact_string(s)
+        assert "sk-ant-api03" not in result
+        assert "<REDACTED>" in result
+
+    def test_github_classic_pat(self):
+        for prefix in ("ghp", "gho", "ghu", "ghs", "ghr"):
+            s = f"token {prefix}_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 leaked"
+            result = _redact_string(s)
+            assert f"{prefix}_AbCd" not in result
+            assert "<REDACTED>" in result
+
+    def test_github_fine_grained_pat(self):
+        s = "github_pat_11ABC123_aBcDeFgHiJkLmNoPqRsTuV here"
+        result = _redact_string(s)
+        assert "github_pat_11ABC" not in result
+        assert "<REDACTED>" in result
+
+    def test_aws_access_key(self):
+        s = "creds AKIAIOSFODNN7EXAMPLE here, also ASIAQWERTY1234567890"
+        result = _redact_string(s)
+        assert "AKIAIOSFODNN7EXAMPLE" not in result
+        assert "ASIAQWERTY1234567890" not in result
+        assert result.count("<REDACTED>") == 2
+
+    def test_bearer_token(self):
+        s = "Authorization: Bearer abc123def456ghi789jkl012mno345"
+        result = _redact_string(s)
+        assert "abc123def456ghi789jkl" not in result
+        assert "<REDACTED>" in result
+
+    def test_env_assignment_scrubbing(self):
+        """Lines like `WANDB_API_KEY=value` should keep the key visible but scrub the value."""
+        s = "WANDB_API_KEY=somevalue123 trained successfully"
+        result = _redact_string(s)
+        assert "WANDB_API_KEY" in result
+        assert "somevalue123" not in result
+        assert "<REDACTED>" in result
+
+    def test_env_assignment_with_export(self):
+        s = "export HF_TOKEN=abcd1234 && python train.py"
+        result = _redact_string(s)
+        assert "HF_TOKEN" in result
+        assert "abcd1234" not in result
+
+    def test_env_assignment_colon_form(self):
+        """YAML-style `KEY: value` also scrubs."""
+        s = "  ANTHROPIC_API_KEY: sk-ant-api03-foo\n"
+        result = _redact_string(s)
+        assert "ANTHROPIC_API_KEY" in result
+        # Both the env-rule AND the sk-ant pattern would catch this; either is fine.
+        assert "<REDACTED>" in result
+        assert "sk-ant-api03-foo" not in result
+
+    def test_env_assignment_skips_non_secret_keys(self):
+        """`step=100` should NOT match because `step` lacks TOKEN/KEY/etc."""
+        s = "step=100 lr=0.001 wd=0.1"
+        assert _redact_string(s) == s
+
 
 # ---------------------------------------------------------------------------
 # redact_secrets (deep structure)

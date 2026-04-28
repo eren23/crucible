@@ -26,6 +26,7 @@ from crucible.core.experiment_contract import (
 )
 from crucible.core.io import read_jsonl
 from crucible.core.log import utc_now_iso
+from crucible.core.redact import redact_secrets
 
 
 def _get_config() -> ProjectConfig:
@@ -67,6 +68,92 @@ def _queue_contract_fields(config: ProjectConfig) -> dict[str, Any]:
         "contract_status": metadata["contract_status"],
         "wandb": metadata["wandb"],
     }
+
+
+_LINT_LOAD_RE = re.compile(r"\bfrom_pretrained\b|\bload_state_dict\b")
+_LINT_SAVE_RE = re.compile(
+    r"\bsave_pretrained\b|\bpush_to_hub\b|\btorch\.save\b|\.save_adapter\b"
+)
+_LINT_TRAIN_LOOP_RE = re.compile(r"\bfor\s+(?:epoch|step)\b|\bmodel\.train\(\)")
+_LINT_TRAIN_LOSS_EMIT_RE = re.compile(r"train_loss\s*[:=]")
+_LINT_LORA_RE = re.compile(r"\bLoraConfig\b|\bget_peft_model\b|\bpeft\b")
+
+
+def _training_script_lints(script_text: str) -> list[str]:
+    """Pure regex lints on a training-script body. Returns warning strings.
+
+    Caught:
+    - Loads a pretrained model but never persists results (orphan training).
+    - Has a training loop but never emits ``train_loss:...`` (OutputParser
+      will silently produce no metrics — easy to miss for hours).
+    - Uses LoRA / PEFT but never calls a save_* method (adapter weights lost).
+    """
+    if not script_text:
+        return []
+    out: list[str] = []
+    loads = bool(_LINT_LOAD_RE.search(script_text))
+    saves = bool(_LINT_SAVE_RE.search(script_text))
+    has_train_loop = bool(_LINT_TRAIN_LOOP_RE.search(script_text))
+    emits_train_loss = bool(_LINT_TRAIN_LOSS_EMIT_RE.search(script_text))
+    has_lora = bool(_LINT_LORA_RE.search(script_text))
+
+    if loads and not saves:
+        out.append(
+            "Training script loads a pretrained model (from_pretrained / load_state_dict) "
+            "but never persists results (no save_pretrained / push_to_hub / torch.save / "
+            "save_adapter). Trained weights will be lost when the pod is destroyed."
+        )
+    if has_train_loop and not emits_train_loss:
+        out.append(
+            "Training loop detected but no `train_loss:` emit found. Crucible's "
+            "OutputParser expects the line `step:{i}/{N} train_loss:{value}` to record "
+            "metrics — without it, the run will appear to complete with no curve."
+        )
+    if has_lora and not saves:
+        out.append(
+            "LoRA / PEFT usage detected but no save call. PEFT adapters need an explicit "
+            "save_pretrained / save_adapter — they aren't included in default torch.save "
+            "of the base model."
+        )
+    return out
+
+
+def _lint_default_training_script(config: ProjectConfig) -> list[str]:
+    """Lint every training script declared in ``config.training`` (multi-backend safe).
+
+    A project spec carries ``training: list[TrainingConfig]`` — one entry per
+    backend. Earlier versions of this lint only inspected ``training[0]``,
+    silently passing pathologies in any other backend's script. Now we iterate
+    all backends and prefix the warning with the backend name when there is
+    more than one. Same regex set runs on each script.
+    """
+    training = getattr(config, "training", None) or []
+    if not training:
+        return []
+    multi = len(training) > 1
+    out: list[str] = []
+    for entry in training:
+        script_path = getattr(entry, "script", None)
+        if not script_path:
+            continue
+        try:
+            path = Path(script_path)
+            if not path.is_absolute():
+                path = config.project_root / path
+            if not path.exists() or path.stat().st_size > 1_000_000:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        warnings = _training_script_lints(text)
+        if not warnings:
+            continue
+        if multi:
+            backend = getattr(entry, "backend", "?") or "?"
+            out.extend(f"[backend={backend}] {w}" for w in warnings)
+        else:
+            out.extend(warnings)
+    return out
 
 
 def _wandb_run_name_warnings(exp_config: dict[str, Any]) -> list[str]:
@@ -275,6 +362,7 @@ def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
         limit=1,
     )
     warnings = _wandb_run_name_warnings(args.get("config") or {})
+    warnings.extend(_lint_default_training_script(config))
     if added:
         result = {"status": "enqueued", "run_id": added[0]["run_id"], "item": added[0]}
         if warnings:
@@ -1081,13 +1169,21 @@ def version_save_design(args: dict[str, Any]) -> dict[str, Any]:
                 content[field] = args[field]
         content["name"] = name  # always ensure name matches
 
+        from crucible.runner.tagger import merge_auto_tags, tag_design
+
+        auto_design_tags = tag_design(content)
+        merged_tags = merge_auto_tags(list(args.get("tags", [])), auto_design_tags)
+        # Persist the merged tags inside the design body so consumers reading
+        # the design content see the same tag list as the version metadata.
+        content["tags"] = merged_tags
+
         meta = store.create(
             "experiment_design",
             args["name"],
             content,
             summary=args.get("summary", f"Design: {args['name']}"),
             created_by=args.get("created_by", "mcp-agent"),
-            tags=args.get("tags", []),
+            tags=merged_tags,
         )
 
         # Auto-commit if configured
@@ -2716,7 +2812,7 @@ def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
         total = len(lines)
         if tail_lines > 0 and total > tail_lines:
             lines = lines[-tail_lines:]
-        return {
+        return redact_secrets({
             "found": True,
             "run_id": run_id,
             "source": "local",
@@ -2724,7 +2820,7 @@ def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
             "lines_returned": len(lines),
             "total_lines": total,
             "log_files": [str(lf) for lf in local_logs],
-        }
+        })
 
     # Step 2: Try SSH to remote pod
     try:
@@ -2761,14 +2857,14 @@ def get_run_logs(args: dict[str, Any]) -> dict[str, Any]:
 
         text = proc.stdout or ""
         lines = text.splitlines()
-        return {
+        return redact_secrets({
             "found": True,
             "run_id": run_id,
             "source": "remote",
             "node": assigned_node,
             "log_text": "\n".join(lines),
             "lines_returned": len(lines),
-        }
+        })
     except (CrucibleError, subprocess.SubprocessError, OSError) as exc:
         return {"found": False, "run_id": run_id, "reason": f"SSH probe failed: {exc}. Try collect_results to download logs locally."}
 
@@ -4196,6 +4292,8 @@ def recipe_save(args: dict[str, Any]) -> dict[str, Any]:
         path = recipes_dir / f"{name}.yaml"
         overwritten = path.exists()
 
+        from crucible.runner.tagger import merge_auto_tags, tag_recipe
+
         recipe = {
             "name": name,
             "title": args.get("title", ""),
@@ -4207,14 +4305,24 @@ def recipe_save(args: dict[str, Any]) -> dict[str, Any]:
             "steps": steps,
             "results": args.get("results", {}),
             "gotchas": args.get("gotchas", []),
-            "tags": args.get("tags", []),
+            "tags": list(args.get("tags", [])),
         }
+        # Auto-tags merged in after user tags so user order is preserved.
+        auto_tags = tag_recipe(recipe)
+        recipe["tags"] = merge_auto_tags(recipe["tags"], auto_tags)
 
         path.write_text(
             yaml.safe_dump(recipe, default_flow_style=False, sort_keys=False)
         )
 
-        return {"saved": True, "path": str(path), "name": name, "overwritten": overwritten}
+        return {
+            "saved": True,
+            "path": str(path),
+            "name": name,
+            "overwritten": overwritten,
+            "tags": recipe["tags"],
+            "auto_tags": auto_tags,
+        }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
@@ -4235,6 +4343,12 @@ def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
             return {"recipes": [], "total": 0}
 
         tag_filter = args.get("tag")
+        tags_filter = args.get("tags") or []
+        if isinstance(tags_filter, str):
+            tags_filter = [tags_filter]
+        # Combine the legacy single-tag filter with the new multi-tag list.
+        required_tags = [t for t in ([tag_filter] if tag_filter else []) + list(tags_filter) if t]
+
         recipes = []
         for path in sorted(recipes_dir.glob("*.yaml")):
             try:
@@ -4246,7 +4360,7 @@ def recipe_list(args: dict[str, Any]) -> dict[str, Any]:
                 continue
 
             tags = data.get("tags", [])
-            if tag_filter and tag_filter not in tags:
+            if required_tags and not all(t in tags for t in required_tags):
                 continue
 
             recipes.append({
@@ -5140,6 +5254,66 @@ def notebook_list_runtimes(args: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "runtimes": list_runtimes()}
 
 
+def agent_health_check(args: dict[str, Any]) -> dict[str, Any]:
+    """Check the orchestrator's recent tool-call sequence for doom-loop patterns.
+
+    The orchestrator passes its own recent calls; Crucible runs the detector
+    and returns a corrective hint when a loop is found. Stateless on the
+    Crucible side — keeps with the orchestrator-owns-its-state contract.
+    """
+    from crucible.core.doom_loop import detect
+
+    raw_calls = args.get("recent_calls") or []
+    if not isinstance(raw_calls, list):
+        return {"ok": True, "inspected": 0, "reason": "recent_calls must be a list"}
+
+    window = int(args.get("window", 10))
+    threshold = int(args.get("threshold", 3))
+    if threshold < 2:
+        threshold = 2
+
+    history: list[dict[str, Any]] = []
+    for i, call in enumerate(raw_calls):
+        if not isinstance(call, dict):
+            continue
+        name = str(call.get("name") or call.get("tool") or "")
+        if not name:
+            continue
+        tu_id = f"hc_{i}"
+        history.append({
+            "role": "assistant",
+            "content": [{
+                "type": "tool_use",
+                "id": tu_id,
+                "name": name,
+                "input": call.get("args") or call.get("arguments") or call.get("input") or {},
+            }],
+        })
+        if "result" in call:
+            history.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tu_id,
+                    "content": call.get("result"),
+                }],
+            })
+
+    hint = detect(history, window=window, threshold=threshold)
+    if hint is None:
+        return {"ok": True, "inspected": len(raw_calls), "hint": None, "pattern": None}
+
+    pattern = "cycle" if "cycle" in hint.lower() else (
+        "identical" if "identical" in hint.lower() else "repetition"
+    )
+    return {
+        "ok": False,
+        "inspected": len(raw_calls),
+        "pattern": pattern,
+        "hint": hint,
+    }
+
+
 TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Fleet status & lifecycle
     "get_fleet_status": get_fleet_status,
@@ -5321,4 +5495,6 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Notebook exporter
     "notebook_export": notebook_export,
     "notebook_list_runtimes": notebook_list_runtimes,
+    # Agent self-supervision
+    "agent_health_check": agent_health_check,
 }

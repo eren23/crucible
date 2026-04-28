@@ -182,7 +182,12 @@ class TestRecipeSavePersistence:
         recipe_save(_make_recipe_args())
         path = cfg / ".crucible" / "recipes" / "test-recipe.yaml"
         data = yaml.safe_load(path.read_text())
-        assert data["tags"] == ["yolo", "test"]
+        # User tags come first in original order; auto-tags follow.
+        assert data["tags"][:2] == ["yolo", "test"]
+        # The recipe carries enough signal for at least one auto-tag:
+        # project_spec='yolo11-demo' → family:yolo11-demo, tool:run_project.
+        assert any(t.startswith("family:") for t in data["tags"])
+        assert "tool:run_project" in data["tags"]
 
     def test_sets_created_at(self, cfg):
         recipe_save(_make_recipe_args())
@@ -230,7 +235,8 @@ class TestRecipeSavePersistence:
         assert data["goal"] == ""
         assert data["environment"] == {}
         assert data["gotchas"] == []
-        assert data["tags"] == []
+        # No user tags; the single tool step still produces one auto-tag.
+        assert data["tags"] == ["tool:run_project"]
 
     def test_creates_recipes_dir(self, cfg):
         recipes_dir = cfg / ".crucible" / "recipes"
@@ -289,7 +295,7 @@ class TestRecipeList:
         assert r["name"] == "detailed"
         assert r["title"] == "Detailed Recipe"
         assert r["goal"] == "Test listing"
-        assert r["tags"] == ["gpu", "wandb"]
+        assert r["tags"][:2] == ["gpu", "wandb"]
         assert r["project_spec"] == "yolo11-demo"
         assert "created_at" in r
 
@@ -309,6 +315,23 @@ class TestRecipeList:
         recipe_save(_make_recipe_args(name="alpha", tags=["a"]))
         result = recipe_list({"tag": "nonexistent"})
         assert result["total"] == 0
+
+    def test_filter_by_multiple_tags_and(self, cfg):
+        """Passing `tags=[...]` requires ALL listed tags to be present."""
+        recipe_save(_make_recipe_args(name="alpha", tags=["yolo", "small"]))
+        recipe_save(_make_recipe_args(name="beta", tags=["yolo"]))
+        recipe_save(_make_recipe_args(name="gamma", tags=["small"]))
+
+        result = recipe_list({"tags": ["yolo", "small"]})
+        names = [r["name"] for r in result["recipes"]]
+        assert names == ["alpha"]
+
+    def test_filter_with_auto_tag(self, cfg):
+        """Auto-tags participate in filtering: tool:run_project is added at save."""
+        recipe_save(_make_recipe_args(name="alpha"))
+        result = recipe_list({"tags": ["tool:run_project"]})
+        assert result["total"] == 1
+        assert result["recipes"][0]["name"] == "alpha"
 
     def test_skips_corrupted_yaml(self, cfg):
         recipe_save(_make_recipe_args(name="good-recipe"))
@@ -358,7 +381,8 @@ class TestRecipeGet:
         assert result["steps"][0]["tool"] == "run_project"
         assert result["results"]["map50_95_b"] == 0.733
         assert result["gotchas"][0]["issue"] == "torch version"
-        assert result["tags"] == ["yolo", "test"]
+        # User-supplied tags preserved at the head; auto-tags follow.
+        assert result["tags"][:2] == ["yolo", "test"]
         assert result["created_by"] == "test-agent"
         assert "created_at" in result
 

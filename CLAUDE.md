@@ -229,7 +229,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (136 total)
+### MCP Tools (149 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -255,9 +255,10 @@ Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/di
 `model_compose`, `model_from_template`, `model_list_stack_patterns`, `model_list_block_types`, `model_preview_spec`, `model_get_spec`
 
 **Tier 6 — Agent Assistance:**
-- `get_run_logs(run_id)` — Fetch training stdout/stderr (local logs or SSH fallback). Essential for debugging.
+- `get_run_logs(run_id)` — Fetch training stdout/stderr (local logs or SSH fallback). Essential for debugging. Output is scrubbed for HF / Anthropic / OpenAI / GitHub / AWS / Bearer / env-style secrets before return.
 - `model_fetch_architecture(family)` — Read source code/spec for any architecture. Enables read→modify→re-register workflow.
 - `get_architecture_guide()` — Decision tree for declarative vs code plugin workflows.
+- `agent_health_check(recent_calls)` — Optional doom-loop detector. Stateless: orchestrator passes its recent tool calls (oldest first), Crucible runs cycle / repetition detection and returns `{ok, pattern?, hint?}`. Suppresses false-positives on legitimate polling (same args, varying results). Equivalent library entry: `from crucible.core import detect_doom_loop`.
 
 **Tier 7 — Tree Search (branching experiment exploration):**
 `tree_create` → `tree_enqueue_pending` → `dispatch_experiments` → `collect_results` → `tree_sync_results` → `tree_get` → `tree_expand_node` or `tree_auto_expand` → repeat

@@ -2072,15 +2072,22 @@ TOOLS: list[Tool] = [
     Tool(
         name="recipe_list",
         description=(
-            "List all saved session recipes.\n\n"
+            "List all saved session recipes. Auto-tags (e.g. 'preset:smoke', "
+            "'outcome:success', 'tool:dispatch_experiments') are derived at save time "
+            "from the recipe body and added alongside any user-supplied tags.\n\n"
             "REQUIRES: Nothing.\n"
-            "RETURNS: {recipes: [{name, title, created_at, tags, project_spec, goal}]}\n"
-            "NEXT: recipe_get for full details."
+            "RETURNS: {recipes: [{name, title, created_at, tags, project_spec, goal}], total}\n"
+            "NEXT: recipe_get for full details. Combine multiple `tags` for AND-filtering."
         ),
         inputSchema={
             "type": "object",
             "properties": {
-                "tag": {"type": "string", "description": "Filter recipes by tag."},
+                "tag": {"type": "string", "description": "Single-tag filter (legacy)."},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Multi-tag filter; only recipes carrying ALL listed tags match.",
+                },
             },
             "additionalProperties": False,
         },
@@ -3081,6 +3088,48 @@ TOOLS: list[Tool] = [
             "NEXT: pick one and pass its name as notebook_export(runtime=...)."
         ),
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="agent_health_check",
+        description=(
+            "Optional helper: inspect the orchestrator's recent tool-call sequence for "
+            "doom-loop patterns (repeated identical calls, single-tool spam with stale "
+            "results, or 2–5 tool cycles). Stateless — Crucible runs the detection on the "
+            "calls you supply; the orchestrator decides whether to act on the hint. "
+            "Orchestrators that already track call history can equivalently call "
+            "`from crucible.core import detect_doom_loop` (stable re-export) and skip this tool.\n\n"
+            "REQUIRES: orchestrator's own recent tool calls (oldest first). Each entry "
+            "needs `name`; optionally `args` (dict) and `result` (any). Supplying `result` "
+            "lets the detector suppress legitimate polling (same args, varying results) "
+            "instead of flagging it as a loop.\n"
+            "RETURNS: {ok: bool, inspected: int, pattern?: 'identical'|'repetition'|'cycle', hint?: str}. "
+            "ok=true means no loop. ok=false means the agent should pivot — `hint` is a "
+            "ready-to-inject corrective prompt.\n"
+            "NEXT: when ok=false, change strategy: skip ahead, ask the user, or pick a different tool."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "recent_calls": {
+                    "type": "array",
+                    "description": "Recent tool calls, oldest first. Each: {name: str, args?: object, result?: any}.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "args": {"type": "object"},
+                            "result": {},
+                        },
+                        "required": ["name"],
+                        "additionalProperties": True,
+                    },
+                },
+                "window": {"type": "integer", "default": 10, "description": "Lookback window in calls."},
+                "threshold": {"type": "integer", "default": 3, "description": "Min consecutive identical calls to flag."},
+            },
+            "required": ["recent_calls"],
+            "additionalProperties": False,
+        },
     ),
 ]
 
