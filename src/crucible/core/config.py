@@ -104,6 +104,35 @@ class WandbConfig:
 
 
 @dataclass
+class HfCollabConfig:
+    """HuggingFace Hub collaboration backbone (opt-in).
+
+    When ``enabled=True`` the new ``hf_*`` MCP tools and the ``hf_dataset``
+    hub_remote can publish leaderboard / findings / recipes / artifacts to
+    HuggingFace so external agents (e.g. ml-intern) can read them. All paths
+    stay no-op when ``enabled=False`` — Crucible never auto-pushes.
+
+    Repo names are templates: ``{project}`` is substituted from
+    ``ProjectConfig.name`` at call time.
+
+    Auth: ``HF_TOKEN`` env var (read at write time, never persisted).
+    """
+    enabled: bool = False
+    leaderboard_repo: str = ""
+    findings_repo: str = ""
+    recipes_repo: str = ""
+    artifacts_repo: str = ""   # supports {project} placeholder substitution
+    private: bool = True   # default to private repos to avoid accidental leak
+    briefing_auto_pull: bool = False
+    """Auto-pull peer leaderboard rows into get_research_briefing.
+
+    Off by default even when ``enabled=True`` — every briefing call hits HF
+    over HTTP and adds 1-30s latency. Opt in explicitly when you want
+    briefings to surface peer-agent prior runs without an extra tool call.
+    """
+
+
+@dataclass
 class FleetSSHInitialConnectConfig:
     """Exponential-backoff params for the first SSH connect attempt.
 
@@ -173,6 +202,7 @@ class ProjectConfig:
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
+    hf_collab: HfCollabConfig = field(default_factory=HfCollabConfig)
     execution_policy: ExecutionPolicyConfig = field(default_factory=ExecutionPolicyConfig)
     fleet: FleetConfig = field(default_factory=FleetConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
@@ -293,6 +323,20 @@ def _build_wandb(raw: dict[str, Any]) -> WandbConfig:
     )
 
 
+def _build_hf_collab(raw: dict[str, Any]) -> HfCollabConfig:
+    if not raw:
+        return HfCollabConfig()
+    return HfCollabConfig(
+        enabled=bool(raw.get("enabled", False)),
+        leaderboard_repo=str(raw.get("leaderboard_repo", "") or ""),
+        findings_repo=str(raw.get("findings_repo", "") or ""),
+        recipes_repo=str(raw.get("recipes_repo", "") or ""),
+        artifacts_repo=str(raw.get("artifacts_repo", "") or ""),
+        private=bool(raw.get("private", True)),
+        briefing_auto_pull=bool(raw.get("briefing_auto_pull", False)),
+    )
+
+
 def _build_execution_policy(raw: dict[str, Any]) -> ExecutionPolicyConfig:
     return ExecutionPolicyConfig(
         require_remote=raw.get("require_remote", True),
@@ -348,6 +392,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         metrics=_build_metrics(raw.get("metrics", {})),
         researcher=_build_researcher(raw.get("researcher", {})),
         wandb=_build_wandb(raw.get("wandb", {})),
+        hf_collab=_build_hf_collab(raw.get("hf_collab", {})),
         execution_policy=_build_execution_policy(raw.get("execution_policy", {})),
         fleet=_build_fleet(raw.get("fleet", {})),
         plugins=_build_plugins(raw.get("plugins", {})),

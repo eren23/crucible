@@ -2110,6 +2110,180 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ---- HuggingFace collab tools (opt-in publish/pull) ----
+    Tool(
+        name="hf_push_artifact",
+        description=(
+            "Upload a local artifact directory (model checkpoints, eval bundle) to a HF repo. "
+            "Used to share trained models with peer agents without round-tripping through RunPod scp.\n\n"
+            "REQUIRES: hf_collab.enabled=true in crucible.yaml; HF_TOKEN env var set; "
+            "either repo_id arg or hf_collab.artifacts_repo configured; local_dir exists.\n"
+            "RETURNS: {ok, repo_id, repo_type, url, run_id}\n"
+            "NEXT: hf_pull_artifact on another machine to retrieve, or share the URL."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "local_dir": {"type": "string", "description": "Path to the local artifact directory."},
+                "repo_id": {"type": "string", "description": "Override target repo (default: hf_collab.artifacts_repo)."},
+                "repo_type": {"type": "string", "enum": ["model", "dataset", "space"], "default": "model"},
+                "run_id": {"type": "string", "description": "Optional run id for the commit message and tracking."},
+                "commit_message": {"type": "string", "description": "Optional commit message override."},
+            },
+            "required": ["local_dir"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hf_pull_artifact",
+        description=(
+            "Download an artifact directory from a HF repo into a local destination. "
+            "Inverse of hf_push_artifact.\n\n"
+            "REQUIRES: hf_collab.enabled=true; HF_TOKEN if private repo; repo_id.\n"
+            "RETURNS: {ok, repo_id, dest, files}\n"
+            "NEXT: load the model from dest for local inspection / re-evaluation."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "HF repo id (org/name)."},
+                "repo_type": {"type": "string", "enum": ["model", "dataset", "space"], "default": "model"},
+                "revision": {"type": "string", "description": "Optional git revision (branch/tag/sha)."},
+                "dest": {"type": "string", "description": "Destination dir (default: .crucible/artifacts/<safe-id>)."},
+            },
+            "required": ["repo_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hf_publish_leaderboard",
+        description=(
+            "Export the current leaderboard (top N) to a HF Dataset repo as leaderboard.jsonl + README.md. "
+            "Lets peer agents discover SOTA configs without coordinating storage.\n\n"
+            "REQUIRES: hf_collab.enabled=true; HF_TOKEN; either repo_id or hf_collab.leaderboard_repo configured.\n"
+            "RETURNS: {ok, repo_id, top_n, rows, url}\n"
+            "NEXT: peers retrieve via hf_pull_artifact (repo_type='dataset') or huggingface_hub.hf_hub_download."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "Override target repo."},
+                "top_n": {"type": "integer", "default": 100, "description": "Number of leaderboard rows to publish."},
+                "challenge": {"type": "string", "description": "Stable challenge identifier embedded in each row (default: project name). Peers filter on this via research_hf_prior_attempts(challenge_id=...)."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hf_publish_findings",
+        description=(
+            "Export research findings to a HF Dataset repo as findings.jsonl + README.md.\n\n"
+            "REQUIRES: hf_collab.enabled=true; HF_TOKEN; either repo_id or hf_collab.findings_repo configured. "
+            "Hub init when scope!='project'.\n"
+            "RETURNS: {ok, repo_id, scope, count, url}\n"
+            "NEXT: peer agents pull and ingest into their briefings."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "Override target repo."},
+                "scope": {"type": "string", "enum": ["project", "track", "global"], "default": "project"},
+                "track": {"type": "string", "description": "Track name (required when scope='track')."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_hf_prior_attempts",
+        description=(
+            "Pull prior agents' leaderboard rows from a HF Dataset repo. "
+            "Used to discover what other agents have tried on the same challenge "
+            "before re-running configurations. Best-effort — never blocks the loop.\n\n"
+            "REQUIRES: a leaderboard repo — supply repo_id directly OR set "
+            "hf_collab.leaderboard_repo. hf_collab.enabled is NOT required for read-only.\n"
+            "RETURNS: {ok, repo_id, count, runs}\n"
+            "NEXT: feed runs into get_research_briefing or design_generate_hypotheses."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "HF Dataset repo with leaderboard.jsonl. Default: hf_collab.leaderboard_repo."},
+                "challenge_id": {"type": "string", "description": "Optional substring filter on row 'challenge' or 'name' fields."},
+                "top_k": {"type": "integer", "default": 10, "description": "Number of top rows to return."},
+                "primary_metric": {"type": "string", "description": "Sort key. Default: project metrics.primary."},
+                "direction": {"type": "string", "enum": ["minimize", "maximize"], "description": "Sort direction. Default: project metrics.direction."},
+                "revision": {"type": "string", "description": "Optional git revision (branch/tag/sha)."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_hf_discussions",
+        description=(
+            "List discussions on a HF repo — peer-agent communication channel (read-only).\n\n"
+            "REQUIRES: repo_id with discussions enabled. Read access; HF_TOKEN if private.\n"
+            "RETURNS: {ok, repo_id, count, discussions: [{num, title, status, author, ...}]}\n"
+            "NEXT: read individual threads via huggingface_hub directly, or "
+            "note_post_to_hf_discussions to leave a reply."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "HF repo id (org/name)."},
+                "repo_type": {"type": "string", "enum": ["dataset", "model", "space"], "default": "dataset"},
+                "status": {"type": "string", "enum": ["open", "closed", "all"], "default": "all"},
+                "limit": {"type": "integer", "default": 50},
+            },
+            "required": ["repo_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="note_post_to_hf_discussions",
+        description=(
+            "Open a HF Discussion containing a Crucible note — broadcasts 'I tried X, "
+            "failed because Y' so peer agents see prior attempts before re-running.\n\n"
+            "REQUIRES: hf_collab.enabled=true; HF_TOKEN with write access; either "
+            "repo_id or hf_collab.findings_repo configured; EITHER title+body OR "
+            "run_id+note_id (resolved via local NoteStore).\n"
+            "RETURNS: {ok, repo_id, num, url, title}\n"
+            "NEXT: peer agents call research_hf_discussions on the same repo to read."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "Override target repo (default: hf_collab.findings_repo)."},
+                "repo_type": {"type": "string", "enum": ["dataset", "model", "space"], "default": "dataset"},
+                "title": {"type": "string", "description": "Discussion title. If omitted, derived from note metadata."},
+                "body": {"type": "string", "description": "Discussion body. If omitted, derived from note body."},
+                "run_id": {"type": "string", "description": "Run id (with note_id) to resolve from local notes."},
+                "note_id": {"type": "string", "description": "Note id (with run_id) to resolve from local notes."},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hf_publish_recipes",
+        description=(
+            "Export saved recipes (.crucible/recipes/*.yaml) to a HF Dataset repo.\n\n"
+            "REQUIRES: hf_collab.enabled=true; HF_TOKEN; either repo_id or hf_collab.recipes_repo configured. "
+            "At least one recipe matches the optional names filter.\n"
+            "RETURNS: {ok, repo_id, count, url, names}\n"
+            "NEXT: peer agents fetch and execute via recipe_get/recipe_list flows."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "repo_id": {"type": "string", "description": "Override target repo."},
+                "names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional filter — only publish recipes whose name is in this list.",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
     # ---- Plugin registry tools ----
     Tool(
         name="plugin_list",

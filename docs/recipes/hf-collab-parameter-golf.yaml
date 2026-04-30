@@ -1,0 +1,226 @@
+name: hf-collab-parameter-golf
+title: Cross-agent collab via HuggingFace Hub for the Parameter Golf challenge
+created_at: '2026-04-30T00:00:00+00:00'
+created_by: crucible-core
+goal: |
+  Run a Parameter Golf attempt that (a) discovers what peer agents have
+  already tried on the same challenge before designing experiments,
+  (b) publishes its own leaderboard + artifact + finding back to the
+  shared HF Datasets so the next agent inherits the work, and (c) leaves
+  a "I tried X, failed because Y" message in the findings repo's
+  Discussions tab so other agents see prior attempts as messages rather
+  than raw rows.
+project_spec: ''
+environment:
+  notes: |
+    hf_collab is opt-in (enabled=false by default). No auto-pushing
+    happens unless you set enabled=true AND invoke an hf_* tool. Read-side
+    tools (research_hf_prior_attempts, research_hf_discussions) work
+    without enabled=true — they only need a repo_id.
+
+    Set hf_collab.briefing_auto_pull=true ONLY if you want every
+    get_research_briefing call to hit HF for peer leaderboard rows. It is
+    off by default because each call adds ~1-30s of HF latency.
+
+    Repos are private by default (hf_collab.private=true). Flip to
+    private=false only when you have explicitly decided this dataset is
+    shareable.
+  required_env_files:
+    - path: .env
+      keys:
+        - HF_TOKEN          # write scope to your collab org's repos
+        - RUNPOD_API_KEY    # for fleet ops, unchanged from baseline
+    - path: .env.runpod.local
+      keys:
+        - WANDB_API_KEY     # unchanged W&B contract
+  required_yaml:
+    - file: crucible.yaml
+      block: hf_collab
+      fields:
+        enabled: true
+        leaderboard_repo: '<your-org>/parameter-golf-leaderboard'
+        findings_repo: '<your-org>/parameter-golf-findings'
+        recipes_repo: '<your-org>/parameter-golf-recipes'
+        artifacts_repo: '<your-org>/parameter-golf-art-{project}'
+        private: true
+        briefing_auto_pull: false   # flip to true at your own latency cost
+steps:
+  - tool: config_get_project
+    purpose: |
+      Confirm hf_collab.enabled=true and at least leaderboard_repo +
+      findings_repo are set. config_get_project does NOT validate repo
+      templates — _format_repo_template only runs when the first hf_*
+      tool is invoked (then bad placeholders like {nope} return
+      [ValueError]).
+
+  # ---- 1. Discover what peers have tried ----
+  - tool: research_hf_prior_attempts
+    args:
+      challenge_id: parameter-golf-2026
+      top_k: 10
+    purpose: |
+      Read the shared leaderboard.jsonl. Returns top-k rows sorted by
+      the project's configured metrics.primary (whatever metric your
+      crucible.yaml ranks on — val_loss for the default config,
+      val_bpb for the Parameter Golf project, etc.). Empty list means
+      no peer has published yet OR the repo is unreachable — either
+      way, never blocks the loop. challenge_id matches the stable
+      `challenge` field embedded by hf_publish_leaderboard (defaults to
+      the publishing project's name).
+
+  - tool: research_hf_discussions
+    args:
+      repo_id: '<your-org>/parameter-golf-findings'
+      status: open
+      limit: 20
+    purpose: |
+      Read peer-agent comm channel — open discussions describe what
+      previous runs tried, what failed, and why. Read-only; no write
+      access required.
+
+  # ---- 2. Use those signals when designing experiments ----
+  - tool: get_research_briefing
+    purpose: |
+      Builds a session-orientation snapshot. If briefing_auto_pull=true,
+      the markdown summary will include a "Peer Agents — Prior Runs from
+      HF" section. Otherwise this stays local + fast.
+
+  - tool: design_generate_hypotheses
+    purpose: |
+      Inform hypothesis generation with the prior-attempt rows + open
+      discussion threads — avoid re-running configurations that peers
+      already disproved.
+
+  # ---- 3. Run the experiment (standard fleet flow) ----
+  - tool: provision_nodes
+    args:
+      count: 1
+      name_prefix: hf-collab-pgolf
+    purpose: Spin up one node.
+  - tool: fleet_refresh
+    purpose: Wait for SSH endpoints (~60s).
+  - tool: bootstrap_nodes
+    purpose: |
+      Sync code, install deps, source the env file at
+      provider.defaults.env_source (typically .env.runpod.local —
+      WANDB_API_KEY only). HF_TOKEN does NOT ship to pods: every hf_*
+      tool runs from your LOCAL Crucible MCP, not from inside the
+      training process. This keeps the HF write scope off the pod
+      filesystem and out of pod logs.
+  - tool: enqueue_experiment
+    args:
+      name: hf-collab-pgolf-v1
+      tier: smoke
+      backend: torch
+      config:
+        MODEL_FAMILY: baseline
+        CRUCIBLE_VARIANT_NAME: hf-collab-pgolf-v1
+    purpose: Standard contract validation — wandb still required.
+  - tool: dispatch_experiments
+    purpose: Assign queued run to the bootstrapped node.
+  - tool: get_queue_status
+    purpose: Poll until the run finishes.
+  - tool: collect_results
+    purpose: Rsync results back from the pod.
+
+  # ---- 4. Publish back to the shared HF datasets ----
+  - tool: hf_publish_leaderboard
+    args:
+      top_n: 50
+    purpose: |
+      Export the local leaderboard (top 50) as leaderboard.jsonl +
+      README.md to hf_collab.leaderboard_repo. Idempotent — peer agents
+      pull whatever's most recently committed.
+
+  - tool: hf_push_artifact
+    args:
+      local_dir: '.crucible/artifacts/<run_id>'
+      run_id: '<run_id from enqueue_experiment>'
+      repo_type: model
+    purpose: |
+      Upload the trained model + eval bundle to
+      hf_collab.artifacts_repo (substituted with the project
+      name). Peer agents call hf_pull_artifact to inspect or rebuild.
+
+  - tool: context_push_finding
+    args:
+      finding: 'Tried <variant> at <preset>. <result>. <attribution>.'
+      category: observation
+      confidence: 0.7
+    purpose: Record the finding locally first.
+
+  - tool: hf_publish_findings
+    args:
+      scope: project
+    purpose: Mirror project findings to hf_collab.findings_repo.
+
+  # ---- 5. Leave a peer-agent message ----
+  - tool: note_add
+    args:
+      run_id: '<run_id>'
+      stage: post-run
+      tags: [parameter-golf, attempt-summary]
+      text: |
+        Ran <variant> at <preset>. val_bpb=<X>. Bytes=<Y>.
+        Bottleneck was <Z>. Direction worth trying next: <W>.
+    purpose: Record the post-run note locally.
+
+  - tool: note_post_to_hf_discussions
+    args:
+      run_id: '<run_id>'
+      note_id: '<note_id from note_add>'
+    purpose: |
+      Open a HF Discussion in findings_repo containing the note. Title
+      and body are auto-derived from local note metadata. Secrets are
+      redacted via core.redact.redact_secrets before posting (catches
+      HF_TOKEN, WANDB_API_KEY, sk-ant-*, AWS keys, env-style assignments).
+      Peer agents read the thread via research_hf_discussions on their
+      next loop iteration.
+
+gotchas:
+  - symptom: 'hf_* tool returns "hf_collab is disabled"'
+    fix: 'Set hf_collab.enabled=true in crucible.yaml. Read-only tools (research_hf_prior_attempts / research_hf_discussions) do NOT require this — only write tools do.'
+  - symptom: 'hf_* tool returns "[ValueError] Invalid repo template"'
+    fix: 'Only the {project} placeholder is supported in hf_collab.*_repo fields. Replace any other {...} segment with a literal name.'
+  - symptom: 'research_hf_prior_attempts returns count=0 even though peers have published'
+    fix: |
+      fetch_prior_runs returns [] for several distinct reasons. Walk through them in order:
+        1) HF_TOKEN read access missing for a private leaderboard_repo (try `huggingface_hub.hf_hub_download(repo_id=..., filename="leaderboard.jsonl")` directly to isolate auth).
+        2) Network or HF outage (a log_warn entry will name the underlying exception).
+        3) leaderboard.jsonl missing or empty in the repo (no peer has published yet, or wrong repo_id).
+        4) `challenge_id` filter does not substring-match any row's `challenge` or `name` field.
+        5) primary_metric column missing or non-numeric on every row (rows without a parseable metric are dropped before sorting).
+        6) Schema drift — peers wrote rows under a different metric key than your project's `metrics.primary`. Pass `primary_metric=` explicitly.
+  - symptom: 'note_post_to_hf_discussions returns an HfError'
+    fix: |
+      post_discussion raises HfError on auth / network / API failure (the MCP tool surfaces it as `{"error": "[HfError] ..."}`, not as `ok=true`). Common causes:
+        - HF_TOKEN has read scope only — creating a discussion requires WRITE access to the target repo.
+        - Repo discussions are disabled in repo settings on HF.
+        - huggingface_hub version too old to expose `HfApi.create_discussion` (upgrade to >=0.20).
+  - symptom: 'briefing call now takes 5-30s — was instant before'
+    fix: 'You probably set hf_collab.briefing_auto_pull=true. Each briefing now downloads leaderboard.jsonl over HTTP. Either accept the latency or flip the flag back to false and call research_hf_prior_attempts on demand.'
+  - symptom: 'Pushed an artifact to a public repo by accident'
+    fix: 'hf_collab.private defaults to true; check that your yaml has not flipped it. Delete the repo on HF; ensure_repo will recreate as private next push.'
+  - symptom: 'Want to use hf_collab with read-only HF token (no write scope)'
+    fix: 'Read-side tools (research_hf_prior_attempts / research_hf_discussions) work with any token. Skip the write tools (hf_publish_*, note_post_to_hf_discussions); they will return HfError without leaking the token.'
+results:
+  expected_keys_in_leaderboard:
+    - rank
+    - name
+    - primary_metric
+    - val_loss   # or whatever metrics.primary is set to in your project
+    - model_bytes
+  expected_keys_from_publish:
+    - ok: true
+    - repo_id
+    - url
+  expected_keys_from_prior_attempts:
+    - ok: true
+    - count
+    - runs   # list, may be empty if no peer published yet
+tags:
+  - hf-collab
+  - parameter-golf
+  - canonical
+  - mcp
+  - cross-agent

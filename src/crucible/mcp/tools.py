@@ -4412,6 +4412,560 @@ def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# HuggingFace collab — read-side (prior runs, discussions, post-comm)
+# ---------------------------------------------------------------------------
+
+
+def research_hf_prior_attempts(args: dict[str, Any]) -> dict[str, Any]:
+    """Pull prior agents' leaderboard rows from a HF Dataset repo.
+
+    Best-effort: missing repo / network failure / malformed JSONL returns
+    an empty list rather than blocking the research loop.
+
+    REQUIRES: a leaderboard repo — supply ``repo_id`` directly OR set
+              ``hf_collab.leaderboard_repo`` in crucible.yaml. ``hf_collab.enabled``
+              is NOT required for read-only queries.
+    RETURNS: {ok, repo_id, count, runs: [{rank, name, primary_metric, ...}]}
+    NEXT: feed top runs into get_research_briefing or design_generate_hypotheses.
+    """
+    config = _get_config()
+    try:
+        override = args.get("repo_id", "")
+        repo_id = _format_repo_template(
+            override or config.hf_collab.leaderboard_repo, config
+        )
+        if not repo_id:
+            return {
+                "error": (
+                    "No repo_id supplied and hf_collab.leaderboard_repo is empty. "
+                    "Pass repo_id or configure hf_collab.leaderboard_repo."
+                )
+            }
+        from crucible.researcher.hf_search import fetch_prior_runs
+
+        runs = fetch_prior_runs(
+            repo_id=repo_id,
+            top_k=int(args.get("top_k", 10)),
+            challenge_id=args.get("challenge_id"),
+            primary_metric=args.get("primary_metric") or config.metrics.primary,
+            direction=args.get("direction") or config.metrics.direction,
+            revision=args.get("revision"),
+        )
+        return {"ok": True, "repo_id": repo_id, "count": len(runs), "runs": runs}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+def research_hf_discussions(args: dict[str, Any]) -> dict[str, Any]:
+    """List discussions on a HF repo (peer-agent comm channel, read-only).
+
+    REQUIRES: ``repo_id`` (HF repo with discussions enabled).
+    RETURNS: {ok, repo_id, count, discussions: [{num, title, status, author, ...}]}
+    NEXT: read individual threads with huggingface_hub directly, or
+          note_post_to_hf_discussions to leave a reply.
+    """
+    try:
+        repo_id = args.get("repo_id", "")
+        if not repo_id:
+            return {"error": "repo_id is required."}
+        repo_type = args.get("repo_type", "dataset")
+        status = args.get("status", "all")
+        if status not in ("open", "closed", "all"):
+            return {"error": f"Invalid status {status!r}; use open|closed|all."}
+        limit = int(args.get("limit", 50))
+        from crucible.researcher.hf_discussions import list_discussions
+
+        items = list_discussions(
+            repo_id=repo_id,
+            repo_type=repo_type,
+            status=status,
+            limit=limit,
+        )
+        return {"ok": True, "repo_id": repo_id, "count": len(items), "discussions": items}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def note_post_to_hf_discussions(args: dict[str, Any]) -> dict[str, Any]:
+    """Open a HF Discussion on a repo containing the given local note.
+
+    Use this to broadcast "I tried X, failed because Y" so peer agents
+    can see prior attempts before re-running the same configuration.
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN with write access to the
+              repo; either ``repo_id`` or hf_collab.findings_repo configured;
+              EITHER ``run_id``+``note_id`` (resolved via NoteStore) OR an
+              explicit ``title``+``body``.
+    RETURNS: {ok, repo_id, num, url, title}
+    NEXT: peer agents call research_hf_discussions on the same repo to see it.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        override = args.get("repo_id", "")
+        repo_id = _format_repo_template(
+            override or config.hf_collab.findings_repo, config
+        )
+        if not repo_id:
+            return {
+                "error": (
+                    "No repo_id supplied and hf_collab.findings_repo is empty. "
+                    "Pass repo_id or configure hf_collab.findings_repo."
+                )
+            }
+        repo_type = args.get("repo_type", "dataset")
+
+        title = args.get("title", "").strip()
+        body = args.get("body", "").strip()
+        run_id = args.get("run_id", "")
+        note_id = args.get("note_id", "")
+
+        if not title or not body:
+            # Fall back to resolving from the local note store.
+            if not run_id or not note_id:
+                return {
+                    "error": (
+                        "Provide title+body, OR run_id+note_id to resolve "
+                        "from the local note store."
+                    )
+                }
+            store = _get_note_store()
+            entry = store.get_note(note_id)
+            if entry is None:
+                return {"error": f"Note {note_id!r} not found in local store."}
+            meta, note_body = entry
+            if not title:
+                stage = meta.get("stage", "note")
+                title = f"[{config.name}] {stage} note from run {run_id} ({note_id})"
+            if not body:
+                tags = meta.get("tags") or []
+                tag_line = f"\n\nTags: {', '.join(tags)}" if tags else ""
+                body = (
+                    f"{note_body}{tag_line}\n\n"
+                    f"---\n_Posted by Crucible from project `{config.name}`._"
+                )
+
+        # Redact secrets before posting — notes can contain stack traces,
+        # env dumps, or copy-pasted snippets with API keys / tokens.
+        # Posting verbatim to a public-readable HF Discussion would leak.
+        title = redact_secrets(title)
+        body = redact_secrets(body)
+
+        from crucible.researcher.hf_discussions import post_discussion
+
+        result = post_discussion(
+            repo_id=repo_id,
+            title=title,
+            description=body,
+            repo_type=repo_type,
+        )
+        return {
+            "ok": True,
+            "repo_id": repo_id,
+            "num": result.get("num"),
+            "url": result.get("url"),
+            "title": result.get("title"),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace collab tools (opt-in publish/pull for cross-agent state sharing)
+# ---------------------------------------------------------------------------
+
+
+def _hf_collab_disabled() -> dict[str, Any]:
+    return {
+        "error": (
+            "hf_collab is disabled. Set hf_collab.enabled=true in crucible.yaml "
+            "and configure org / repo names before calling hf_* tools."
+        )
+    }
+
+
+def _format_repo_template(template: str, config: ProjectConfig) -> str:
+    """Substitute ``{project}`` into ``template`` and reject other placeholders.
+
+    Raises ``ValueError`` if the template contains an unsupported placeholder
+    so callers can convert the failure into a structured tool-error rather
+    than crashing on KeyError / ValueError from ``str.format``.
+    """
+    if not template:
+        return ""
+    try:
+        # Allow only `{project}` — any other field raises KeyError.
+        return template.format(project=config.name)
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid repo template {template!r}: {exc}. "
+            "Only the {project} placeholder is supported."
+        ) from exc
+
+
+def _hf_resolve_repo(config: ProjectConfig, kind: str, override: str = "") -> str:
+    """Pick the configured HF repo for ``kind`` and substitute ``{project}``.
+
+    ``kind`` is one of: leaderboard, findings, recipes, artifacts.
+    ``override`` (if non-empty) wins. Raises ``ValueError`` for malformed
+    templates — caller is responsible for surfacing that as a tool-error.
+    """
+    if override:
+        return _format_repo_template(override, config)
+    cfg = config.hf_collab
+    table = {
+        "leaderboard": cfg.leaderboard_repo,
+        "findings": cfg.findings_repo,
+        "recipes": cfg.recipes_repo,
+        "artifacts": cfg.artifacts_repo,
+    }
+    return _format_repo_template(table.get(kind, ""), config)
+
+
+def _hf_remote(config: ProjectConfig, repo_type: str = "dataset"):
+    """Build the configured ``hf_dataset`` hub_remote with project defaults."""
+    from crucible.core.hub_remotes import build_hub_remote
+
+    return build_hub_remote(
+        "hf_dataset",
+        repo_type=repo_type,
+        private=config.hf_collab.private,
+    )
+
+
+def hf_push_artifact(args: dict[str, Any]) -> dict[str, Any]:
+    """Upload a local artifact directory (model checkpoints, eval bundle, etc.)
+    to a HuggingFace repo.
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN env var set; either ``repo_id``
+              or hf_collab.artifacts_repo configured; ``local_dir`` exists.
+    RETURNS: {ok, repo_id, repo_type, url, run_id}
+    NEXT: hf_pull_artifact on another machine to retrieve, or share the URL with
+          collaborating agents.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        local_dir = args.get("local_dir", "")
+        if not local_dir:
+            return {"error": "local_dir is required."}
+        if not Path(local_dir).is_dir():
+            return {"error": f"local_dir not found: {local_dir}"}
+        repo_id = _hf_resolve_repo(config, "artifacts", args.get("repo_id", ""))
+        if not repo_id:
+            return {"error": "No repo_id supplied and hf_collab.artifacts_repo is empty."}
+        repo_type = args.get("repo_type", "model")
+        run_id = args.get("run_id", "")
+        commit_message = args.get("commit_message") or (
+            f"crucible: artifact for run {run_id}" if run_id else "crucible: push artifact"
+        )
+        from crucible.core.hub_remotes import build_hub_remote
+
+        remote = build_hub_remote(
+            "hf_dataset",
+            repo_type=repo_type,
+            private=config.hf_collab.private,
+        )
+        url = remote.push(local_dir, repo_id, commit_message=commit_message)
+        return {"ok": True, "repo_id": repo_id, "repo_type": repo_type, "url": url, "run_id": run_id}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+def hf_pull_artifact(args: dict[str, Any]) -> dict[str, Any]:
+    """Download an artifact directory from a HF repo into a local destination.
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN if private; ``repo_id``.
+    RETURNS: {ok, repo_id, dest, files}
+    NEXT: load the model from ``dest`` for local inspection / re-evaluation.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        repo_id = args.get("repo_id", "")
+        if not repo_id:
+            return {"error": "repo_id is required."}
+        repo_type = args.get("repo_type", "model")
+        revision = args.get("revision")
+        dest_arg = args.get("dest", "")
+        if dest_arg:
+            dest = Path(dest_arg)
+        else:
+            safe = repo_id.replace("/", "--")
+            dest = config.project_root / config.store_dir / "artifacts" / safe
+        from crucible.core.hub_remotes import build_hub_remote
+
+        remote = build_hub_remote(
+            "hf_dataset",
+            repo_type=repo_type,
+            private=config.hf_collab.private,
+        )
+        out = remote.pull(repo_id, str(dest), revision=revision)
+        out_path = Path(out)
+        if out_path.exists():
+            files = sorted(
+                str(p.relative_to(out_path))
+                for p in out_path.rglob("*")
+                if p.is_file()
+            )
+        else:
+            files = []
+        return {"ok": True, "repo_id": repo_id, "dest": str(out), "files": files}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, default=str) + "\n")
+
+
+def hf_publish_leaderboard(args: dict[str, Any]) -> dict[str, Any]:
+    """Export the current leaderboard (top N entries) to a HF Dataset repo.
+
+    Writes ``leaderboard.jsonl`` plus a small README.md with the project name,
+    primary metric, and timestamp. Each row mirrors the ``get_leaderboard``
+    output entry.
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN; either ``repo_id`` or
+              hf_collab.leaderboard_repo configured.
+    RETURNS: {ok, repo_id, top_n, rows, url}
+    NEXT: peers pull via ``hf_pull_artifact`` (repo_type='dataset') or
+          ``huggingface_hub.hf_hub_download`` directly to read leaderboard.jsonl.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        repo_id = _hf_resolve_repo(config, "leaderboard", args.get("repo_id", ""))
+        if not repo_id:
+            return {"error": "No repo_id supplied and hf_collab.leaderboard_repo is empty."}
+        top_n = int(args.get("top_n", 100))
+        # Compute leaderboard inline (avoid get_leaderboard's double config load).
+        from crucible.analysis.leaderboard import leaderboard
+        from crucible.analysis.results import completed_results
+
+        primary = config.metrics.primary
+        secondary = config.metrics.secondary or ""
+        # ``challenge`` is the stable cross-project filter key consumed by
+        # fetch_prior_runs(challenge_id=...). Caller may override; default
+        # to project name so rows from project ``parameter-golf`` filter
+        # cleanly via challenge_id='parameter-golf'.
+        challenge = str(args.get("challenge") or config.name or "")
+        results = completed_results(config)
+        top = leaderboard(results, top_n=top_n, cfg=config)
+        rows: list[dict[str, Any]] = []
+        for i, r in enumerate(top, 1):
+            res = r.get("result", {})
+            entry: dict[str, Any] = {
+                "rank": i,
+                "challenge": challenge,
+                "project": config.name,
+                "name": r.get("name", ""),
+                "primary_metric": primary,
+                primary: res.get(primary),
+                "steps_completed": res.get("steps_completed"),
+                "model_bytes": r.get("model_bytes"),
+                "contract_status": r.get("contract_status", "legacy_missing_contract"),
+            }
+            if secondary:
+                entry[secondary] = res.get(secondary)
+            rows.append(entry)
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            stage = Path(td) / "stage"
+            stage.mkdir()
+            _write_jsonl(stage / "leaderboard.jsonl", rows)
+            readme = (
+                f"# {config.name} — leaderboard\n\n"
+                f"Generated by Crucible at {utc_now_iso()}.\n\n"
+                f"- primary_metric: `{primary}`\n"
+                f"- direction: `{config.metrics.direction}`\n"
+                f"- entries: {len(rows)}\n\n"
+                "See `leaderboard.jsonl` for the ranked rows.\n"
+            )
+            (stage / "README.md").write_text(readme, encoding="utf-8")
+            from crucible.core.hub_remotes import build_hub_remote
+
+            remote = build_hub_remote("hf_dataset", repo_type="dataset", private=config.hf_collab.private)
+            url = remote.push(
+                str(stage),
+                repo_id,
+                commit_message=f"crucible: leaderboard {utc_now_iso()} ({len(rows)} rows)",
+            )
+        return {"ok": True, "repo_id": repo_id, "top_n": top_n, "rows": len(rows), "url": url}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+def hf_publish_findings(args: dict[str, Any]) -> dict[str, Any]:
+    """Export research findings to a HF Dataset repo.
+
+    Scope:
+      - ``project`` (default): findings from .crucible/research_state.jsonl
+      - ``track`` / ``global``: findings from the hub (~/.crucible-hub/...)
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN; either ``repo_id`` or
+              hf_collab.findings_repo configured. Hub init when scope!='project'.
+    RETURNS: {ok, repo_id, scope, count, url}
+    NEXT: peer agents can pull the dataset and ingest into their own briefings.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        repo_id = _hf_resolve_repo(config, "findings", args.get("repo_id", ""))
+        if not repo_id:
+            return {"error": "No repo_id supplied and hf_collab.findings_repo is empty."}
+        scope = args.get("scope", "project")
+        track = args.get("track")
+        if scope == "project":
+            from crucible.researcher.state import ResearchState
+
+            state = ResearchState(config.project_root / config.research_state_file)
+            findings = state.get_findings(category=None, limit=10000)
+        else:
+            # Use the config-aware HubStore so a non-default hub_dir is honored.
+            hub = _get_hub_store()
+            if not hub.initialized:
+                return {"error": "Hub not initialized; cannot publish track/global findings."}
+            findings = hub.list_findings(scope, track=track)
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            stage = Path(td) / "stage"
+            stage.mkdir()
+            _write_jsonl(stage / "findings.jsonl", findings)
+            readme = (
+                f"# {config.name} — findings ({scope})\n\n"
+                f"Generated by Crucible at {utc_now_iso()}.\n\n"
+                f"- scope: `{scope}`\n"
+                + (f"- track: `{track}`\n" if track else "")
+                + f"- entries: {len(findings)}\n\n"
+                "See `findings.jsonl` for the records.\n"
+            )
+            (stage / "README.md").write_text(readme, encoding="utf-8")
+            from crucible.core.hub_remotes import build_hub_remote
+
+            remote = build_hub_remote("hf_dataset", repo_type="dataset", private=config.hf_collab.private)
+            url = remote.push(
+                str(stage),
+                repo_id,
+                commit_message=f"crucible: findings/{scope} {utc_now_iso()} ({len(findings)} rows)",
+            )
+        return {"ok": True, "repo_id": repo_id, "scope": scope, "count": len(findings), "url": url}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+def hf_publish_recipes(args: dict[str, Any]) -> dict[str, Any]:
+    """Export saved recipes to a HF Dataset repo.
+
+    REQUIRES: hf_collab.enabled=true; HF_TOKEN; either ``repo_id`` or
+              hf_collab.recipes_repo configured. At least one recipe in
+              .crucible/recipes/ matching the optional ``names`` filter.
+    RETURNS: {ok, repo_id, count, url, names}
+    NEXT: peer agents can pull recipes and execute via recipe_get/recipe_list flows.
+    """
+    config = _get_config()
+    if not config.hf_collab.enabled:
+        return _hf_collab_disabled()
+    try:
+        repo_id = _hf_resolve_repo(config, "recipes", args.get("repo_id", ""))
+        if not repo_id:
+            return {"error": "No repo_id supplied and hf_collab.recipes_repo is empty."}
+        names = args.get("names") or []
+        if isinstance(names, str):
+            names = [names]
+        recipes_dir = _recipes_dir(config)
+        if not recipes_dir.is_dir():
+            return {"error": f"No recipes directory at {recipes_dir}"}
+
+        import shutil
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            stage = Path(td) / "stage" / "recipes"
+            stage.mkdir(parents=True)
+            published: list[str] = []
+            skipped_symlinks: list[str] = []
+            recipes_root = recipes_dir.resolve()
+            for path in sorted(recipes_dir.glob("*.yaml")):
+                if names and path.stem not in names:
+                    continue
+                # Reject symlinks — a malicious symlink in .crucible/recipes/
+                # would let publish_recipes exfiltrate arbitrary file contents
+                # to a HF Dataset repo. is_symlink() catches direct links;
+                # the resolve() check catches symlinked parents.
+                if path.is_symlink():
+                    skipped_symlinks.append(path.name)
+                    continue
+                resolved = path.resolve()
+                try:
+                    resolved.relative_to(recipes_root)
+                except ValueError:
+                    skipped_symlinks.append(path.name)
+                    continue
+                shutil.copy2(path, stage / path.name, follow_symlinks=False)
+                published.append(path.stem)
+            if not published:
+                return {
+                    "error": "No matching recipes to publish.",
+                    "skipped_symlinks": skipped_symlinks,
+                }
+
+            readme = (
+                f"# {config.name} — recipes\n\n"
+                f"Generated by Crucible at {utc_now_iso()}.\n\n"
+                f"- recipes: {len(published)}\n\n"
+                + "\n".join(f"- `{n}.yaml`" for n in published)
+                + "\n"
+            )
+            (stage.parent / "README.md").write_text(readme, encoding="utf-8")
+            from crucible.core.hub_remotes import build_hub_remote
+
+            remote = build_hub_remote("hf_dataset", repo_type="dataset", private=config.hf_collab.private)
+            url = remote.push(
+                str(stage.parent),
+                repo_id,
+                commit_message=f"crucible: recipes {utc_now_iso()} ({len(published)} files)",
+            )
+        result = {
+            "ok": True,
+            "repo_id": repo_id,
+            "count": len(published),
+            "url": url,
+            "names": published,
+        }
+        if skipped_symlinks:
+            result["skipped_symlinks"] = skipped_symlinks
+        return result
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except ValueError as exc:
+        return {"error": f"[ValueError] {exc}"}
+
+
+# ---------------------------------------------------------------------------
 # Plugin registry tools (optimizers, schedulers, providers, loggers, callbacks,
 # composer block types, stack patterns, augmentations)
 # ---------------------------------------------------------------------------
@@ -5446,6 +6000,16 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "recipe_save": recipe_save,
     "recipe_list": recipe_list,
     "recipe_get": recipe_get,
+    # HuggingFace collab tools (opt-in publish/pull)
+    "hf_push_artifact": hf_push_artifact,
+    "hf_pull_artifact": hf_pull_artifact,
+    "hf_publish_leaderboard": hf_publish_leaderboard,
+    "hf_publish_findings": hf_publish_findings,
+    "hf_publish_recipes": hf_publish_recipes,
+    # HuggingFace collab — read-side (prior runs / discussions / post-comm)
+    "research_hf_prior_attempts": research_hf_prior_attempts,
+    "research_hf_discussions": research_hf_discussions,
+    "note_post_to_hf_discussions": note_post_to_hf_discussions,
     # Plugin registry tools
     "plugin_list": plugin_list,
     "plugin_add": plugin_add,

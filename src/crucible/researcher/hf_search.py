@@ -254,3 +254,107 @@ def _attr_or_key(obj: Any, name: str) -> Any:
 def _short(text: str, limit: int = 300) -> str:
     text = (text or "").strip()
     return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+# ---------------------------------------------------------------------------
+# Prior runs — read leaderboard.jsonl that peer agents published via
+# ``hf_publish_leaderboard``. Different signature from search() (needs a
+# repo_id, optional challenge filter, primary metric to sort by) so it
+# lives as a top-level function rather than a SearchKind.
+# ---------------------------------------------------------------------------
+
+
+def fetch_prior_runs(
+    repo_id: str,
+    *,
+    top_k: int = 10,
+    challenge_id: str | None = None,
+    primary_metric: str | None = None,
+    direction: str = "minimize",
+    revision: str | None = None,
+    token: str | None = None,
+    filename: str = "leaderboard.jsonl",
+) -> list[dict[str, Any]]:
+    """Pull a leaderboard JSONL from a HF Dataset repo and return the top-k rows.
+
+    Best-effort: missing repo / network failure / malformed JSONL → ``[]``
+    plus a ``log_warn``. Filters by ``challenge_id`` (case-insensitive substring
+    match against ``name`` or ``challenge`` field) when supplied. Sorts by
+    ``primary_metric`` if given (else uses each row's stated primary metric).
+    """
+    try:
+        from crucible.core.hf_writer import pull_file
+    except ImportError as exc:
+        log_warn(f"fetch_prior_runs: hf_writer unavailable: {exc}")
+        return []
+    if not repo_id:
+        return []
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            local = pull_file(
+                repo_id=repo_id,
+                filename=filename,
+                dest=td,
+                repo_type="dataset",
+                revision=revision,
+                token=token,
+            )
+        except Exception as exc:
+            # hf_writer wraps everything as HfError; treat any failure as
+            # "no prior runs available" — never block the research loop.
+            log_warn(f"fetch_prior_runs: pull from {repo_id!r} failed: {exc}")
+            return []
+
+        rows: list[dict[str, Any]] = []
+        try:
+            with open(local, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError as exc:
+            log_warn(f"fetch_prior_runs: read {local!r} failed: {exc}")
+            return []
+
+    if challenge_id:
+        needle = challenge_id.lower()
+        rows = [
+            r for r in rows
+            if needle in str(r.get("challenge", "")).lower()
+            or needle in str(r.get("name", "")).lower()
+        ]
+
+    if primary_metric:
+        # Drop rows missing/non-numeric for the requested metric — keeping
+        # them with an inf sentinel sorts them to the TOP under
+        # direction='maximize' (since reverse=True), which is exactly
+        # backwards. Filtering is the unambiguous behavior.
+        def _metric(r: dict[str, Any]) -> float | None:
+            v = r.get(primary_metric)
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        scored = [(r, _metric(r)) for r in rows]
+        rows = [r for r, m in scored if m is not None]
+        rows.sort(
+            key=lambda r: float(r[primary_metric]),
+            reverse=(direction == "maximize"),
+        )
+    else:
+        rows.sort(key=lambda r: int(r.get("rank") or 1_000_000))
+
+    return rows[:top_k]
+
+
+# Discussions live in :mod:`crucible.researcher.hf_discussions` — see that
+# module for ``list_discussions`` and ``post_discussion``. They are a
+# separate surface from ecosystem search (this module).

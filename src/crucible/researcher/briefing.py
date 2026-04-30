@@ -214,6 +214,43 @@ def _budget_section(config: ProjectConfig) -> dict[str, float]:
         }
 
 
+def _hf_prior_runs(config: ProjectConfig, top_k: int = 5) -> list[dict[str, Any]]:
+    """Pull peer-agent leaderboard rows from the configured HF Dataset.
+
+    Gated on three flags so briefings stay fast by default:
+      - ``hf_collab.enabled=true``
+      - ``hf_collab.briefing_auto_pull=true`` (opt-in — every briefing
+        otherwise burns HF round-trip latency)
+      - ``hf_collab.leaderboard_repo`` non-empty
+
+    Best-effort — failures swallow to ``[]``.
+    """
+    cfg = getattr(config, "hf_collab", None)
+    if (
+        cfg is None
+        or not cfg.enabled
+        or not getattr(cfg, "briefing_auto_pull", False)
+        or not cfg.leaderboard_repo
+    ):
+        return []
+    try:
+        from crucible.mcp.tools import _format_repo_template
+        from crucible.researcher.hf_search import fetch_prior_runs
+
+        repo_id = _format_repo_template(cfg.leaderboard_repo, config)
+        if not repo_id:
+            return []
+        return fetch_prior_runs(
+            repo_id=repo_id,
+            top_k=top_k,
+            primary_metric=config.metrics.primary,
+            direction=config.metrics.direction,
+        )
+    except _BRIEFING_SECTION_ERRORS as exc:
+        log_warn(f"Briefing section 'hf_prior_runs' failed: {exc}")
+        return []
+
+
 def _hub_findings(config: ProjectConfig) -> list[dict[str, Any]]:
     """Load track + global findings from hub, if available."""
     try:
@@ -280,6 +317,7 @@ def _markdown_summary(
     beliefs: list[str],
     budget: dict[str, float],
     suggested: list[str],
+    hf_prior_runs: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render a human-readable markdown summary."""
     lines: list[str] = []
@@ -350,6 +388,18 @@ def _markdown_summary(
             lines.append(f"- [{n.get('stage', '?')}] run={n.get('run_id', '?')} {n.get('note_id', '')}")
         lines.append("")
 
+    # Peer-agent leaderboard from HF (if hf_collab enabled and reachable)
+    if hf_prior_runs:
+        lines.append(f"## Peer Agents — Prior Runs from HF ({len(hf_prior_runs)})")
+        for r in hf_prior_runs[:5]:
+            metric_val = r.get(primary)
+            metric_str = (
+                f"{metric_val:.4f}" if isinstance(metric_val, (int, float))
+                else str(metric_val)
+            )
+            lines.append(f"- {r.get('name', '?')} {primary}={metric_str}")
+        lines.append("")
+
     # Suggested actions
     lines.append("## Suggested Actions")
     for step in suggested:
@@ -387,10 +437,12 @@ def build_briefing(config: ProjectConfig) -> dict[str, Any]:
     beliefs = _beliefs_section(config)
     budget = _budget_section(config)
     hub = _hub_findings(config)
+    hf_prior_runs = _hf_prior_runs(config)
     suggested = _suggested_next_steps(experiments, findings, hypotheses, budget)
     summary = _markdown_summary(
         project, track, experiments, top3, hypotheses,
         findings, notes, beliefs, budget, suggested,
+        hf_prior_runs=hf_prior_runs,
     )
 
     return {
@@ -404,6 +456,7 @@ def build_briefing(config: ProjectConfig) -> dict[str, Any]:
         "beliefs": beliefs,
         "budget": budget,
         "hub_findings": hub,
+        "hf_prior_runs": hf_prior_runs,
         "suggested_next_steps": suggested,
         "markdown_summary": summary,
     }

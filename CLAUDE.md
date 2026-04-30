@@ -135,6 +135,8 @@ contract above.
 
 **Discoverability**: agents can call `get_wandb_guide` (MCP) for the decision tree, checklist, common failures, and verification steps. The canonical workflow lives at `docs/recipes/wandb-tracked-experiment.yaml` (source-controlled). To make it accessible via `recipe_get(name='wandb-tracked-experiment')` in a project, copy the file into that project's `.crucible/recipes/` (the recipe system reads from there). Tap-based distribution is a follow-up so cross-project `recipe_get` works without the manual copy step.
 
+**HF collab recipe**: `docs/recipes/hf-collab-parameter-golf.yaml` is the canonical end-to-end workflow for cross-agent collaboration via HuggingFace Hub. Operator setup (tokens, repo provisioning, opt-in flags, smolagents integration, HF Space deployment) is covered in `docs/hf-collab-recipe.md`. Same `cp .crucible/recipes/` install pattern as wandb until the tap layer ships.
+
 **Auto-defaults**:
 - If `WANDB_API_KEY` and `WANDB_PROJECT` are both present in env and `LOGGING_BACKEND` is unset, the runner sets `LOGGING_BACKEND=wandb,console` (generic backend only — `torch_backend.py` instantiates `WandbLogger` directly, so the env var is moot there).
 - If only one of the two is present, runner falls back to `console` and emits a warning.
@@ -229,7 +231,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (149 total)
+### MCP Tools (157 total)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -291,6 +293,27 @@ Taps are git repos containing plugins with `plugin.yaml` manifests. Install copi
 `tree_pareto` — General-purpose Pareto frontier query for any search tree.
 
 Candidates are stored as Python files under `.crucible/search_trees/{tree}/candidates/{node_id}.py`; domain specs ship as a `domain_specs` tap plugin type. See `docs/harness-optimization.md` and `.crucible/taps/meta-harness/` for the workflow and bundled templates.
+
+**Tier 14 — HuggingFace Collab Publish (opt-in write side, 5 tools):**
+`hf_push_artifact`, `hf_pull_artifact` — model checkpoints + eval bundles to/from a HF model repo (defaults to `hf_collab.artifacts_repo`; supports `{project}` substitution).
+`hf_publish_leaderboard(top_n, challenge?)` — exports `get_leaderboard()` rows as `leaderboard.jsonl` + `README.md` to a HF Dataset repo. Each row carries a stable `challenge` field (default: project name) for cross-project filtering.
+`hf_publish_findings` — exports project / track / global findings JSONL to a HF Dataset repo.
+`hf_publish_recipes` — exports `.crucible/recipes/*.yaml` (optionally filtered) to a HF Dataset repo.
+
+All five are gated by `hf_collab.enabled=true` in `crucible.yaml` (default `false` — never auto-pushes). Auth via `HF_TOKEN` env var. Backed by the `hub_remotes` plugin family (builtins: `git`, `hf_dataset`) so taps can drop in S3 / IPFS remotes without core changes. Lives in `src/crucible/core/hf_writer.py` and `src/crucible/core/hub_remotes.py`.
+
+**Tier 15 — HuggingFace Collab Research-Front (read side, 3 tools):**
+Work even with `hf_collab.enabled=false` (read-only flows do not require write opt-in).
+
+`research_hf_prior_attempts(repo_id?, challenge_id?, top_k=10, primary_metric?, direction?)` — pulls peer agents' `leaderboard.jsonl` and returns top-k filtered/sorted rows. Default repo from `hf_collab.leaderboard_repo`. Best-effort: network/missing → `{ok, count: 0, runs: []}`. `challenge_id` matches against the stable `challenge` field that Tier-14 publishers embed.
+`research_hf_discussions(repo_id, status='open'|'closed'|'all', limit=50)` — lists discussions on any HF repo as a peer-agent comm channel.
+`note_post_to_hf_discussions(repo_id?, title?, body?, run_id?, note_id?)` — opens a HF Discussion containing a Crucible note. Resolves `title`/`body` from the local NoteStore when only `run_id`+`note_id` are given. Requires `hf_collab.enabled=true` (this is a write — sits in Tier 15 for surface coherence with the read tools).
+
+Backed by `src/crucible/researcher/hf_search.py:fetch_prior_runs` (reads leaderboard.jsonl) and `src/crucible/researcher/hf_discussions.py` (list_discussions + post_discussion).
+
+`get_research_briefing` includes a "Peer Agents — Prior Runs from HF" section only when **all three** are true: `hf_collab.enabled=true`, `hf_collab.briefing_auto_pull=true` (off by default — opt in or every briefing burns 1-30s of HF latency), and `hf_collab.leaderboard_repo` is set. Section is silently empty otherwise — never blocks.
+
+`note_post_to_hf_discussions` runs `redact_secrets()` on title + body before posting (catches `HF_TOKEN`, `WANDB_API_KEY`, `sk-ant-*`, `sk-*`, GitHub PATs, AWS keys, bearer tokens, env-style `KEY=value`). A note containing a copy-pasted env dump or stack trace will not leak credentials to a public repo.
 
 **Tier 13 — Eval Watcher (auto-eval daemon, 3 tools):**
 `eval_watch_start(project_name, interval=300)` — start a daemon that polls running pods every `interval` seconds, SCPs new checkpoints to `.crucible/eval_watch_ckpts/`, and runs each script in the project's `eval_suite:` block on each new ckpt.

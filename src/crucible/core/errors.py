@@ -68,6 +68,9 @@ class StoreError(CrucibleError):
 class HubError(CrucibleError):
     """Hub init, sync, track, finding promotion failures."""
 
+class HfError(HubError):
+    """HuggingFace Hub push/pull/auth failures (collab backbone)."""
+
 class ApiError(CrucibleError):
     """API server startup, auth, or request handling failures."""
 
