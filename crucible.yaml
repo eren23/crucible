@@ -63,7 +63,7 @@ metrics:
 # Experiment presets
 presets:
   smoke:
-    MAX_WALLCLOCK_SECONDS: "60"
+    MAX_WALLCLOCK_SECONDS: "180"
     ITERATIONS: "400"
     TRAIN_BATCH_TOKENS: "8192"
   screen:
@@ -87,7 +87,7 @@ remote_results_file: experiments.jsonl
 # Timeout map (seconds) per backend per preset
 timeout_map:
   torch:
-    smoke: 120
+    smoke: 300
     screen: 4200
     proxy: 2400
     medium: 4800

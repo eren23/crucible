@@ -25,7 +25,7 @@ from crucible.core.config import ProjectConfig, load_config
 
 PRESET_DEFAULTS: dict[str, dict[str, str]] = {
     "smoke": {
-        "MAX_WALLCLOCK_SECONDS": "60",
+        "MAX_WALLCLOCK_SECONDS": "180",
         "ITERATIONS": "400",
         "TRAIN_BATCH_TOKENS": "8192",
         "GRAD_ACCUM_STEPS": "1",

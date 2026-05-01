@@ -270,7 +270,16 @@ def main() -> None:
     for _cb in _callbacks:
         _cb.on_model_ready(_cb_state_early)
 
-    compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
+    # torch.compile gives meaningful throughput on long runs but takes 30-60s
+    # to warm up and uses fullgraph=True (any graph break is fatal). Set
+    # TORCH_COMPILE=0 to skip — useful for smoke iteration on plugins with
+    # compile-incompatible ops (e.g. .item() in metric stashes) and for
+    # variants whose compiled-graph time exceeds the smoke wallclock budget.
+    if os.environ.get("TORCH_COMPILE", "1") != "0":
+        compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
+    else:
+        log0("torch.compile disabled by TORCH_COMPILE=0")
+        compiled_model = base_model
     model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else compiled_model
 
     # Optimizer split:
