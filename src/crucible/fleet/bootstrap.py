@@ -551,7 +551,7 @@ def bootstrap_node(
                     or (proj_cfg.data.probe.download_command or "").strip()
                 )
                 if download_cmd:
-                    cmd_for_step = download_cmd
+                    cmd_for_step = f"cd {shlex.quote(workspace)} && {download_cmd}"
                     _record_step(
                         node, "data_download",
                         lambda: bootstrap_step(node, "data_download", cmd_for_step),
