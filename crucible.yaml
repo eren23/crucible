@@ -127,6 +127,9 @@ sync_excludes:
   - fleet_runs
   - day_runs
   - .DS_Store
+  - checkpoints
+  - videos
+  - wandb
 
 # Output paths
 results_file: experiments.jsonl
