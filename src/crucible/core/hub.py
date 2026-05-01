@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import HubError
+from crucible.core.hub_lock import hub_lock
 from crucible.core.finding import (
     can_promote,
     make_finding_id,
@@ -279,29 +280,35 @@ class HubStore:
         if not path.exists():
             raise HubError(f"Project path does not exist: {path}")
 
-        # Check for duplicates
-        existing = read_jsonl(self._registry_path)
-        for entry in existing:
-            if entry.get("name") == name:
-                raise HubError(f"Project '{name}' already linked.")
+        # Lock spans the duplicate-check + append so two concurrent calls
+        # from different projects can't both pass the check and double-add.
+        with hub_lock(self.hub_dir):
+            existing = read_jsonl(self._registry_path)
+            for entry in existing:
+                if entry.get("name") == name:
+                    raise HubError(f"Project '{name}' already linked.")
 
-        record: dict[str, Any] = {
-            "name": name,
-            "path": str(path),
-            "linked_at": utc_now_iso(),
-        }
-        append_jsonl(self._registry_path, record)
-        return record
+            record: dict[str, Any] = {
+                "name": name,
+                "path": str(path),
+                "linked_at": utc_now_iso(),
+            }
+            append_jsonl(self._registry_path, record)
+            return record
 
     def unlink_project(self, name: str) -> bool:
         """Remove a project from the registry. Returns True if found and removed."""
         self._require_init()
-        existing = read_jsonl(self._registry_path)
-        updated = [e for e in existing if e.get("name") != name]
-        if len(updated) == len(existing):
-            return False
-        write_jsonl(self._registry_path, updated)
-        return True
+        # Lock the read-filter-write sequence: write_jsonl overwrites the
+        # whole ledger, so without serialization a concurrent link_project
+        # could be lost.
+        with hub_lock(self.hub_dir):
+            existing = read_jsonl(self._registry_path)
+            updated = [e for e in existing if e.get("name") != name]
+            if len(updated) == len(existing):
+                return False
+            write_jsonl(self._registry_path, updated)
+            return True
 
     def list_projects(self) -> list[dict[str, Any]]:
         """List all linked projects."""
@@ -515,37 +522,45 @@ class HubStore:
         finding_id = finding.get("id") or make_finding_id(
             finding["title"], scope, track
         )
-        version = self._next_finding_version(finding_id, scope, track)
 
-        enriched = dict(finding)
-        enriched.setdefault("id", finding_id)
-        enriched.setdefault("status", "active")
-        enriched.setdefault("category", "observation")
-        enriched.setdefault("confidence", 0.7)
-        enriched.setdefault("tags", [])
-        enriched.setdefault("source_experiments", [])
-        enriched.setdefault("created_at", utc_now_iso())
-        enriched["version"] = version
-        enriched["scope"] = scope
-        if track:
-            enriched["track"] = track
+        # Lock spans next-version compute + yaml write + ledger append.
+        # Without it, two concurrent stores from different projects could
+        # both compute the same `v1`, both write `v1.yaml` (last write
+        # wins), and produce two ledger entries that the reader's
+        # finding_id-keyed dedupe silently collapses, dropping one
+        # finding's body forever.
+        with hub_lock(self.hub_dir):
+            version = self._next_finding_version(finding_id, scope, track)
 
-        self._write_finding_yaml(enriched, finding_id, version, scope, track)
+            enriched = dict(finding)
+            enriched.setdefault("id", finding_id)
+            enriched.setdefault("status", "active")
+            enriched.setdefault("category", "observation")
+            enriched.setdefault("confidence", 0.7)
+            enriched.setdefault("tags", [])
+            enriched.setdefault("source_experiments", [])
+            enriched.setdefault("created_at", utc_now_iso())
+            enriched["version"] = version
+            enriched["scope"] = scope
+            if track:
+                enriched["track"] = track
 
-        ledger_entry = {
-            "kind": "finding",
-            "ts": enriched["created_at"],
-            "finding_id": finding_id,
-            "version": version,
-            "title": enriched["title"],
-            "status": enriched.get("status", "active"),
-            "scope": scope,
-        }
-        if track:
-            ledger_entry["track"] = track
-        append_jsonl(self._findings_ledger(scope, track), ledger_entry)
+            self._write_finding_yaml(enriched, finding_id, version, scope, track)
 
-        return enriched
+            ledger_entry = {
+                "kind": "finding",
+                "ts": enriched["created_at"],
+                "finding_id": finding_id,
+                "version": version,
+                "title": enriched["title"],
+                "status": enriched.get("status", "active"),
+                "scope": scope,
+            }
+            if track:
+                ledger_entry["track"] = track
+            append_jsonl(self._findings_ledger(scope, track), ledger_entry)
+
+            return enriched
 
     def get_finding(
         self,
@@ -763,30 +778,32 @@ class HubStore:
                 f"Architecture code must contain a register_model call: {name!r}"
             )
 
-        # Check for duplicates in the registry ledger
-        existing = self._read_architecture_registry()
-        for entry in existing:
-            if entry.get("name") == name:
-                raise HubError(f"Architecture '{name}' already exists in the hub.")
+        # Lock spans dup-check + file write + ledger append so two projects
+        # can't both pass the dup-check and race on the same plugin file.
+        with hub_lock(self.hub_dir):
+            existing = self._read_architecture_registry()
+            for entry in existing:
+                if entry.get("name") == name:
+                    raise HubError(f"Architecture '{name}' already exists in the hub.")
 
-        suffix = ".py" if kind == "code" else ".yaml"
-        target_dir = self._arch_plugins_dir if kind == "code" else self._arch_specs_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
-        plugin_path = target_dir / f"{name}{suffix}"
-        plugin_path.write_text(code, encoding="utf-8")
+            suffix = ".py" if kind == "code" else ".yaml"
+            target_dir = self._arch_plugins_dir if kind == "code" else self._arch_specs_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            plugin_path = target_dir / f"{name}{suffix}"
+            plugin_path.write_text(code, encoding="utf-8")
 
-        record: dict[str, Any] = {
-            "name": name,
-            "kind": kind,
-            "relative_path": str(plugin_path.relative_to(self.hub_dir)),
-            "added_at": utc_now_iso(),
-            "source_project": source_project,
-            "tags": tags or [],
-        }
+            record: dict[str, Any] = {
+                "name": name,
+                "kind": kind,
+                "relative_path": str(plugin_path.relative_to(self.hub_dir)),
+                "added_at": utc_now_iso(),
+                "source_project": source_project,
+                "tags": tags or [],
+            }
 
-        append_jsonl(self._arch_registry_path, record)
+            append_jsonl(self._arch_registry_path, record)
 
-        return record
+            return record
 
     def get_architecture(self, name: str) -> dict[str, Any] | None:
         """Get architecture metadata by name from the registry ledger.
@@ -842,18 +859,22 @@ class HubStore:
         """
         self._require_init()
 
-        existing = self._read_architecture_registry()
-        target = next((e for e in existing if e.get("name") == name), None)
-        updated = [e for e in existing if e.get("name") != name]
-        if len(updated) == len(existing):
-            return False
-        write_jsonl(self._arch_registry_path, updated)
+        # Read-filter-write on the registry plus a file unlink — must be
+        # atomic vs. concurrent store_architecture / remove_architecture
+        # from another project on the same machine.
+        with hub_lock(self.hub_dir):
+            existing = self._read_architecture_registry()
+            target = next((e for e in existing if e.get("name") == name), None)
+            updated = [e for e in existing if e.get("name") != name]
+            if len(updated) == len(existing):
+                return False
+            write_jsonl(self._arch_registry_path, updated)
 
-        plugin_path = self._architecture_path_from_record(target or {"name": name, "kind": "code"})
-        if plugin_path.exists():
-            plugin_path.unlink()
+            plugin_path = self._architecture_path_from_record(target or {"name": name, "kind": "code"})
+            if plugin_path.exists():
+                plugin_path.unlink()
 
-        return True
+            return True
 
     # ------------------------------------------------------------------
     # Context loading
@@ -947,64 +968,89 @@ class HubStore:
         }
 
         remote_name = remote or "origin"
+        # Serialize sync across processes on this machine. Two projects
+        # calling hub_sync at the same time would otherwise race on
+        # add/commit/push and one push would be rejected. A non-POSIX host
+        # falls back to a no-op and keeps the old race exposure.
+        with hub_lock(self.hub_dir):
+            try:
+                self._git_run("add", "-A")
 
-        try:
-            self._git_run("add", "-A")
-
-            status = self._git_run("status", "--porcelain", check=False)
-            if status.stdout.strip():
-                self._git_run(
-                    "commit", "-m",
-                    f"crucible-hub: sync {utc_now_iso()}"
-                )
-                result["committed"] = True
-
-            # Is a remote even configured? No → local-only mode, return clean.
-            remote_check = self._git_run("remote", "get-url", remote_name, check=False)
-            if remote_check.returncode != 0:
-                result["notes"].append(
-                    f"no git remote '{remote_name}' configured — local-only hub (taps/findings stored on this machine)"
-                )
-                return result
-            result["remote_configured"] = True
-            remote_url = remote_check.stdout.strip()
-
-            # Pull (with rebase to keep history linear)
-            pull = self._git_run("pull", "--rebase", remote_name, "HEAD", check=False)
-            if pull.returncode == 0:
-                result["pulled"] = True
-                result["remote_reachable"] = True
-            else:
-                reason = _classify_remote_failure(pull.stderr)
-                if reason == "not_configured":
-                    result["notes"].append(f"pull skipped: no remote tracking for '{remote_name}'")
-                elif reason == "unreachable":
-                    result["notes"].append(
-                        f"remote '{remote_url}' unreachable: {_condense(pull.stderr)}"
+                status = self._git_run("status", "--porcelain", check=False)
+                if status.stdout.strip():
+                    self._git_run(
+                        "commit", "-m",
+                        f"crucible-hub: sync {utc_now_iso()}"
                     )
-                else:
-                    result["errors"].append(f"pull: {pull.stderr.strip()}")
+                    result["committed"] = True
 
-            # Only attempt push if pull confirmed the remote is actually there.
-            if result["remote_reachable"] or _classify_remote_failure(pull.stderr) == "not_configured":
-                push = self._git_run("push", remote_name, "HEAD", check=False)
-                if push.returncode == 0:
-                    result["pushed"] = True
+                # Is a remote even configured? No → local-only mode, return clean.
+                remote_check = self._git_run("remote", "get-url", remote_name, check=False)
+                if remote_check.returncode != 0:
+                    result["notes"].append(
+                        f"no git remote '{remote_name}' configured — local-only hub (taps/findings stored on this machine)"
+                    )
+                    return result
+                result["remote_configured"] = True
+                remote_url = remote_check.stdout.strip()
+
+                # Pull (with rebase to keep history linear)
+                pull = self._git_run("pull", "--rebase", remote_name, "HEAD", check=False)
+                if pull.returncode == 0:
+                    result["pulled"] = True
                     result["remote_reachable"] = True
                 else:
-                    reason = _classify_remote_failure(push.stderr)
-                    if reason == "unreachable":
+                    reason = _classify_remote_failure(pull.stderr)
+                    if reason == "not_configured":
+                        result["notes"].append(f"pull skipped: no remote tracking for '{remote_name}'")
+                    elif reason == "unreachable":
                         result["notes"].append(
-                            f"push skipped: remote '{remote_url}' unreachable"
+                            f"remote '{remote_url}' unreachable: {_condense(pull.stderr)}"
                         )
-                    elif reason != "not_configured":
-                        result["errors"].append(f"push: {push.stderr.strip()}")
-            else:
-                result["notes"].append(
-                    f"push skipped: remote '{remote_url}' is unreachable (fix the URL or `git remote remove {remote_name}`)"
-                )
+                    else:
+                        result["errors"].append(f"pull: {pull.stderr.strip()}")
 
-        except (subprocess.CalledProcessError, OSError) as exc:
-            result["errors"].append(str(exc))
+                # Only attempt push if pull confirmed the remote is actually there.
+                if result["remote_reachable"] or _classify_remote_failure(pull.stderr) == "not_configured":
+                    # Push with retry-on-reject: another machine may have
+                    # pushed between our pull and push. Up to 3 attempts of
+                    # rebase + push before giving up.
+                    push_attempts = 0
+                    while True:
+                        push_attempts += 1
+                        push = self._git_run("push", remote_name, "HEAD", check=False)
+                        if push.returncode == 0:
+                            result["pushed"] = True
+                            result["remote_reachable"] = True
+                            break
+                        reason = _classify_remote_failure(push.stderr)
+                        rejected = (
+                            "non-fast-forward" in push.stderr
+                            or "rejected" in push.stderr.lower()
+                        )
+                        if rejected and push_attempts < 3:
+                            rebase = self._git_run(
+                                "pull", "--rebase", remote_name, "HEAD", check=False,
+                            )
+                            if rebase.returncode != 0:
+                                result["errors"].append(
+                                    f"push retry rebase failed: {rebase.stderr.strip()}"
+                                )
+                                break
+                            continue
+                        if reason == "unreachable":
+                            result["notes"].append(
+                                f"push skipped: remote '{remote_url}' unreachable"
+                            )
+                        elif reason != "not_configured":
+                            result["errors"].append(f"push: {push.stderr.strip()}")
+                        break
+                else:
+                    result["notes"].append(
+                        f"push skipped: remote '{remote_url}' is unreachable (fix the URL or `git remote remove {remote_name}`)"
+                    )
+
+            except (subprocess.CalledProcessError, OSError) as exc:
+                result["errors"].append(str(exc))
 
         return result

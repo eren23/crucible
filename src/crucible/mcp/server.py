@@ -404,10 +404,14 @@ TOOLS: list[Tool] = [
     Tool(
         name="destroy_nodes",
         description=(
-            "Tear down nodes. Supports names, pod IDs, or destroy-all.\n\n"
-            "With no args: destroys ALL pods (inventory + orphans via RunPod API).\n"
-            "With node_names: destroys matching nodes by name (inventory + orphan name match).\n"
-            "With pod_ids: destroys specific pods by RunPod pod ID (direct API, no inventory needed).\n\n"
+            "Tear down nodes. Supports names, pod IDs, or destroy-all-for-this-project.\n\n"
+            "With no args: destroys this project's inventory + this project's tagged orphans only.\n"
+            "  Sibling-project pods on the same RunPod account are NEVER touched unless\n"
+            "  include_legacy=true is passed (dangerous — can wipe other projects' pods).\n"
+            "With node_names: destroys matching nodes (inventory + orphans whose name matches AND\n"
+            "  whose project tag matches this project; sibling-project name collisions are\n"
+            "  skipped unless include_legacy=true).\n"
+            "With pod_ids: destroys specific pods by RunPod pod ID (direct API, no inventory).\n\n"
             "REQUIRES: RUNPOD_API_KEY for orphan/pod_id cleanup.\n"
             "RETURNS: {destroyed, status, orphan_pods_destroyed?}\n"
             "NEXT: provision_nodes to create new ones."
@@ -418,14 +422,19 @@ TOOLS: list[Tool] = [
                 "node_names": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Node names to destroy. If empty, destroys all.",
+                    "description": "Node names to destroy. If empty, destroys all of THIS project's pods (never siblings).",
                     "default": [],
                 },
                 "pod_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "RunPod pod IDs to destroy directly (bypasses inventory).",
+                    "description": "RunPod pod IDs to destroy directly (bypasses inventory and project filter).",
                     "default": [],
+                },
+                "include_legacy": {
+                    "type": "boolean",
+                    "description": "Also destroy untagged / sibling-project pods that match. DANGEROUS — only use after auditing the orphan list. Default: false.",
+                    "default": False,
                 },
             },
             "additionalProperties": False,
@@ -435,21 +444,30 @@ TOOLS: list[Tool] = [
         name="cleanup_orphans",
         description=(
             "List and optionally destroy pods on the provider that aren't in local inventory.\n\n"
-            "An 'orphan' is any pod that exists on the provider side (e.g. RunPod) but has no\n"
-            "entry in nodes.json — typically caused by a partially-failed provision batch, a\n"
-            "crash during fleet operations, or pods created by another client.\n\n"
+            "Project-scoped: only pods whose name carries THIS project's tag (starts with\n"
+            "'{project}__') are eligible for destruction by default. Pods are also tagged\n"
+            "with a CRUCIBLE_PROJECT env var at create time for human inspection in the\n"
+            "RunPod UI, but the cleanup filter matches on name to avoid a per-pod GET.\n"
+            "Pods belonging to OTHER Crucible projects on the same RunPod account are\n"
+            "returned as 'legacy_pods' for visibility and are NEVER destroyed unless\n"
+            "include_legacy=true is passed.\n\n"
             "REQUIRES: Provider supports pod listing (RunPod ✓, SSH ✗). RUNPOD_API_KEY set.\n"
-            "RETURNS: {orphans: [{name, pod_id}], destroyed: [pod_id, ...], total_orphans, status}\n"
-            "NEXT: Review orphans with destroy=false first, then re-run with destroy=true if\n"
-            "you want them gone. Alternatively, call fleet_refresh to 'adopt' them into\n"
-            "inventory as reconciled_orphan nodes."
+            "RETURNS: {orphans, tagged_orphans, legacy_pods, destroyed, total_orphans, total_legacy, status}\n"
+            "NEXT: Review with destroy=false first. If pods in legacy_pods belong to a\n"
+            "sibling project, leave them alone. Alternatively, call fleet_refresh to adopt\n"
+            "tagged orphans into inventory as reconciled_orphan nodes."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "destroy": {
                     "type": "boolean",
-                    "description": "If true, destroy the orphans via the provider API. Default: false (list only).",
+                    "description": "If true, destroy the (tagged) orphans via the provider API. Default: false (list only).",
+                    "default": False,
+                },
+                "include_legacy": {
+                    "type": "boolean",
+                    "description": "If true, also destroy untagged / sibling-project pods. DANGEROUS — can wipe pods owned by other projects sharing the RunPod account. Default: false.",
                     "default": False,
                 },
             },
@@ -3422,8 +3440,38 @@ def _init_tracer() -> None:
     atexit.register(_finalize_tracer)
 
 
+def _log_resolved_project() -> None:
+    """Surface which crucible.yaml the server resolved at startup.
+
+    Multi-project users on one machine often hit silent failures when the
+    MCP server picks up a different project's config than they intended
+    (cwd ambiguity, stale ``CRUCIBLE_PROJECT_ROOT``, symlinks). One log
+    line per startup makes that immediately visible.
+    """
+    try:
+        from crucible.core.config import find_config, load_config
+        cfg_path = find_config()
+        if cfg_path is None:
+            _log.warning(
+                "crucible-mcp: no crucible.yaml found from cwd=%s; "
+                "set CRUCIBLE_PROJECT_ROOT to pin the project root.",
+                Path.cwd(),
+            )
+            return
+        cfg = load_config(cfg_path)
+        _log.warning(
+            "crucible-mcp: project=%r root=%s",
+            cfg.name or "<unnamed>",
+            cfg_path.parent,
+        )
+    except Exception as exc:
+        # Never let the banner crash startup.
+        _log.warning("crucible-mcp: project resolution failed: %s", exc)
+
+
 async def _run_server() -> None:
     _init_tracer()
+    _log_resolved_project()
 
     try:
         async with stdio_server() as (read_stream, write_stream):

@@ -445,25 +445,44 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
         fleet.destroy(selected_names=selected)
         destroyed_names = list(selected) if selected else ["all"]
 
-        # Also clean up orphaned pods via RunPod API
+        # Also clean up orphaned pods via RunPod API. Project-scoped:
+        # never destroys pods belonging to a sibling project on the same
+        # RunPod account. The pre-PR behavior of "no names = wipe entire
+        # account" was a multi-project landmine; opt in via include_legacy.
         orphan_destroyed: list[str] = []
+        include_legacy = bool(args.get("include_legacy", False))
         if config.provider.type.lower() == "runpod":
             from crucible.fleet.providers.runpod import RunPodProvider
             provider = fleet.provider
             if isinstance(provider, RunPodProvider):
                 if not node_names:
-                    # No names: destroy ALL pods in the account
-                    orphan_destroyed = provider.destroy_all_pods()
+                    # No names: cascade through cleanup_orphans, which is
+                    # already project-scoped. include_legacy=True lets the
+                    # caller knowingly destroy un-tagged / sibling pods.
+                    orphan_result = fleet.cleanup_orphans(
+                        destroy=True, include_legacy=include_legacy,
+                    )
+                    orphan_destroyed = list(orphan_result.get("destroyed", []))
                 else:
-                    # Names specified: find orphans with matching names
+                    # Names specified: find orphans with matching names,
+                    # restricted to this project's tag (or untagged when
+                    # the project has no name configured).
                     from crucible.fleet.inventory import load_nodes_if_exists
+                    from crucible.fleet.providers.runpod import is_project_pod
                     remaining = load_nodes_if_exists(fleet.nodes_file)
                     tracked_ids = {n.get("pod_id") or n.get("node_id") for n in remaining}
+                    project_name = config.name or ""
                     for pod in provider.list_all_pods():
                         pod_name = str(pod.get("name") or "")
                         pod_id = str(pod.get("id") or "")
-                        if pod_name in selected and pod_id not in tracked_ids:
-                            orphan_destroyed.extend(provider.destroy_pods_by_id([pod_id]))
+                        if pod_name not in selected or pod_id in tracked_ids:
+                            continue
+                        if project_name and not is_project_pod(pod_name, project_name):
+                            # Sibling-project pod with the same name; never
+                            # destroy unless include_legacy was opted in.
+                            if not include_legacy:
+                                continue
+                        orphan_destroyed.extend(provider.destroy_pods_by_id([pod_id]))
 
         result: dict[str, Any] = {
             "destroyed": destroyed_names if node_names else "all",
@@ -477,21 +496,39 @@ def destroy_nodes(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def cleanup_orphans(args: dict[str, Any]) -> dict[str, Any]:
-    """List and optionally destroy pods on the provider that aren't in local inventory.
+    """List/destroy pods on the provider that aren't in local inventory.
+
+    Project-scoped: only pods carrying THIS project's tag (CRUCIBLE_PROJECT
+    env + ``{project}__`` name prefix) are eligible for destruction by
+    default. Pods belonging to sibling Crucible projects on the same RunPod
+    account are returned in ``legacy_pods`` for visibility but are NOT
+    destroyed unless ``include_legacy=true`` is passed.
 
     REQUIRES: Provider supports pod listing (RunPod does; SSH does not).
-    RETURNS: {orphans: [{name, pod_id}], destroyed: [pod_id, ...], total_orphans: int}
-    NEXT: If destroy=False, review the list and re-run with destroy=True, or
-          use destroy_nodes with pod_ids to destroy specific ones.
+    RETURNS: {orphans: [{name, pod_id}], tagged_orphans: [...],
+              legacy_pods: [...], destroyed: [pod_id, ...],
+              total_orphans: int, total_legacy: int}
+    NEXT: If destroy=False, review the list and re-run with destroy=True. If
+          you see expected pods in legacy_pods, those probably belong to
+          another project on the same RunPod account — confirm before
+          passing include_legacy=true.
     """
     config = _get_config()
     try:
         fleet = _get_fleet_manager(config)
-        result = fleet.cleanup_orphans(destroy=bool(args.get("destroy", False)))
+        result = fleet.cleanup_orphans(
+            destroy=bool(args.get("destroy", False)),
+            include_legacy=bool(args.get("include_legacy", False)),
+        )
+        tagged = result.get("tagged_orphans", result.get("orphans", []))
+        legacy = result.get("legacy_pods", [])
         return {
-            "orphans": result["orphans"],
+            "orphans": tagged,
+            "tagged_orphans": tagged,
+            "legacy_pods": legacy,
             "destroyed": result["destroyed"],
-            "total_orphans": len(result["orphans"]),
+            "total_orphans": len(tagged),
+            "total_legacy": len(legacy),
             "status": "ok",
         }
     except CrucibleError as exc:

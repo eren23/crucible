@@ -107,6 +107,7 @@ class FleetManager:
             defaults=config.provider.defaults,
             network_volume_id=config.provider.network_volume_id,
             template_id=config.provider.template_id,
+            project_name=config.name or "",
         )
 
     # ------------------------------------------------------------------
@@ -328,24 +329,36 @@ class FleetManager:
     # Orphan cleanup
     # ------------------------------------------------------------------
 
-    def cleanup_orphans(self, *, destroy: bool = False) -> dict[str, Any]:
+    def cleanup_orphans(
+        self,
+        *,
+        destroy: bool = False,
+        include_legacy: bool = False,
+    ) -> dict[str, Any]:
         """Find pods on the provider that aren't in local inventory.
 
-        An "orphan" is any pod that exists on the provider side but has no
-        corresponding entry in ``nodes.json``. This happens when a
+        An "orphan" is any pod that exists on the provider side AND carries
+        the current project's tag (`{project}__` prefix in its name) but has
+        no corresponding entry in ``nodes.json``. This happens when a
         provisioning batch fails partway through, when a pod is created by
-        another client, or when inventory is manually edited.
+        another client of the same project, or when inventory is manually
+        edited.
 
-        :param destroy: if True, destroy the orphans via the provider. If
-            False (default), just return the list without touching them.
-        :returns: ``{"orphans": [{"name", "pod_id"}], "destroyed": [pod_id, ...]}``.
-            ``destroyed`` is empty when ``destroy=False``.
+        Pods belonging to **other projects** on the same RunPod account
+        (different tag prefix or no prefix at all) are returned separately
+        as ``legacy_pods`` and are **never** destroyed unless the caller
+        opts in via ``include_legacy=True``. Without this safety, project A
+        could destroy project B's running training pods on the same account.
+
+        :param destroy: if True, destroy the project's tagged orphans.
+        :param include_legacy: if True, also include untagged / sibling-project
+            pods in the destroy set. Use with care — this can destroy pods
+            owned by other Crucible projects sharing the RunPod account.
+        :returns: ``{"orphans": [...], "tagged_orphans": [...],
+            "legacy_pods": [...], "destroyed": [...]}``. ``orphans`` is an
+            alias for ``tagged_orphans`` for backward compatibility.
         :raises FleetError: if the provider does not support pod listing.
         """
-        # The provider must expose a ``list_all_pods`` method for this to
-        # work. RunPod does; SSH does not (no central API). We feature-check
-        # rather than importing provider-specific classes to keep the
-        # manager provider-agnostic.
         list_all = getattr(self.provider, "list_all_pods", None)
         if not callable(list_all):
             from crucible.core.errors import FleetError
@@ -361,21 +374,48 @@ class FleetManager:
             if nid:
                 tracked_ids.add(str(nid))
 
-        orphans: list[dict[str, str]] = []
-        for pod in list_all():
+        # Partition account pods by project tag. Falls back to "everything is
+        # tagged" when the provider can't partition (legacy provider) or when
+        # this manager has no project name configured.
+        list_project = getattr(self.provider, "list_project_pods", None)
+        project_name = self.config.name or ""
+        if callable(list_project) and project_name:
+            partition = list_project(project_name)
+            tagged_pods = partition.get("tagged", [])
+            untagged_pods = partition.get("untagged", [])
+        else:
+            tagged_pods = list_all()
+            untagged_pods = []
+
+        tagged_orphans: list[dict[str, str]] = []
+        for pod in tagged_pods:
             pod_id = str(pod.get("id") or "")
             if not pod_id or pod_id in tracked_ids:
                 continue
-            orphans.append({
+            tagged_orphans.append({
                 "name": str(pod.get("name") or ""),
                 "pod_id": pod_id,
             })
 
+        legacy_pods: list[dict[str, str]] = []
+        for pod in untagged_pods:
+            pod_id = str(pod.get("id") or "")
+            if not pod_id or pod_id in tracked_ids:
+                continue
+            legacy_pods.append({
+                "name": str(pod.get("name") or ""),
+                "pod_id": pod_id,
+            })
+
+        to_destroy = list(tagged_orphans)
+        if include_legacy:
+            to_destroy.extend(legacy_pods)
+
         destroyed: list[str] = []
-        if destroy and orphans:
+        if destroy and to_destroy:
             destroy_by_id = getattr(self.provider, "destroy_pods_by_id", None)
             if callable(destroy_by_id):
-                destroyed = destroy_by_id([o["pod_id"] for o in orphans])
+                destroyed = destroy_by_id([o["pod_id"] for o in to_destroy])
             else:
                 from crucible.core.errors import FleetError
                 raise FleetError(
@@ -384,10 +424,17 @@ class FleetManager:
                 )
 
         log_info(
-            f"cleanup_orphans: found {len(orphans)} orphan(s)"
+            f"cleanup_orphans: project={project_name!r}, "
+            f"tagged_orphans={len(tagged_orphans)}, "
+            f"legacy_pods={len(legacy_pods)}"
             + (f", destroyed {len(destroyed)}" if destroy else "")
         )
-        return {"orphans": orphans, "destroyed": destroyed}
+        return {
+            "orphans": tagged_orphans,
+            "tagged_orphans": tagged_orphans,
+            "legacy_pods": legacy_pods,
+            "destroyed": destroyed,
+        }
 
     # ------------------------------------------------------------------
     # Stop / Start (pod lifecycle)

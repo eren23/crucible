@@ -1,6 +1,7 @@
 """Load and validate crucible.yaml project configuration."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -616,7 +617,35 @@ def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]
 
 
 def find_config() -> Path | None:
-    """Walk up from cwd looking for crucible.yaml."""
+    """Locate ``crucible.yaml`` for the current project.
+
+    Resolution order:
+
+    1. ``$CRUCIBLE_PROJECT_ROOT/crucible.yaml`` — explicit override. Set
+       this when the cwd is ambiguous (e.g. running from a parent dir, a
+       git worktree, an MCP server spawned from the wrong directory).
+       If the env var is set but the file is missing, raises
+       :class:`crucible.core.errors.ConfigError` — the operator clearly
+       meant something specific, and silently falling back to defaults
+       would re-introduce the multi-project safety hole this override
+       exists to close.
+    2. Walk up from ``Path.cwd()`` until a ``crucible.yaml`` is found.
+
+    Returns ``None`` only when the walk-up itself produces no hit and no
+    env var is set.
+    """
+    explicit = os.environ.get("CRUCIBLE_PROJECT_ROOT")
+    if explicit:
+        candidate = Path(explicit).expanduser().resolve() / "crucible.yaml"
+        if candidate.exists():
+            return candidate
+        from crucible.core.errors import ConfigError
+        raise ConfigError(
+            f"CRUCIBLE_PROJECT_ROOT={explicit!r} is set but no crucible.yaml "
+            f"exists at {candidate}. Either fix the path, unset the env var, "
+            f"or run from inside the project directory."
+        )
+
     current = Path.cwd().resolve()
     for parent in [current, *current.parents]:
         candidate = parent / "crucible.yaml"

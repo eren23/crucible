@@ -71,6 +71,7 @@ def _runpod_factory(
     gpu_count: int = 1,
     network_volume_id: str = "",
     template_id: str = "",
+    project_name: str = "",
     **kwargs: Any,
 ) -> FleetProvider:
     from crucible.fleet.providers.runpod import RunPodProvider
@@ -83,6 +84,7 @@ def _runpod_factory(
         gpu_count=gpu_count,
         network_volume_id=network_volume_id,
         template_id=template_id,
+        project_name=project_name,
     )
 
 
@@ -90,8 +92,14 @@ def _ssh_factory(
     *,
     ssh_key: str = "",
     defaults: JsonDict | None = None,
+    project_name: str = "",  # noqa: ARG001 — accepted for API parity with runpod
     **kwargs: Any,
 ) -> FleetProvider:
+    # SSHProvider is a pass-through over user-managed hosts — there's no
+    # central listing API to filter, so the project tag would have nothing
+    # to do. We accept the kwarg so `build_provider("ssh", project_name=...)`
+    # doesn't error; if the SSH provider ever grows pod-listing semantics,
+    # wire it through here.
     from crucible.fleet.providers.ssh import SSHProvider
     return SSHProvider(
         ssh_key=ssh_key,

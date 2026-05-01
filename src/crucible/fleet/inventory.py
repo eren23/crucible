@@ -189,14 +189,28 @@ def count_bootstrapped_ready(nodes: list[NodeRecord]) -> int:
 
 
 def next_node_index(nodes: list[NodeRecord], name_prefix: str) -> int:
-    """Find the next ordinal index for a new node with the given prefix."""
+    """Find the next ordinal index for a new node with the given prefix.
+
+    Recognizes both legacy (``{name_prefix}-NN``) and project-tagged
+    (``{project}__{name_prefix}-NN``) naming. Without the strip, every
+    inventory entry from a tagged provider would be ignored and the
+    counter would always return 1, making `_provision_replacement_nodes`
+    issue duplicate ordinals on each replacement.
+    """
+    # Lazy import — inventory.py is loaded by code paths that don't
+    # always pull the runpod provider, and the constant is small enough
+    # to avoid a hard cross-module dep.
+    from crucible.fleet.providers.runpod import PROJECT_TAG_SEPARATOR
+
     prefix = f"{name_prefix}-"
     indexes: list[int] = []
     for node in nodes:
         name = node.get("name", "")
-        if not name.startswith(prefix):
+        # Strip optional `{project}__` tag before matching name_prefix.
+        bare = name.split(PROJECT_TAG_SEPARATOR, 1)[-1] if PROJECT_TAG_SEPARATOR in name else name
+        if not bare.startswith(prefix):
             continue
-        suffix = name[len(prefix):]
+        suffix = bare[len(prefix):]
         if suffix.isdigit():
             indexes.append(int(suffix))
     return (max(indexes) if indexes else 0) + 1

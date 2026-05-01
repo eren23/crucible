@@ -47,6 +47,110 @@ def runpod_api_key() -> str:
     return api_key
 
 
+# ---------------------------------------------------------------------------
+# Project-scoped pod naming (multi-project isolation)
+# ---------------------------------------------------------------------------
+#
+# A single RUNPOD_API_KEY covers the whole RunPod account, so two Crucible
+# projects on the same machine share a pod namespace. Without isolation,
+# `cleanup_orphans` from project A would treat project B's running pods as
+# orphans and could destroy them. We solve this by:
+#
+#   1. Prefixing every pod name with `{project}__` (double underscore is
+#      reserved as the project/name separator and is unlikely to collide
+#      with normal `name_prefix` values).
+#   2. Injecting `CRUCIBLE_PROJECT={project}` into pod env as defense in
+#      depth.
+#   3. Filtering provider-side pod listings by the prefix before computing
+#      orphans (see `RunPodProvider.list_project_pods`).
+#
+# The empty/unset project case falls back to legacy un-prefixed naming so
+# existing pre-tag pods keep working.
+
+PROJECT_TAG_SEPARATOR = "__"
+
+
+def normalize_project_name(name: str) -> str:
+    """Coerce a project name into a RunPod-safe identifier.
+
+    Replaces any character outside ``[A-Za-z0-9_-]`` with ``-``. Collapses
+    runs of ``_`` so ``__`` (the project/prefix separator) can never appear
+    inside the normalized name itself — without that, project ``foo`` would
+    falsely claim pods belonging to project ``foo__bar``. Empty / all-junk
+    input returns ``""`` so callers can branch on the legacy un-tagged path.
+    """
+    if not name:
+        return ""
+    cleaned = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name)
+    cleaned = cleaned.strip("-_")
+    # Collapse `_+` runs to a single `_` so the separator is unambiguous.
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned or ""
+
+
+def validate_name_prefix(name_prefix: str) -> None:
+    """Reject ``name_prefix`` values that would collide with the separator.
+
+    A ``name_prefix`` containing ``__`` would let a sibling project's
+    ``is_project_pod`` parser claim our pods (e.g. our pod
+    ``alpha__wave__retry-01`` could be parsed as project=``alpha`` with
+    prefix=``wave__retry``, which is fine, but a project named
+    ``alpha__wave`` running in parallel would also accept it). Reject
+    early so the failure mode is "you can't provision" rather than "you
+    silently lose pods."
+    """
+    if PROJECT_TAG_SEPARATOR in (name_prefix or ""):
+        raise FleetError(
+            f"name_prefix={name_prefix!r} cannot contain "
+            f"{PROJECT_TAG_SEPARATOR!r} (reserved as project tag separator)."
+        )
+
+
+def project_tag_prefix(project_name: str) -> str:
+    """Return the prefix used for all pods belonging to ``project_name``.
+
+    Returns empty string when project_name is empty (legacy pods).
+    """
+    norm = normalize_project_name(project_name)
+    return f"{norm}{PROJECT_TAG_SEPARATOR}" if norm else ""
+
+
+def build_pod_name(project_name: str, name_prefix: str, index: int) -> str:
+    """Construct a project-tagged pod name.
+
+    When ``project_name`` is empty, falls back to the legacy
+    ``{name_prefix}-{index:02d}`` shape used before multi-project isolation.
+    """
+    validate_name_prefix(name_prefix)
+    prefix = project_tag_prefix(project_name)
+    if prefix:
+        return f"{prefix}{name_prefix}-{index:02d}"
+    return f"{name_prefix}-{index:02d}"
+
+
+def is_project_pod(pod_name: str, project_name: str) -> bool:
+    """True iff ``pod_name`` carries the exact tag of ``project_name``.
+
+    Matches the project segment EXACTLY against the normalized project
+    name, so ``foo`` does not claim pods belonging to ``foo__bar`` and
+    ``foo-extra`` does not claim pods belonging to ``foo-extra-2``.
+
+    Defense-in-depth: a legitimate Crucible pod name carries EXACTLY ONE
+    separator (``normalize_project_name`` collapses ``__`` runs in the
+    project segment, ``validate_name_prefix`` rejects ``__`` in the
+    suffix). A pod name with two or more separators is manually crafted
+    or externally created — refuse to claim it.
+    """
+    norm = normalize_project_name(project_name)
+    if not norm:
+        return False
+    if pod_name.count(PROJECT_TAG_SEPARATOR) != 1:
+        return False
+    project_part, sep, _rest = pod_name.partition(PROJECT_TAG_SEPARATOR)
+    return sep == PROJECT_TAG_SEPARATOR and project_part == norm
+
+
 def read_public_key(path_text: str) -> str:
     """Read and validate an SSH public key file."""
     path = Path(path_text).expanduser()
@@ -462,6 +566,7 @@ def build_pod_payload(
     gpu_count: int = 1,
     network_volume_id: str | None = None,
     template_id: str | None = None,
+    project_name: str = "",
 ) -> dict[str, Any]:
     """Construct the JSON body for a POST /pods request."""
     if container_disk_gb < 0 or volume_gb < 0:
@@ -470,15 +575,19 @@ def build_pod_payload(
         raise FleetError(
             "RunPod volume size must be greater than or equal to container disk size.",
         )
+    env_dict: dict[str, str] = {
+        "JUPYTER_PASSWORD": uuid.uuid4().hex[:16],
+        "PUBLIC_KEY": public_key,
+    }
+    norm_project = normalize_project_name(project_name)
+    if norm_project:
+        env_dict["CRUCIBLE_PROJECT"] = norm_project
     payload: dict[str, Any] = {
         "allowedCudaVersions": ["12.8"],
         "cloudType": cloud_type,
         "computeType": "GPU",
         "containerDiskInGb": container_disk_gb,
-        "env": {
-            "JUPYTER_PASSWORD": uuid.uuid4().hex[:16],
-            "PUBLIC_KEY": public_key,
-        },
+        "env": env_dict,
         "gpuCount": gpu_count,
         "gpuTypeIds": gpu_type_ids,
         "gpuTypePriority": "availability",
@@ -514,6 +623,7 @@ def create_api_pod(
     gpu_count: int = 1,
     network_volume_id: str | None = None,
     template_id: str | None = None,
+    project_name: str = "",
 ) -> dict[str, Any]:
     """Create a RunPod pod via GraphQL mutation.
 
@@ -525,6 +635,9 @@ def create_api_pod(
         {"key": "JUPYTER_PASSWORD", "value": uuid.uuid4().hex[:16]},
         {"key": "PUBLIC_KEY", "value": public_key},
     ]
+    norm_project = normalize_project_name(project_name)
+    if norm_project:
+        env_list.append({"key": "CRUCIBLE_PROJECT", "value": norm_project})
 
     # GraphQL mutation input
     gql_input: dict[str, Any] = {
@@ -580,6 +693,7 @@ def create_api_pod(
             volume_mount_path=volume_mount_path, public_key=public_key,
             ports=ports, gpu_count=gpu_count,
             network_volume_id=network_volume_id, template_id=template_id,
+            project_name=project_name,
         )
         created = runpod_request("POST", "/pods", payload=payload)
         if not isinstance(created, dict):
@@ -707,6 +821,7 @@ class RunPodProvider(FleetProvider):
         gpu_count: int = 1,
         network_volume_id: str = "",
         template_id: str = "",
+        project_name: str = "",
     ) -> None:
         self.image_name = image_name
         self.gpu_type_ids = gpu_type_ids or list(DEFAULT_GPU_TYPE_IDS)
@@ -722,6 +837,7 @@ class RunPodProvider(FleetProvider):
         self.gpu_count = gpu_count
         self.network_volume_id = network_volume_id
         self.template_id = template_id
+        self.project_name = normalize_project_name(project_name)
 
     # -- FleetProvider interface ------------------------------------------
 
@@ -766,7 +882,7 @@ class RunPodProvider(FleetProvider):
         failed: list[dict[str, Any]] = []
         for index in range(start_index, start_index + count):
             ordinal = index - start_index + 1
-            name = f"{name_prefix}-{index:02d}"
+            name = build_pod_name(self.project_name, name_prefix, index)
             last_error: str | None = None
             log_info(f"Creating pod {ordinal}/{count}: {name} (container={eff_container_disk}GB, volume={eff_volume_gb}GB, gpus={eff_gpu_count})")
             success = False
@@ -786,6 +902,7 @@ class RunPodProvider(FleetProvider):
                         gpu_count=eff_gpu_count,
                         network_volume_id=eff_network_volume_id,
                         template_id=eff_template_id,
+                        project_name=self.project_name,
                     )
                     node = inventory_record_from_api(
                         raw,
@@ -870,12 +987,19 @@ class RunPodProvider(FleetProvider):
                 refreshed.append(failed)
 
         # Reconcile: add any pods from the API that aren't in inventory
-        # (orphan recovery). We tag these with state="reconciled_orphan" so
-        # they're immediately visible to the user via get_fleet_status — the
-        # user can then decide whether to adopt them or call cleanup_orphans.
+        # (orphan recovery). Project-scoped: only same-project pods are
+        # adopted into ``refreshed``. Sibling-project pods are NEVER
+        # reconciled here — that would re-introduce the cross-project leak
+        # `cleanup_orphans` was hardened against. When ``project_name`` is
+        # empty (legacy un-tagged provider), fall back to listing all pods
+        # so single-project users keep the old reconciliation behavior.
         try:
-            all_pods = self.list_all_pods()
-            for pod in all_pods:
+            if self.project_name:
+                partition = self.list_project_pods(self.project_name)
+                candidate_pods = partition.get("tagged", [])
+            else:
+                candidate_pods = self.list_all_pods()
+            for pod in candidate_pods:
                 pod_id = str(pod.get("id") or "")
                 if pod_id and pod_id not in seen_ids:
                     log_warn(
@@ -920,6 +1044,33 @@ class RunPodProvider(FleetProvider):
     def list_all_pods(self) -> list[dict[str, Any]]:
         """List all pods from the RunPod API, regardless of local inventory."""
         return runpod_list_api_pods()
+
+    def list_project_pods(
+        self, project_name: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Partition account pods by whether they carry our project tag.
+
+        Returns ``{"tagged": [...], "untagged": [...]}``. ``tagged`` are pods
+        whose name starts with ``{project}__``; ``untagged`` are everything
+        else (including pods owned by sibling projects on the same RunPod
+        account, legacy pre-tag pods, and pods created outside Crucible).
+
+        Used by :meth:`crucible.fleet.manager.FleetManager.cleanup_orphans`
+        to ensure project A never destroys project B's pods.
+        """
+        project = project_name if project_name is not None else self.project_name
+        all_pods = self.list_all_pods()
+        if not project:
+            return {"tagged": list(all_pods), "untagged": []}
+        tagged: list[dict[str, Any]] = []
+        untagged: list[dict[str, Any]] = []
+        for pod in all_pods:
+            pod_name = str(pod.get("name") or "")
+            if is_project_pod(pod_name, project):
+                tagged.append(pod)
+            else:
+                untagged.append(pod)
+        return {"tagged": tagged, "untagged": untagged}
 
     def destroy_all_pods(self) -> list[str]:
         """Destroy ALL pods from the RunPod account. Returns list of destroyed pod IDs."""

@@ -32,6 +32,39 @@ from crucible.core.log import log_warn
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
 from crucible.core.types import ExperimentResult
+from crucible.fleet.providers.runpod import normalize_project_name
+
+
+def derive_wandb_run_name(
+    *,
+    explicit: str | None,
+    project_name: str,
+    variant: str,
+    exp_id: str,
+) -> str:
+    """Resolve ``WANDB_RUN_NAME`` for a single experiment launch.
+
+    Precedence:
+
+    1. ``explicit`` (caller already set ``WANDB_RUN_NAME``) — pass through unchanged.
+    2. ``{project}-{variant}`` when both are non-empty.
+    3. ``{project}-{exp_id}`` when project is set but variant is empty.
+    4. ``exp_id`` alone (legacy single-project default).
+
+    Project name and variant are run through ``normalize_project_name`` so
+    a yaml ``name: "Foo Bar/v2"`` produces a clean W&B identifier rather
+    than a URL-encoded one. The exp_id half is passed through verbatim
+    because it's already a UUID-ish slug.
+    """
+    if explicit is not None and explicit != "":
+        return explicit
+    p = normalize_project_name(project_name)
+    v = normalize_project_name(variant)
+    if p and v:
+        return f"{p}-{v}"
+    if p:
+        return f"{p}-{exp_id}"
+    return exp_id
 from crucible.runner.output_parser import (
     OutputParser,
     classify_failure,
@@ -254,7 +287,15 @@ def run_experiment(
         env["WANDB_ENTITY"] = project_config.wandb.entity
     if project_config.wandb.mode and not env.get("WANDB_MODE"):
         env["WANDB_MODE"] = project_config.wandb.mode
-    env.setdefault("WANDB_RUN_NAME", exp_id)
+    # Derive WANDB_RUN_NAME so cross-project runs in a shared W&B project
+    # remain distinguishable. Logic lives in derive_wandb_run_name so it
+    # can be tested directly without spinning up the full launcher.
+    env["WANDB_RUN_NAME"] = derive_wandb_run_name(
+        explicit=env.get("WANDB_RUN_NAME"),
+        project_name=project_config.name or "",
+        variant=env.get("CRUCIBLE_VARIANT_NAME", ""),
+        exp_id=exp_id,
+    )
     env.setdefault("CRUCIBLE_EXECUTION_PROVIDER", project_config.provider.type.lower())
 
     # Auto-enable W&B logging when both credentials and project are present.

@@ -25,6 +25,7 @@ from typing import Any
 import yaml
 
 from crucible.core.errors import TapError
+from crucible.core.hub_lock import hub_lock
 from crucible.core.io import atomic_write_yaml, read_yaml
 from crucible.core.log import utc_now_iso
 
@@ -167,9 +168,12 @@ class TapManager:
             "last_synced": now,
         }
 
-        taps = self._load_taps_yaml()
-        taps.append(tap_info)
-        self._save_taps_yaml(taps)
+        # Lock the taps.yaml read+append+write — concurrent `sync_tap` from
+        # another project would otherwise clobber our timestamp update.
+        with hub_lock(self.hub_dir):
+            taps = self._load_taps_yaml()
+            taps.append(tap_info)
+            self._save_taps_yaml(taps)
 
         return tap_info
 
@@ -179,9 +183,12 @@ class TapManager:
         if tap_dir.exists():
             shutil.rmtree(tap_dir)
 
-        taps = self._load_taps_yaml()
-        taps = [t for t in taps if t.get("name") != name]
-        self._save_taps_yaml(taps)
+        # Lock the taps.yaml read+filter+write so we don't race with
+        # add_tap or sync_tap from another project.
+        with hub_lock(self.hub_dir):
+            taps = self._load_taps_yaml()
+            taps = [t for t in taps if t.get("name") != name]
+            self._save_taps_yaml(taps)
 
     def list_taps(self) -> list[dict[str, Any]]:
         """Return all configured taps."""
@@ -193,41 +200,45 @@ class TapManager:
         If *name* is empty, syncs all taps.
         Returns ``{synced: [names], errors: [...]}``.
         """
-        taps = self._load_taps_yaml()
-        if name:
-            targets = [t for t in taps if t.get("name") == name]
-            if not targets:
-                raise TapError(f"Tap {name!r} not found")
-        else:
-            targets = taps
+        # Lock spans the git fetch/reset on each tap dir AND the taps.yaml
+        # read+write — two projects syncing the same tap concurrently would
+        # otherwise race on FETCH_HEAD and on the last_synced timestamps.
+        with hub_lock(self.hub_dir):
+            taps = self._load_taps_yaml()
+            if name:
+                targets = [t for t in taps if t.get("name") == name]
+                if not targets:
+                    raise TapError(f"Tap {name!r} not found")
+            else:
+                targets = taps
 
-        synced: list[str] = []
-        errors: list[str] = []
+            synced: list[str] = []
+            errors: list[str] = []
 
-        for tap in targets:
-            tap_name = tap["name"]
-            tap_dir = self._taps_dir / tap_name
-            if not tap_dir.exists():
-                errors.append(f"{tap_name}: directory missing")
-                continue
-            try:
-                # Correct way to update a shallow clone:
-                # fetch latest shallow snapshot, then reset to it.
-                self._git_run("fetch", "--depth", "1", "origin", cwd=tap_dir, check=True)
-                self._git_run("reset", "--hard", "FETCH_HEAD", cwd=tap_dir, check=True)
-                synced.append(tap_name)
-                tap["last_synced"] = utc_now_iso()
-            except subprocess.CalledProcessError as exc:
-                errors.append(f"{tap_name}: {exc.stderr.strip()}")
+            for tap in targets:
+                tap_name = tap["name"]
+                tap_dir = self._taps_dir / tap_name
+                if not tap_dir.exists():
+                    errors.append(f"{tap_name}: directory missing")
+                    continue
+                try:
+                    # Correct way to update a shallow clone:
+                    # fetch latest shallow snapshot, then reset to it.
+                    self._git_run("fetch", "--depth", "1", "origin", cwd=tap_dir, check=True)
+                    self._git_run("reset", "--hard", "FETCH_HEAD", cwd=tap_dir, check=True)
+                    synced.append(tap_name)
+                    tap["last_synced"] = utc_now_iso()
+                except subprocess.CalledProcessError as exc:
+                    errors.append(f"{tap_name}: {exc.stderr.strip()}")
 
-        # Persist last_synced — single read/write, no TOCTOU
-        synced_times = {t["name"]: t.get("last_synced", "") for t in targets if t["name"] in set(synced)}
-        for t in taps:
-            if t["name"] in synced_times:
-                t["last_synced"] = synced_times[t["name"]]
-        self._save_taps_yaml(taps)
+            # Persist last_synced — single read/write, no TOCTOU
+            synced_times = {t["name"]: t.get("last_synced", "") for t in targets if t["name"] in set(synced)}
+            for t in taps:
+                if t["name"] in synced_times:
+                    t["last_synced"] = synced_times[t["name"]]
+            self._save_taps_yaml(taps)
 
-        return {"synced": synced, "errors": errors}
+            return {"synced": synced, "errors": errors}
 
     # ------------------------------------------------------------------
     # Package discovery
@@ -340,6 +351,21 @@ class TapManager:
         """
         _validate_name(name, "package")
 
+        # The whole install path — already-installed check, candidate
+        # selection, file copy, and ledger append — runs under one lock so
+        # two concurrent installs of the same package from different
+        # projects can't both pass the dup-check and silently overwrite
+        # each other's files.
+        with hub_lock(self.hub_dir):
+            return self._install_locked(name, tap=tap, plugin_type=plugin_type)
+
+    def _install_locked(
+        self,
+        name: str,
+        *,
+        tap: str = "",
+        plugin_type: str = "",
+    ) -> dict[str, Any]:
         # Check if already installed (name + type combination — allows
         # installing the same name across different types without collision).
         installed = self._load_installed_yaml()
@@ -483,6 +509,12 @@ class TapManager:
         """
         _validate_name(name, "package")
 
+        # Lock the read-filter-delete-write sequence so a concurrent
+        # install/uninstall from another project can't see a torn ledger.
+        with hub_lock(self.hub_dir):
+            self._uninstall_locked(name, plugin_type=plugin_type)
+
+    def _uninstall_locked(self, name: str, *, plugin_type: str = "") -> None:
         installed = self._load_installed_yaml()
         matches = [
             p for p in installed
