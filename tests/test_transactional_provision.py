@@ -151,29 +151,34 @@ class TestProvisionPartialFailure:
 
 
 class TestCleanupOrphans:
+    """conftest project name is ``test-project``; project-tagged pods carry
+    the prefix ``test-project__``."""
+
     def test_lists_orphans_without_destroying(self, fleet_config: ProjectConfig):
         from crucible.fleet.manager import FleetManager
 
         fm = FleetManager(fleet_config)
-        # Inventory has only gpu-1 (from conftest) — need to compute tracked ids
         fm.nodes_file.write_text(
-            json.dumps([{"name": "tracked", "node_id": "tracked-id", "pod_id": "tracked-id"}])
+            json.dumps([{"name": "test-project__tracked", "node_id": "tracked-id", "pod_id": "tracked-id"}])
         )
 
-        # Provider reports two pods — one tracked, one orphan
+        # Provider reports two project-tagged pods — one tracked, one orphan
         fm._provider = MagicMock()
-        fm._provider.list_all_pods.return_value = [
-            {"id": "tracked-id", "name": "tracked"},
-            {"id": "orphan-id", "name": "runaway"},
-        ]
+        fm._provider.list_project_pods.return_value = {
+            "tagged": [
+                {"id": "tracked-id", "name": "test-project__tracked"},
+                {"id": "orphan-id", "name": "test-project__runaway"},
+            ],
+            "untagged": [],
+        }
 
         result = fm.cleanup_orphans(destroy=False)
 
         assert len(result["orphans"]) == 1
         assert result["orphans"][0]["pod_id"] == "orphan-id"
-        assert result["orphans"][0]["name"] == "runaway"
+        assert result["orphans"][0]["name"] == "test-project__runaway"
         assert result["destroyed"] == []
-        # destroy=False must NOT call the destroy API
+        assert result["legacy_pods"] == []
         fm._provider.destroy_pods_by_id.assert_not_called()
 
     def test_destroys_orphans_when_requested(self, fleet_config: ProjectConfig):
@@ -183,10 +188,13 @@ class TestCleanupOrphans:
         fm.nodes_file.write_text("[]")
 
         fm._provider = MagicMock()
-        fm._provider.list_all_pods.return_value = [
-            {"id": "orphan-1", "name": "a"},
-            {"id": "orphan-2", "name": "b"},
-        ]
+        fm._provider.list_project_pods.return_value = {
+            "tagged": [
+                {"id": "orphan-1", "name": "test-project__a"},
+                {"id": "orphan-2", "name": "test-project__b"},
+            ],
+            "untagged": [],
+        }
         fm._provider.destroy_pods_by_id.return_value = ["orphan-1", "orphan-2"]
 
         result = fm.cleanup_orphans(destroy=True)
@@ -201,11 +209,14 @@ class TestCleanupOrphans:
 
         fm = FleetManager(fleet_config)
         fm.nodes_file.write_text(
-            json.dumps([{"name": "t", "node_id": "a", "pod_id": "a"}])
+            json.dumps([{"name": "test-project__t", "node_id": "a", "pod_id": "a"}])
         )
 
         fm._provider = MagicMock()
-        fm._provider.list_all_pods.return_value = [{"id": "a", "name": "t"}]
+        fm._provider.list_project_pods.return_value = {
+            "tagged": [{"id": "a", "name": "test-project__t"}],
+            "untagged": [],
+        }
 
         result = fm.cleanup_orphans(destroy=True)
         assert result["orphans"] == []
@@ -234,13 +245,14 @@ class TestCleanupOrphans:
 
         fm = FleetManager(fleet_config)
         fm.nodes_file.write_text(
-            json.dumps([{"name": "old-style", "node_id": "legacy-id"}])
+            json.dumps([{"name": "test-project__old-style", "node_id": "legacy-id"}])
         )
 
         fm._provider = MagicMock()
-        fm._provider.list_all_pods.return_value = [
-            {"id": "legacy-id", "name": "old-style"},
-        ]
+        fm._provider.list_project_pods.return_value = {
+            "tagged": [{"id": "legacy-id", "name": "test-project__old-style"}],
+            "untagged": [],
+        }
 
         result = fm.cleanup_orphans(destroy=False)
         assert result["orphans"] == []
