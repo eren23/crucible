@@ -268,7 +268,16 @@ def fetch_wandb_run_info(
     entity: str | None = None,
     run_name: str | None = None,
 ) -> JsonDict:
-    """Fetch metrics + URL for a completed W&B run."""
+    """Fetch metrics + URL + lifecycle state for a W&B run.
+
+    Returns ``state`` (e.g. ``"running"``, ``"finished"``, ``"failed"``,
+    ``"crashed"``, ``"killed"``) and ``heartbeat_at`` (ISO timestamp of the
+    last W&B heartbeat). The status classifier in ``project_runner`` uses
+    these to override stdout/exit-code-based classification when W&B is
+    still actively recording — this prevents long-running cmaj-style runs
+    from being prematurely marked ``failed`` when their stdout heartbeat
+    falls quiet between problem boundaries.
+    """
     try:
         run = _fetch_wandb_run(project=project, entity=entity, run_name=run_name)
         if run is None:
@@ -283,6 +292,8 @@ def fetch_wandb_run_info(
             "url": getattr(run, "url", None),
             "run_name": getattr(run, "name", None) or getattr(run, "display_name", None),
             "metrics": metrics,
+            "state": getattr(run, "state", None),
+            "heartbeat_at": getattr(run, "heartbeatAt", None) or getattr(run, "_attrs", {}).get("heartbeatAt"),
         }
     except Exception as exc:
         log_warn(f"W&B run info fetch failed for project={project!r}: {exc}")

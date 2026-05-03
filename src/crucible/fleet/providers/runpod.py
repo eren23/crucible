@@ -661,10 +661,17 @@ def create_api_pod(
         gql_input["minMemoryInGb"] = 8
         gql_input["minVcpuCount"] = 2
 
-    # Spot = podFindAndDeployInterruptable, on-demand = podFindAndDeployOnDemand
+    # On-demand keeps podFindAndDeployOnDemand. Spot was renamed by the RunPod
+    # API: PodFindAndDeployInterruptableInput is gone, replaced by
+    # PodRentInterruptableInput (per the GraphQL "Did you mean ...?" hint).
+    # The matching mutation field name was extrapolated to podRentInterruptable.
+    # If RunPod kept the old mutation name with the new input type, GraphQL
+    # validation will fail and ``create_api_pod`` falls back to the REST
+    # ``POST /pods`` path below — same outcome as the original bug, no
+    # regression. Worth verifying against current schema introspection.
     if interruptible:
-        mutation_name = "podFindAndDeployInterruptable"
-        input_type = "PodFindAndDeployInterruptableInput"
+        mutation_name = "podRentInterruptable"
+        input_type = "PodRentInterruptableInput"
     else:
         mutation_name = "podFindAndDeployOnDemand"
         input_type = "PodFindAndDeployOnDemandInput"

@@ -47,10 +47,19 @@ def launch_project(
     effective_overrides.setdefault("CRUCIBLE_EXECUTION_PROVIDER", node.get("provider", "runpod"))
     effective_overrides.setdefault("CRUCIBLE_ENFORCE_CONTRACT", "1")
 
-    override_exports = ""
+    # Build a single export prefix that lives INSIDE the inner ``bash -lc``
+    # train command.  Putting exports at the outer SSH-shell level (before
+    # ``python -c``) is fragile: the inner ``bash -lc`` is a login shell that
+    # sources ``/etc/profile`` + ``~/.bash_profile``, and many train commands
+    # then ``source .env`` themselves.  Either of those can clobber values we
+    # set at the outer level — observed in practice with TEMP / SEED silently
+    # falling back to defaults despite ``run_project(overrides={...})``.
+    # Exporting *inside* the inner shell, AFTER profile and after the user's
+    # own ``source .env``, makes overrides authoritative.
+    override_exports_inline = ""
     if effective_overrides:
         parts = [f"export {k}={shlex.quote(str(v))}" for k, v in effective_overrides.items()]
-        override_exports = " && ".join(parts) + " && "
+        override_exports_inline = " && ".join(parts) + " && "
 
     # Activation + env sourcing.  ``set -a`` forces every variable
     # assigned by ``source`` (including bare ``KEY=val`` lines, not just
@@ -78,13 +87,13 @@ def launch_project(
             'exit 101; fi'
         )
 
-    train_cmd = spec.train
+    wrapped_train_cmd = f"{override_exports_inline}{spec.train}"
     exit_code_file = f"{log_dir}/{run_id}.exit_code"
     launch_snippet = (
         "import pathlib, subprocess, threading; "
         f"pathlib.Path({log_dir!r}).mkdir(parents=True, exist_ok=True); "
         f"log = open({log_file!r}, 'ab', buffering=0); "
-        f"proc = subprocess.Popen(['bash', '-lc', {train_cmd!r}], "
+        f"proc = subprocess.Popen(['bash', '-lc', {wrapped_train_cmd!r}], "
         "stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, "
         "start_new_session=True); "
         "print(proc.pid); "
@@ -92,7 +101,6 @@ def launch_project(
     )
     cmd = (
         f"{activate} && {source_env}{preflight} && "
-        f"{override_exports}"
         f"mkdir -p {log_dir_quoted} && "
         f"python -c {shlex.quote(launch_snippet)}"
     )
@@ -295,6 +303,43 @@ def _node_state_label(node: NodeRecord) -> str:
     return api_state or state or "unknown"
 
 
+def _wandb_is_live(wandb_info: dict[str, Any], stale_after_s: int = 180) -> bool:
+    """Return True if W&B reports the run is alive right now.
+
+    Treats ``state == "running"`` as authoritative when the heartbeat is
+    fresh. The stale-window guards against zombie W&B runs whose process
+    crashed without finishing — those keep ``state="running"`` but stop
+    sending heartbeats. Default 180s matches W&B's own zombie-detection
+    grace period.
+
+    Safety bias: an unparseable heartbeat returns False, not True. False
+    here means "fall through to other classifiers" (which can still mark
+    the run completed if there are post-mortem metrics). True here would
+    pin the run as ``running`` indefinitely, blocking ``collect_project_result``
+    from ever finalizing — a worse failure mode than a one-off mis-classify.
+    """
+    state = str(wandb_info.get("state") or "").lower()
+    if state != "running":
+        return False
+    heartbeat_at = wandb_info.get("heartbeat_at")
+    if not heartbeat_at:
+        # No heartbeat info but state=running — trust W&B (better than
+        # mis-classifying as failed). The stale check is best-effort.
+        return True
+    from datetime import datetime, timezone
+    try:
+        if isinstance(heartbeat_at, (int, float)):
+            ts = datetime.fromtimestamp(float(heartbeat_at), tz=timezone.utc)
+        else:
+            text = str(heartbeat_at).rstrip("Z")
+            ts = datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError, OverflowError):
+        log_warn(f"W&B heartbeat unparseable ({heartbeat_at!r}) — treating as not-live.")
+        return False
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    return age <= stale_after_s
+
+
 def _classify_project_status(
     *,
     process_probe: dict[str, Any],
@@ -303,16 +348,38 @@ def _classify_project_status(
     node: NodeRecord,
     wandb_info: dict[str, Any],
 ) -> tuple[str, str | None]:
-    """Resolve the best status/failure_class for an external project run."""
+    """Resolve the best status/failure_class for an external project run.
+
+    Status precedence:
+      1. local SSH probe says the pid is alive       → ``running``
+      2. W&B reports state=running with fresh heartbeat → ``running``
+         (covers the "stdout fell quiet between problems" failure mode
+         where the pid disappeared from this side because the SSH probe
+         timed out, but W&B is still receiving step-level updates)
+      3. stdout parser saw a terminal marker         → ``completed``
+      4. W&B has any post-mortem record              → ``completed``
+      5. node unreachable / interrupted              → ``interrupted``
+      6. otherwise classify via ``classify_failure`` → ``failed``
+    """
     if process_probe.get("running") is True:
+        return "running", None
+
+    if _wandb_is_live(wandb_info):
         return "running", None
 
     parsed_status = parsed.get("status") if parsed else None
     if parsed_status == "completed":
         return "completed", None
 
-    if wandb_info:
+    # W&B post-mortem: only treat as completed when W&B itself says so.
+    # ``state == "finished"`` is the only success terminal; "failed",
+    # "crashed", "killed" must surface as failures with the W&B state as
+    # the failure_class so callers see the real reason.
+    wandb_state = str(wandb_info.get("state") or "").lower() if wandb_info else ""
+    if wandb_state == "finished":
         return "completed", None
+    if wandb_state in {"failed", "crashed", "killed"}:
+        return "failed", f"wandb_{wandb_state}"
 
     node_state = _node_state_label(node)
     if (not process_probe.get("reachable")) or node_state in BAD_API_STATES or node_state in {"unreachable", "ssh_timeout"}:
@@ -399,11 +466,15 @@ def collect_project_result(
     else:
         parsed = None
 
-    # Fetch WandB metrics if configured
+    # Fetch WandB metrics + lifecycle state. We fetch even when the local
+    # SSH probe says ``still_running`` so the classifier can cross-check:
+    # if the SSH probe spuriously reports the pid gone (BAD_API_STATES,
+    # transient ssh_timeout, etc.) but W&B still has a fresh heartbeat,
+    # the run is alive and must not be marked failed.
     wandb_metrics: dict[str, float] = {}
     wandb_info: dict[str, Any] = {}
     wandb_required = bool(spec.env_set.get("WANDB_PROJECT"))
-    if wandb_required and not still_running:
+    if wandb_required:
         try:
             from crucible.runner.wandb_logger import fetch_wandb_run_info
             wandb_project = spec.env_set.get("WANDB_PROJECT", "")

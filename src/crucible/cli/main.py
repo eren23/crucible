@@ -39,6 +39,10 @@ def _main() -> None:
     prov.add_argument("--count", type=int, default=2, help="Number of nodes to create")
     prov.add_argument("--name-prefix", type=str, default="crucible", help="Node name prefix")
     prov.add_argument("--interruptible", action="store_true", help="Use spot instances")
+    prov.add_argument(
+        "--project", type=str, default="",
+        help="Project spec name (.crucible/projects/<name>.yaml) — applies pod overrides",
+    )
 
     fleet_sub.add_parser("destroy", help="Tear down nodes").add_argument(
         "--node", type=str, action="append", dest="nodes", help="Node names to destroy"

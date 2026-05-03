@@ -25,7 +25,7 @@ from crucible.core.experiment_contract import (
     validate_experiment_contract,
 )
 from crucible.core.io import read_jsonl
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 from crucible.core.redact import redact_secrets
 
 
@@ -241,9 +241,17 @@ def _probe_node_metrics(node: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
-    """Node inventory, health summary, current assignments, and optional live metrics."""
+    """Node inventory, health summary, current assignments, and optional live metrics.
+
+    Always probes the provider for tagged orphan pods (provider pods carrying
+    this project's tag but absent from local inventory) so callers see them
+    surfaced in the response without an extra ``cleanup_orphans`` call.
+    Set ``include_orphans=False`` to skip the probe (saves one provider API
+    round-trip).
+    """
     config = _get_config()
     include_metrics = args.get("include_metrics", False)
+    include_orphans = args.get("include_orphans", True)
     try:
         from crucible.fleet.inventory import load_nodes, summarize_nodes
 
@@ -262,6 +270,25 @@ def get_fleet_status(args: dict[str, Any]) -> dict[str, Any]:
             for n in nodes
         ]
         result: dict[str, Any] = {"summary": summary, "nodes": node_details}
+
+        if include_orphans:
+            try:
+                fm = _get_fleet_manager(config)
+                orphan_info = fm.cleanup_orphans(destroy=False, include_legacy=False)
+                tagged = orphan_info.get("tagged_orphans", []) or []
+                if tagged:
+                    result["provider_orphans"] = {
+                        "count": len(tagged),
+                        "pods": tagged,
+                        "hint": (
+                            "Run provision_project(purge_orphans=True) or "
+                            "cleanup_orphans(destroy=True) to remove them."
+                        ),
+                    }
+            except CrucibleError as exc:
+                # Provider may not support orphan listing — non-fatal,
+                # don't pollute the status output.
+                log_warn(f"get_fleet_status: orphan probe failed: {exc}")
         active_project_runs = [
             {
                 "run_id": row.get("run_id"),
@@ -3670,20 +3697,38 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
     """Provision nodes for an external project, applying pod overrides from the spec.
 
     REQUIRES: RUNPOD_API_KEY in .env, project spec in .crucible/projects/.
-    RETURNS: {created, new_nodes: [{name, node_id}]}
+    RETURNS: {created, new_nodes: [{name, node_id}], purged_orphans?: int}
     NEXT: fleet_refresh (wait ~60s), then bootstrap_project.
+
+    :param purge_orphans: if True, destroy the project's tagged orphan pods
+        (provider pods that are NOT in the local nodes.json) BEFORE creating
+        new pods. Avoids the dual-bootstrap failure mode where stale pods
+        from a killed-orchestrator session collide with fresh ones.
     """
     config = _get_config()
     try:
         from crucible.core.config import load_project_spec
         project_name = args["project_name"]
         count = args.get("count", 1)
+        purge_orphans = bool(args.get("purge_orphans", False))
         spec = load_project_spec(project_name, config.project_root)
         _project_contract_env(config, spec)
 
         from crucible.fleet.inventory import load_nodes_if_exists, next_node_index
         fm = _get_fleet_manager(config)
         name_prefix = project_name[:12]
+
+        purged_orphans = 0
+        if purge_orphans:
+            try:
+                cleanup_result = fm.cleanup_orphans(destroy=True, include_legacy=False)
+                purged_orphans = len(cleanup_result.get("destroyed", []))
+            except CrucibleError as exc:
+                # Surface the failure to the caller but don't block provisioning.
+                # An orphan-cleanup hiccup shouldn't prevent new pods from being
+                # created — the dual-bootstrap risk is real but recoverable.
+                log_warn(f"provision_project: orphan purge failed: {exc}")
+
         existing_nodes = load_nodes_if_exists(config.project_root / config.nodes_file)
 
         # Apply pod overrides if present
@@ -3719,13 +3764,16 @@ def provision_project(args: dict[str, Any]) -> dict[str, Any]:
             n for n in nodes
             if (n.get("node_id") or n.get("pod_id")) not in previous_ids
         ]
-        return {
+        response: dict[str, Any] = {
             "created": len(new_nodes),
             "new_nodes": [
                 {"name": n.get("name", ""), "node_id": n.get("node_id", "")}
                 for n in new_nodes
             ],
         }
+        if purge_orphans:
+            response["purged_orphans"] = purged_orphans
+        return response
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
@@ -3734,11 +3782,21 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
     """Bootstrap an external project on fleet nodes: clone, venv, install, setup.
 
     REQUIRES: Nodes with SSH (run fleet_refresh after provision_project).
-    RETURNS: {total, bootstrapped, nodes: [{name, state, project}]}
+    RETURNS: {total, bootstrapped, nodes: [{name, state, project, error?}]}
     NEXT: run_project.
+
+    :param node_names: optional list — bootstrap exactly these nodes (strict).
+    :param timeout_s: hard wall-clock cap per node, default 1800 (30 min).
+        If a single node's bootstrap exceeds this, the node is marked
+        ``boot_timeout`` and the batch continues. Prevents the
+        "bootstrap hangs forever" failure mode (e.g. wedged SSH channels
+        after ``install_datasets``) without blocking the rest of the
+        fleet from coming online.
     """
     config = _get_config()
     try:
+        import concurrent.futures
+
         from crucible.core.config import load_project_spec
         from crucible.fleet.bootstrap import bootstrap_project as _bootstrap_project
         from crucible.fleet.inventory import (
@@ -3749,6 +3807,7 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
         project_name = args["project_name"]
         spec = load_project_spec(project_name, config.project_root)
         node_names = args.get("node_names")
+        timeout_s = max(int(args.get("timeout_s", 1800)), 60)
 
         nodes_file = config.project_root / config.nodes_file
         all_nodes = load_nodes_if_exists(nodes_file) or []
@@ -3768,20 +3827,51 @@ def bootstrap_project_tool(args: dict[str, Any]) -> dict[str, Any]:
         for node in ssh_nodes:
             # Apply workspace from spec
             node["workspace_path"] = spec.workspace
+            # Run bootstrap in a worker thread with a hard wall-clock cap.
+            # ``concurrent.futures`` lets us bail at ``timeout_s`` even if
+            # the underlying SSH/subprocess machinery is wedged. We do NOT
+            # use the executor as a context manager — its ``__exit__`` calls
+            # ``shutdown(wait=True)`` which would re-block on the wedged
+            # thread, defeating the timeout. ``shutdown(wait=False)`` lets
+            # the thread leak (Python can't kill threads); the OS reaps it
+            # when the SSH subprocess eventually dies.
+            #
+            # Defensive: pass a deep copy of ``node`` to the worker so the
+            # leaked thread cannot mutate the dict that's already been
+            # written to nodes.json under the timeout state. Currently
+            # ``_bootstrap_project`` only mutates the dict in place and
+            # never persists it itself, but copying preempts the failure
+            # mode if that contract changes.
+            import copy as _copy
+            worker_node = _copy.deepcopy(node)
+            pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"bootstrap-{node['name']}",
+            )
+            future = pool.submit(
+                _bootstrap_project, worker_node, spec, project_root=config.project_root,
+            )
             try:
-                updated = _bootstrap_project(node, spec, project_root=config.project_root)
-                # Clear any stale error from a previous failed bootstrap — the
-                # node is now ready and should not display old error strings.
+                updated = future.result(timeout=timeout_s)
                 updated.pop("error", None)
                 upsert_node_record(nodes_file, updated)
                 results.append(updated)
+                pool.shutdown(wait=True)
+            except concurrent.futures.TimeoutError:
+                log_warn(
+                    f"{node['name']}: bootstrap exceeded {timeout_s}s hard "
+                    f"timeout — marking boot_timeout and continuing batch."
+                )
+                node["state"] = "boot_timeout"
+                node["error"] = f"bootstrap exceeded {timeout_s}s wall-clock cap"
+                upsert_node_record(nodes_file, node)
+                results.append(node)
+                pool.shutdown(wait=False)
             except (CrucibleError, subprocess.SubprocessError, OSError, RuntimeError) as exc:
-                # Per-node bootstrap failure: mark the node and continue with
-                # the rest of the batch.
                 node["state"] = "boot_failed"
                 node["error"] = str(exc)
                 upsert_node_record(nodes_file, node)
                 results.append(node)
+                pool.shutdown(wait=False)
 
         bootstrapped = [n for n in results if n.get("state") == "ready"]
         return {

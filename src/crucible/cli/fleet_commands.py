@@ -34,10 +34,40 @@ def _handle_fleet(args: argparse.Namespace) -> None:
         from crucible.fleet.manager import FleetManager
 
         fleet = FleetManager(config)
-        nodes = fleet.provision(
-            count=args.count,
-            name_prefix=getattr(args, "name_prefix", "crucible"),
-        )
+        provision_kwargs: dict[str, object] = {
+            "count": args.count,
+            "name_prefix": getattr(args, "name_prefix", "crucible"),
+        }
+        # When --project is passed, load the project spec and apply its pod
+        # overrides (image, gpu_type, container_disk, volume_disk,
+        # interruptible, gpu_count). Mirrors what the MCP provision_project
+        # tool already does so CLI users get the same pod shape.
+        project = getattr(args, "project", "") or ""
+        if project:
+            from crucible.core.config import load_project_spec
+            spec = load_project_spec(project, config.project_root)
+            if spec.pod.image:
+                provision_kwargs["image_name"] = spec.pod.image
+            if spec.pod.gpu_type:
+                provision_kwargs["gpu_type_ids"] = spec.pod.gpu_type
+            if spec.pod.container_disk:
+                provision_kwargs["container_disk_gb"] = spec.pod.container_disk
+            if spec.pod.volume_disk:
+                provision_kwargs["volume_gb"] = spec.pod.volume_disk
+            if spec.pod.gpu_count:
+                provision_kwargs["gpu_count"] = spec.pod.gpu_count
+            # Spec interruptible only kicks in if --interruptible wasn't passed
+            # explicitly. argparse defaults `interruptible` to False when the
+            # flag is absent, so we use spec value as a fallback only when
+            # the user did NOT pass --interruptible.
+            if not getattr(args, "interruptible", False) and spec.pod.interruptible is not None:
+                provision_kwargs["interruptible"] = spec.pod.interruptible
+            elif getattr(args, "interruptible", False):
+                provision_kwargs["interruptible"] = True
+        elif getattr(args, "interruptible", False):
+            provision_kwargs["interruptible"] = True
+
+        nodes = fleet.provision(**provision_kwargs)
         print(f"Provisioned {len(nodes)} nodes.")
         for n in nodes:
             print(f"  {n.get('name', '?')}: {n.get('gpu', '?')}")
