@@ -397,9 +397,17 @@ class HarnessOptimizer:
     ) -> dict[str, Any]:
         """Execute a full propose→validate→benchmark cycle and log it.
 
+        When ``config.judges`` is configured, the judge-separation contract
+        is enforced before any LLM call — mirrors GIANTS' rule that the
+        reward judge and eval judge must differ in model and family.
+
         Returns a summary dict containing counts, the frontier snapshot, and
         the evolution log record that was appended.
         """
+        panel = getattr(self.config, "judges", None)
+        if panel is not None and panel.is_configured():
+            panel.assert_separated()
+
         self._iteration += 1
         proposed = self.propose_candidates()
         valid = self.validate_candidates(list(proposed))

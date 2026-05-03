@@ -1,0 +1,85 @@
+name: synthesis-driven-research
+title: GIANTS-style hypothesis seeding from cross-project findings
+created_at: '2026-05-03T00:00:00+00:00'
+created_by: crucible-core
+goal: |
+  Mine pairs of hub findings and ask the orchestrator's LLM to predict
+  the experiment that synthesizes both parents. Mirrors GIANTS'
+  insight-anticipation paper (https://giants-insights.github.io/) on
+  Crucible's internal findings ledger instead of arXiv.
+
+  Use when you have at least 2 promoted findings in the hub (per-project
+  is fine; cross-track pairs unlock the most novel hypotheses).
+
+project_spec: ''
+environment:
+  notes: |
+    No special env vars beyond what the orchestrator's LLM needs. The
+    synthesis tool itself is pure orchestrator-contract — it returns
+    {system, user, schema} per pair and never makes an internal LLM call.
+  required_env_files: []
+  required_yaml: []
+
+steps:
+  - tool: hub_status
+    purpose: Confirm the hub is initialized and has findings.
+    expect:
+      initialized: true
+
+  - tool: hub_findings_query
+    purpose: See the available findings pool.
+    args:
+      scope: global
+      status: active
+      limit: 50
+    expect:
+      total: '>= 2'
+
+  - tool: design_synthesize_from_findings
+    purpose: |
+      Pull k pairs and get one orchestrator-shaped prompt bundle per pair.
+      Use policy=cross_track to maximize the synthesis novelty.
+    args:
+      k: 4
+      policy: cross_track
+      scope: global
+      status: active
+      seed: 42
+
+  - manual: |
+      For each bundle in the response's `pairs` list:
+        1. Call your LLM (Claude / Gemini / etc.) with bundle.system + bundle.user.
+        2. Parse the response against bundle.schema (validates the shape).
+        3. Each parsed hypothesis MUST carry parent_finding_ids back to the
+           batch so provenance is preserved.
+
+  - tool: design_batch_from_hypotheses
+    purpose: Convert all merged hypotheses into a runnable batch.
+    args:
+      hypotheses: '<merged hypothesis list from prior step>'
+      tier: proxy
+      backend: torch
+
+  - tool: design_enqueue_batch
+    purpose: Add to the queue.
+    args:
+      batch: '<batch from prior step>'
+
+  - tool: dispatch_experiments
+    purpose: Run them.
+
+gotchas:
+  - issue: Pool too small (fewer than 2 findings).
+    fix: |
+      Promote some project-scope findings to track or global via finding_promote.
+      The synthesis tool returns an explicit error when len(findings) < 2.
+  - issue: |
+      cross_track policy returns no pairs because all findings are in one track.
+    fix: |
+      Use policy=random or policy=same_track. Cross-track only fires when at
+      least two distinct non-empty tracks have findings.
+  - issue: Generated hypothesis names not unique → W&B run-name collision.
+    fix: |
+      The synthesis prompt seeds names like `synth_<aaa>_<bbb>_<topic>`. If your
+      orchestrator's LLM emits collisions anyway, set CRUCIBLE_VARIANT_NAME per
+      candidate before enqueuing.

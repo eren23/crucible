@@ -1838,6 +1838,90 @@ def hub_findings_query(args: dict[str, Any]) -> dict[str, Any]:
     return {"findings": findings[:limit], "total": len(findings)}
 
 
+def design_synthesize_from_findings(args: dict[str, Any]) -> dict[str, Any]:
+    """Mine pairs of hub findings and build orchestrator-shaped synthesis prompts.
+
+    GIANTS-style hypothesis seeding: pick two findings that each won on their
+    own project/track, ask the orchestrator's LLM to predict the experiment
+    that synthesizes both. Pure orchestrator-contract — no LLM call. The
+    orchestrator scores each bundle's prompt with its own model, parses the
+    response against the returned schema, and submits via
+    ``design_batch_from_hypotheses`` once it has converted hypotheses.
+    """
+    _get_config()  # ensure env files loaded
+    hub = _get_hub()
+    if hub is None:
+        return {"error": "Hub not initialized. Run hub init first."}
+
+    from crucible.core.log import log_warn
+    from crucible.researcher.synthesis import build_synthesis_prompt, mine_pairs
+
+    scope = args.get("scope", "global")
+    if scope not in ("global", "track"):
+        return {
+            "error": (
+                f"Unsupported scope {scope!r}. Synthesis operates on hub-scope "
+                "findings only — use 'global' or 'track'. Promote project "
+                "findings via finding_promote first."
+            )
+        }
+    track = args.get("track")
+    status = args.get("status", "active")
+    tags = args.get("tags") or []
+    k = int(args.get("k", 4))
+    policy = args.get("policy", "random")
+    seed = args.get("seed")
+
+    # Pull the full pool unfiltered by tags — pair-level OR matching happens
+    # inside mine_pairs so a single tagged finding pulls in untagged partners.
+    try:
+        findings = hub.list_findings(scope, track=track, status=status, tags=None)
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+    if scope == "global" and not track:
+        # Also include findings from all tracks so cross-track pairs are eligible.
+        try:
+            for t in hub.list_tracks():
+                findings.extend(
+                    hub.list_findings("track", track=t["name"], status=status, tags=None)
+                )
+        except CrucibleError as exc:
+            log_warn(f"design_synthesize_from_findings: track expansion failed: {exc}")
+
+    if len(findings) < 2:
+        return {
+            "error": (
+                f"Findings pool has {len(findings)} item(s); need at least 2. "
+                "Promote more findings to the hub or widen the scope/filter."
+            )
+        }
+
+    try:
+        pairs = mine_pairs(
+            findings,
+            k=k,
+            policy=policy,
+            seed=seed,
+            required_tags=set(tags),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+    bundles = [build_synthesis_prompt(pair) for pair in pairs]
+    return {
+        "policy": policy,
+        "scope": scope,
+        "track": track,
+        "pool_size": len(findings),
+        "pairs": bundles,
+        "next": (
+            "Call your LLM with each bundle's {system, user}, parse against "
+            "schema, then design_batch_from_hypotheses with the results."
+        ),
+    }
+
+
 def _research_finding_to_hub_finding(finding: dict[str, Any], config: ProjectConfig) -> dict[str, Any]:
     """Convert a ResearchState finding to hub-compatible Finding format."""
     from crucible.core.finding import make_finding_id
@@ -3234,6 +3318,104 @@ def tree_expand_node(args: dict[str, Any]) -> dict[str, Any]:
         "status": "expanded",
         "parent_node_id": parent_id,
         "new_node_ids": new_ids,
+        "total_nodes": tree.meta["total_nodes"],
+    }
+
+
+def tree_expand_grpo(args: dict[str, Any]) -> dict[str, Any]:
+    """GRPO-style tree expansion: keep top-K candidates by group-relative advantage.
+
+    The orchestrator samples N candidate children, scores each with the eval
+    judge, and passes ``judge_score`` per candidate. We z-score (or min-max)
+    normalize within the group, keep the top ``top_k``, and expand the tree
+    with the kept children. Each kept node stores ``group_advantage`` for
+    later inspection.
+
+    When ``ProjectConfig.judges`` is configured, the panel's separation
+    contract is enforced before any expansion happens. Mirrors GIANTS'
+    GRPO + judge-separation rule.
+    """
+    config = _get_config()
+    from crucible.researcher.grpo import compute_advantages, select_top_k
+    from crucible.researcher.search_tree import SearchTree
+
+    # Enforce judge separation when the project has declared a panel.
+    panel = getattr(config, "judges", None)
+    if panel is not None and panel.is_configured():
+        try:
+            panel.assert_separated()
+        except CrucibleError as exc:
+            return {"error": f"[{type(exc).__name__}] {exc}"}
+
+    name = args["name"]
+    parent_id = args["parent_node_id"]
+    candidates = args.get("candidates", [])
+    top_k = int(args.get("top_k", 2))
+    normalization = args.get("advantage_normalization", "z_score")
+
+    if not candidates:
+        return {"error": "candidates list is empty"}
+
+    # Load tree first so a missing tree / missing parent fails fast — matches
+    # tree_expand_node's load-first pattern and avoids spending CPU on
+    # advantage normalization for a doomed call.
+    tree_dir = _get_tree_dir(config, name)
+    try:
+        tree = SearchTree.load(tree_dir)
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    if tree.get_node(parent_id) is None:
+        return {"error": f"parent_node_id {parent_id!r} not found in tree {name!r}"}
+
+    scores: list[float] = []
+    for i, cand in enumerate(candidates):
+        if not isinstance(cand, dict):
+            return {"error": f"candidate[{i}] is not an object"}
+        if "name" not in cand or not cand["name"]:
+            return {"error": f"candidate[{i}] missing required 'name' field"}
+        if "config" not in cand:
+            return {"error": f"candidate[{i}] missing required 'config' field"}
+        if "judge_score" not in cand:
+            return {"error": f"candidate[{i}] missing 'judge_score' field"}
+        try:
+            scores.append(float(cand["judge_score"]))
+        except (TypeError, ValueError):
+            return {"error": f"candidate[{i}] judge_score is not numeric"}
+
+    try:
+        advantages = compute_advantages(scores, normalization=normalization)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    keep_idx = select_top_k(advantages, top_k=top_k)
+
+    children_specs: list[dict[str, Any]] = []
+    for i in keep_idx:
+        cand = candidates[i]
+        spec: dict[str, Any] = {
+            "name": cand["name"],
+            "config": dict(cand["config"]),
+            "hypothesis": cand.get("hypothesis", ""),
+            "rationale": cand.get("rationale", ""),
+            "tags": cand.get("tags", []),
+            "generation_method": "grpo",
+            "priority_score": float(advantages[i]),
+            "group_advantage": float(advantages[i]),
+        }
+        children_specs.append(spec)
+
+    try:
+        new_ids = tree.expand_node(parent_id, children_specs)
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+    return {
+        "status": "expanded",
+        "parent_node_id": parent_id,
+        "new_node_ids": new_ids,
+        "kept_indices": keep_idx,
+        "advantages": advantages,
+        "normalization": normalization,
         "total_nodes": tree.meta["total_nodes"],
     }
 
@@ -5823,10 +6005,19 @@ def harness_validate(args: dict[str, Any]) -> dict[str, Any]:
 def harness_iterate(args: dict[str, Any]) -> dict[str, Any]:
     """Run one full propose→validate→benchmark cycle and log it.
 
-    REQUIRES: harness_init called.
+    REQUIRES: harness_init called. When config.judges is configured, the
+    judge-separation contract is enforced before any LLM call.
     RETURNS: Iteration summary (counts, frontier snapshot, log record).
     NEXT: harness_frontier, harness_evolution_log.
     """
+    config = _get_config()
+    panel = getattr(config, "judges", None)
+    if panel is not None and panel.is_configured():
+        try:
+            panel.assert_separated()
+        except CrucibleError as exc:
+            return {"error": f"[{type(exc).__name__}] {exc}"}
+
     opt = _get_harness_optimizer(args["tree_name"])
     if opt is None:
         return {"error": "[StateError] call harness_init first"}
@@ -6027,6 +6218,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "design_generate_hypotheses": design_generate_hypotheses,
     "design_batch_from_hypotheses": design_batch_from_hypotheses,
     "design_enqueue_batch": design_enqueue_batch,
+    "design_synthesize_from_findings": design_synthesize_from_findings,
     # Context tools
     "context_get_analysis": context_get_analysis,
     "context_push_finding": context_push_finding,
@@ -6108,6 +6300,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "tree_create": tree_create,
     "tree_get": tree_get,
     "tree_expand_node": tree_expand_node,
+    "tree_expand_grpo": tree_expand_grpo,
     "tree_auto_expand": tree_auto_expand,
     "tree_prune": tree_prune,
     "tree_enqueue_pending": tree_enqueue_pending,

@@ -49,6 +49,31 @@ class TestDesignBatch:
         names = [exp["name"] for exp in batch]
         assert "baseline_control" in names
 
+    def test_carries_parent_finding_ids_into_batch_tags(self, tmp_path):
+        # Synthesis hypotheses carry parent_finding_ids; provenance must
+        # reach the batch entry's tags so it survives W&B + leaderboard
+        # publication. Per CLAUDE.md guarantee.
+        state = _make_state(tmp_path)
+        hyp = _make_hypothesis("synth_exp")
+        hyp["parent_finding_ids"] = ["finding_aaa", "finding_bbb"]
+        batch = design_batch(
+            [hyp], state, tier="proxy", backend="torch", iteration=1,
+            baseline_config=None,
+        )
+        synth_entry = next(e for e in batch if e["name"] == "synth_exp")
+        assert "parent:finding_aaa" in synth_entry["tags"]
+        assert "parent:finding_bbb" in synth_entry["tags"]
+
+    def test_no_parent_tags_when_field_absent(self, tmp_path):
+        state = _make_state(tmp_path)
+        hyp = _make_hypothesis("plain_exp")
+        batch = design_batch(
+            [hyp], state, tier="proxy", backend="torch", iteration=1,
+            baseline_config=None,
+        )
+        entry = next(e for e in batch if e["name"] == "plain_exp")
+        assert not any(t.startswith("parent:") for t in entry["tags"])
+
     def test_baseline_excluded_if_no_config(self, tmp_path):
         state = _make_state(tmp_path)
         hyps = [_make_hypothesis("exp1")]

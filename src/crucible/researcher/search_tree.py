@@ -271,6 +271,7 @@ class SearchTree:
                 "pruned_at": None,
                 "prune_reason": None,
                 "tags": child_spec.get("tags", []),
+                "group_advantage": child_spec.get("group_advantage"),
             }
 
             self.nodes[node_id] = node

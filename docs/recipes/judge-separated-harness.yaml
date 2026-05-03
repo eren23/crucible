@@ -1,0 +1,84 @@
+name: judge-separated-harness
+title: Run a harness optimization with the GIANTS judge-separation contract
+created_at: '2026-05-03T00:00:00+00:00'
+created_by: crucible-core
+goal: |
+  Configure a harness optimization run with separate reward and eval
+  judges, then iterate. Catches reward-hacking — the dominant failure
+  mode of LM-as-judge loops — before any pod time is consumed.
+
+  Mirrors GIANTS (https://giants-insights.github.io/): the reward judge
+  is a small/cheap model used during selection; the eval judge is a
+  different family used for final ranking. Optional audit_judge is a
+  third independent model for spot-checks.
+
+project_spec: ''
+environment:
+  notes: |
+    Set the API keys for whichever providers you put in the panel.
+    Crucible itself does not call these models — your orchestrator does.
+    The contract enforced here is purely about *which* models you must
+    declare.
+  required_yaml:
+    - file: crucible.yaml
+      block: judges
+      fields:
+        reward_judge:
+          model: gemini-2.5-flash
+          family: gemini
+        eval_judge:
+          model: claude-opus-4-7
+          family: claude
+        audit_judge:
+          model: qwen3-14b
+          family: qwen
+        enforce_separation: true
+
+steps:
+  - tool: config_get_project
+    purpose: Confirm judges block is populated.
+    expect:
+      'judges.reward_judge.model': '<non-empty>'
+      'judges.eval_judge.model': '<non-empty>'
+      'judges.enforce_separation': true
+
+  - tool: harness_init
+    purpose: Initialize the harness optimizer for a domain spec.
+    args:
+      tree_name: my-harness-run
+      domain_spec: nlp_classification
+      n_candidates: 4
+
+  - tool: harness_iterate
+    purpose: |
+      Run one full propose→validate→benchmark cycle. Crucible asserts the
+      judge panel is properly separated BEFORE any LLM call. If the panel
+      is mis-configured (same model or same family on reward+eval), the
+      tool returns {"error": "[ConfigError] Judge-separation contract
+      violated: ..."} and no pods spin up.
+    args:
+      tree_name: my-harness-run
+
+  - tool: harness_frontier
+    purpose: Inspect the resulting Pareto frontier.
+    args:
+      tree_name: my-harness-run
+
+gotchas:
+  - issue: |
+      ConfigError "reward_judge and eval_judge use the same model" — you
+      pasted the same model on both panels.
+    fix: |
+      Pick a different family entirely for each. Standard GIANTS recipe is
+      gemini-2.5-flash (reward) + claude-opus or gpt-5 (eval). Cheap +
+      strong, different vendors.
+  - issue: |
+      ConfigError "same family" — you set claude-opus on one and
+      claude-haiku on the other.
+    fix: |
+      Cross vendor lines. Same family means correlated reward hacks.
+  - issue: I want to relax the gate during a one-off comparison run.
+    fix: |
+      Set judges.enforce_separation: false in crucible.yaml. The contract
+      then emits a UserWarning instead of raising. Strongly NOT recommended
+      for any run whose results inform a publication or downstream decision.

@@ -105,6 +105,126 @@ class WandbConfig:
 
 
 @dataclass
+class JudgeConfig:
+    """A single LM-as-judge endpoint.
+
+    ``family`` groups models that share weights / training lineage and would
+    therefore exhibit correlated reward-hacking. Use the major-vendor or
+    open-weights line: ``"claude"``, ``"gemini"``, ``"openai"``, ``"qwen"``,
+    ``"llama"``, etc.
+    """
+    model: str = ""
+    family: str = ""
+    prompt_template: str = ""
+
+
+@dataclass
+class JudgePanel:
+    """Two-or-three judge configuration enforcing GIANTS-style separation.
+
+    Any LM-as-judge loop in Crucible (harness optimizer, GRPO tree expansion)
+    must use distinct judges for reward (selection) and evaluation (final
+    ranking). Same family = correlated failure modes; same model = identical
+    reward hacks. ``audit_judge`` is an optional independent third judge for
+    spot-checks; when set it must also differ from the other two.
+
+    Unconfigured panels (empty model strings) skip enforcement — opt-in.
+    """
+    reward_judge: JudgeConfig = field(default_factory=JudgeConfig)
+    eval_judge: JudgeConfig = field(default_factory=JudgeConfig)
+    audit_judge: JudgeConfig | None = None
+    enforce_separation: bool = True
+
+    def is_configured(self) -> bool:
+        return bool(self.reward_judge.model) and bool(self.eval_judge.model)
+
+    def assert_separated(self) -> None:
+        """Raise ConfigError when reward/eval/audit judges collide.
+
+        Skipped when the panel is unconfigured. When ``enforce_separation``
+        is False, violations emit a UserWarning instead of raising.
+        """
+        from crucible.core.errors import ConfigError
+
+        if not self.is_configured():
+            return
+
+        violations: list[str] = []
+
+        # Configured panels must declare family — without it, family-level
+        # separation cannot be enforced and reward hacks slip through.
+        if not self.reward_judge.family:
+            violations.append(
+                "reward_judge.family is required when reward_judge.model is set"
+            )
+        if not self.eval_judge.family:
+            violations.append(
+                "eval_judge.family is required when eval_judge.model is set"
+            )
+        if self.audit_judge is not None and self.audit_judge.model and not self.audit_judge.family:
+            violations.append(
+                "audit_judge.family is required when audit_judge.model is set"
+            )
+
+        if self.reward_judge.model == self.eval_judge.model:
+            violations.append(
+                f"reward_judge and eval_judge use the same model "
+                f"({self.reward_judge.model!r}); reward-hacking will go undetected"
+            )
+        elif (
+            self.reward_judge.family
+            and self.eval_judge.family
+            and self.reward_judge.family == self.eval_judge.family
+        ):
+            violations.append(
+                f"reward_judge and eval_judge are from the same family "
+                f"({self.reward_judge.family!r}); separate the judge families"
+            )
+
+        if self.audit_judge is not None and self.audit_judge.model:
+            if self.audit_judge.model in (self.reward_judge.model, self.eval_judge.model):
+                violations.append(
+                    f"audit_judge model {self.audit_judge.model!r} collides with "
+                    f"reward_judge or eval_judge"
+                )
+            elif self.audit_judge.family and self.audit_judge.family in (
+                self.reward_judge.family, self.eval_judge.family
+            ):
+                violations.append(
+                    f"audit_judge family {self.audit_judge.family!r} collides with "
+                    f"reward_judge or eval_judge family"
+                )
+
+        if not violations:
+            return
+
+        message = "Judge-separation contract violated: " + "; ".join(violations)
+        if self.enforce_separation:
+            raise ConfigError(message)
+        import warnings
+        warnings.warn(message, UserWarning, stacklevel=2)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "JudgePanel":
+        def _judge(d: dict[str, Any] | None) -> JudgeConfig:
+            d = d or {}
+            return JudgeConfig(
+                model=str(d.get("model", "") or ""),
+                family=str(d.get("family", "") or ""),
+                prompt_template=str(d.get("prompt_template", "") or ""),
+            )
+
+        audit_raw = raw.get("audit_judge")
+        audit = _judge(audit_raw) if audit_raw else None
+        return cls(
+            reward_judge=_judge(raw.get("reward_judge")),
+            eval_judge=_judge(raw.get("eval_judge")),
+            audit_judge=audit,
+            enforce_separation=bool(raw.get("enforce_separation", True)),
+        )
+
+
+@dataclass
 class HfCollabConfig:
     """HuggingFace Hub collaboration backbone (opt-in).
 
@@ -204,6 +324,7 @@ class ProjectConfig:
     researcher: ResearcherConfig = field(default_factory=ResearcherConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     hf_collab: HfCollabConfig = field(default_factory=HfCollabConfig)
+    judges: JudgePanel = field(default_factory=JudgePanel)
     execution_policy: ExecutionPolicyConfig = field(default_factory=ExecutionPolicyConfig)
     fleet: FleetConfig = field(default_factory=FleetConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)
@@ -394,6 +515,7 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         researcher=_build_researcher(raw.get("researcher", {})),
         wandb=_build_wandb(raw.get("wandb", {})),
         hf_collab=_build_hf_collab(raw.get("hf_collab", {})),
+        judges=JudgePanel.from_dict(raw.get("judges", {}) or {}),
         execution_policy=_build_execution_policy(raw.get("execution_policy", {})),
         fleet=_build_fleet(raw.get("fleet", {})),
         plugins=_build_plugins(raw.get("plugins", {})),

@@ -787,6 +787,66 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="design_synthesize_from_findings",
+        description=(
+            "GIANTS-style synthesis: mine pairs of hub findings, return one orchestrator "
+            "prompt bundle per pair so your LLM can predict the experiment that "
+            "synthesizes both parents.\n\n"
+            "REQUIRES: Hub initialized with at least 2 findings in the requested scope.\n"
+            "RETURNS: {policy, scope, pool_size, pairs: [{system, user, schema, parent_finding_ids}], next}\n"
+            "NEXT: For each bundle, call your LLM with system+user, parse against schema, "
+            "then design_batch_from_hypotheses with the merged hypothesis list."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "k": {
+                    "type": "integer",
+                    "description": "Maximum number of pairs to mine.",
+                    "default": 4,
+                },
+                "policy": {
+                    "type": "string",
+                    "enum": ["random", "same_track", "cross_track"],
+                    "description": (
+                        "Pair-mining policy. 'random' samples any pair; 'same_track' "
+                        "draws within one research track; 'cross_track' draws across tracks."
+                    ),
+                    "default": "random",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["global", "track"],
+                    "description": (
+                        "Hub scope to draw findings from. Synthesis is hub-graph-shaped — "
+                        "promote project findings to track or global first via finding_promote."
+                    ),
+                    "default": "global",
+                },
+                "track": {
+                    "type": "string",
+                    "description": "Track name when scope='track'.",
+                    "default": "",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Filter by finding status (e.g., 'active').",
+                    "default": "active",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tag filter; pairs match if either finding has any tag.",
+                },
+                "seed": {
+                    "type": "integer",
+                    "description": "Optional RNG seed for deterministic pair sampling.",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="design_batch_from_hypotheses",
         description=(
             "Convert hypotheses to an executable experiment batch with optional baseline control.\n\n"
@@ -1832,6 +1892,56 @@ TOOLS: list[Tool] = [
                 },
             },
             "required": ["name", "parent_node_id", "children"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="tree_expand_grpo",
+        description=(
+            "GRPO-style expansion: keep top-K candidates by group-relative advantage.\n\n"
+            "REQUIRES: name, parent_node_id, candidates list (each with name, config, judge_score). "
+            "When config.judges is configured, the judge-separation contract is enforced — "
+            "reward_judge and eval_judge must differ in model AND family.\n"
+            "RETURNS: {status, new_node_ids, kept_indices, advantages, normalization, total_nodes}\n"
+            "NEXT: tree_enqueue_pending then dispatch_experiments."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Tree name."},
+                "parent_node_id": {"type": "string", "description": "Node ID to expand."},
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "config": {"type": "object", "additionalProperties": {"type": "string"}},
+                            "hypothesis": {"type": "string"},
+                            "rationale": {"type": "string"},
+                            "tags": {"type": "array", "items": {"type": "string"}},
+                            "judge_score": {
+                                "type": "number",
+                                "description": "Score from your eval judge (any scale; we normalize within the group).",
+                            },
+                        },
+                        "required": ["name", "config", "judge_score"],
+                    },
+                    "description": "Pre-scored candidate children.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of children to keep after advantage normalization.",
+                    "default": 2,
+                },
+                "advantage_normalization": {
+                    "type": "string",
+                    "enum": ["z_score", "min_max"],
+                    "description": "Normalization to apply within the candidate group.",
+                    "default": "z_score",
+                },
+            },
+            "required": ["name", "parent_node_id", "candidates"],
             "additionalProperties": False,
         },
     ),

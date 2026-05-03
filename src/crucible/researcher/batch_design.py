@@ -65,11 +65,18 @@ def design_batch(
         config_with_name = dict(config)
         # Same auto-derivation as the baseline path.
         config_with_name.setdefault("CRUCIBLE_VARIANT_NAME", f"{hyp_name}_iter_{iteration}")
+        tags = ["autonomous", hyp.get("family", "unknown"), f"iter_{iteration}"]
+        # Synthesis hypotheses (from design_synthesize_from_findings) carry
+        # parent_finding_ids — propagate as batch tags so provenance reaches
+        # W&B run tags and the leaderboard.
+        for fid in hyp.get("parent_finding_ids") or []:
+            if fid:
+                tags.append(f"parent:{fid}")
         batch.append(
             {
                 "name": hyp_name,
                 "config": config_with_name,
-                "tags": ["autonomous", hyp.get("family", "unknown"), f"iter_{iteration}"],
+                "tags": tags,
                 "tier": tier,
                 "backend": backend,
                 "priority": int(hyp.get("confidence", 0.5) * 100),

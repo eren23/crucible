@@ -143,6 +143,26 @@ contract above.
 
 **Run-name policy**: `WANDB_RUN_NAME` defaults to `exp_id` (UUID-ish), which collides across variants in the same batch. `enqueue_experiment` and `design_enqueue_batch` return a `warnings` list when neither `WANDB_RUN_NAME` nor `CRUCIBLE_VARIANT_NAME` are set in the config. The `run_project` path auto-derives `WANDB_RUN_NAME` from the variant name.
 
+## Judge-separation contract — LM-as-judge loops
+
+Any LM-as-judge loop in Crucible (currently: `harness_iterate`, `tree_expand_grpo`) must declare a `JudgePanel` with distinct reward and eval judges in different families. Same model = identical reward hacks; same family = correlated failure modes. Mirrors the GIANTS recipe (https://giants-insights.github.io/) — small/cheap reward judge, different-family eval judge, optional independent audit judge.
+
+Configure in `crucible.yaml`:
+
+```yaml
+judges:
+  reward_judge: {model: gemini-2.5-flash, family: gemini}
+  eval_judge:   {model: claude-opus-4-7, family: claude}
+  audit_judge:  {model: qwen3-14b, family: qwen}   # optional
+  enforce_separation: true   # default; set false to downgrade to warning
+```
+
+When `judges:` is absent or all model strings are blank, the panel is *unconfigured* and enforcement is skipped — opt-in only. Tools call `panel.assert_separated()` before any LLM work; mis-separated panels raise `ConfigError` before pod time is consumed. Full doc: `docs/judge-separation.md`. Canonical recipe: `docs/recipes/judge-separated-harness.yaml`.
+
+## GIANTS-style synthesis hypotheses — `design_synthesize_from_findings`
+
+Mines pairs of hub findings (cross-project / cross-track) and returns one orchestrator-shaped prompt bundle per pair so your LLM can predict the experiment that synthesizes both parents. Pure orchestrator-contract: no internal LLM call. Pair-mining policies: `random`, `same_track`, `cross_track`. Each generated hypothesis carries `parent_finding_ids` so provenance reaches the batch and W&B run tags. Recipe: `docs/recipes/synthesis-driven-research.yaml`.
+
 ## Common Commands
 
 ```bash
@@ -245,7 +265,7 @@ Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/di
 `provision_nodes` also accepts optional `network_volume_id` and `template_id` params.
 
 **Tier 2 — Experiment Design:**
-`version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`
+`version_save_design`, `version_list_designs`, `version_run_design`, `version_get_design`, `config_get_presets`, `config_get_project`, `design_synthesize_from_findings` (GIANTS-style hypothesis seeding from cross-project hub findings — pure orchestrator-contract, no internal LLM call)
 
 **Tier 3 — Research Context:**
 `context_push_finding`, `context_get_findings`, `get_research_briefing`, `note_add`, `note_search`, `note_get`
@@ -263,9 +283,9 @@ Plus: `get_fleet_status` (with optional `include_metrics` for live GPU/memory/di
 - `agent_health_check(recent_calls)` — Optional doom-loop detector. Stateless: orchestrator passes its recent tool calls (oldest first), Crucible runs cycle / repetition detection and returns `{ok, pattern?, hint?}`. Suppresses false-positives on legitimate polling (same args, varying results). Equivalent library entry: `from crucible.core import detect_doom_loop`.
 
 **Tier 7 — Tree Search (branching experiment exploration):**
-`tree_create` → `tree_enqueue_pending` → `dispatch_experiments` → `collect_results` → `tree_sync_results` → `tree_get` → `tree_expand_node` or `tree_auto_expand` → repeat
+`tree_create` → `tree_enqueue_pending` → `dispatch_experiments` → `collect_results` → `tree_sync_results` → `tree_get` → `tree_expand_node` or `tree_auto_expand` or `tree_expand_grpo` → repeat
 
-Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, and agent-directed selection policies.
+Plus: `tree_prune`, `tree_list`. Supports UCB1, greedy, epsilon-greedy, agent-directed, and GRPO selection policies. `tree_expand_grpo` takes pre-scored candidates from the orchestrator's eval judge, computes group-relative advantage (z-score / min-max), keeps top-K, and stores `group_advantage` per kept node. Honors the judge-separation contract when `config.judges` is configured.
 
 **Tier 8 — Training Generalization:**
 `config_get_modalities` — List available training backends with modality tags, data adapters, and objectives.
