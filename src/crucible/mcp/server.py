@@ -3322,8 +3322,14 @@ TOOLS: list[Tool] = [
             "Hypothesis: adds items to state.hypotheses (ready for design_batch_from_hypotheses).\n"
             "Reflection: updates state.beliefs + returns promote/kill lists the orchestrator "
             "can then apply via existing fleet tools.\n\n"
+            "Pass state_snapshot — the dict returned by the matching research_request_prompt — "
+            "to enable stale-submit detection. If state has advanced between request and submit "
+            "(another loop iteration ran, or a concurrent process mutated state), the call fails "
+            "with StaleSubmitError so the orchestrator re-requests the prompt with fresh context "
+            "rather than applying stale reasoning. Omit state_snapshot to skip the check.\n\n"
             "REQUIRES: stage + response matching the schema from research_request_prompt.\n"
             "RETURNS: {applied, summary, counts...}\n"
+            "ERRORS: StaleSubmitError when state_snapshot is provided and state has advanced.\n"
             "NEXT: (hypothesis) design_batch_from_hypotheses → design_enqueue_batch → dispatch_experiments.\n"
             "      (reflection) examine promote_names/kill_names; add promoted hypotheses if desired."
         ),
@@ -3339,6 +3345,11 @@ TOOLS: list[Tool] = [
                     "description": "Parsed response object OR raw JSON string. Shape matches the schema from research_request_prompt.",
                 },
                 "iteration": {"type": "integer", "default": 0},
+                "state_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot dict from the matching research_request_prompt call. When present, enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
             },
             "required": ["stage", "response"],
             "additionalProperties": False,

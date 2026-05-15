@@ -1627,7 +1627,8 @@ def research_submit(args: dict[str, Any]) -> dict[str, Any]:
 
     Accepts either a parsed response dict (matching the schema returned
     by research_request_prompt) or a raw JSON string. Mutations persist
-    to ResearchState.
+    to ResearchState. Pass the ``state_snapshot`` from the matching
+    research_request_prompt call to enable stale-submit detection.
     """
     from crucible.researcher import orchestrator_api as oa
     from crucible.researcher.state import ResearchState
@@ -1649,6 +1650,7 @@ def research_submit(args: dict[str, Any]) -> dict[str, Any]:
         config=config,
         state=state,
         iteration=int(args.get("iteration", 0)),
+        state_snapshot=args.get("state_snapshot"),
     )
 
 

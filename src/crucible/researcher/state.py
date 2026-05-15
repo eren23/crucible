@@ -11,6 +11,7 @@ fresh read from disk so callers see peer writes before mutating.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import tempfile
@@ -152,21 +153,48 @@ class ResearchState:
         self._hours_used = 0.0
         self._load()
 
-    def snapshot(self) -> dict[str, int]:
+    def snapshot(self) -> dict[str, Any]:
         """Return an opaque snapshot for stale-submit detection.
 
-        Tracks the four mutable lists on ``ResearchState`` plus
-        ``budget_hours_used`` for completeness. Iteration is intentionally
-        not part of the snapshot — it is caller-controlled and would
-        cause spurious mismatches when the same state is queried at
-        different loop turns. Loop turn identity is tracked separately
-        by the autonomous-loop session driver.
+        Includes both four list-length counters AND a content hash so the
+        guard catches mutations that don't change a list length:
+        ``mark_hypothesis`` (status flip in place), ``update_beliefs``
+        (wholesale replacement with same length), ``charge_hours``
+        (budget-only mutation). The hash is a truncated sha256 of a
+        stable JSON serialization of all mutable fields.
+
+        Iteration is intentionally not part of the snapshot — it is
+        caller-controlled and would cause spurious mismatches when the
+        same state is queried at different loop turns. Loop turn
+        identity is tracked separately by the autonomous-loop session
+        driver.
         """
+        digest_input = json.dumps(
+            {
+                "hypotheses": [
+                    (h.get("hypothesis", h.get("name", "")), h.get("status", "pending"))
+                    for h in self.hypotheses
+                ],
+                "history": [
+                    (rec.get("experiment", {}).get("name", ""), rec.get("ts", ""))
+                    for rec in self.history
+                ],
+                "beliefs": list(self.beliefs),
+                "findings": [
+                    (f.get("finding", ""), f.get("ts", ""), f.get("category", ""))
+                    for f in self.findings
+                ],
+                "hours_used": round(self._hours_used, 6),
+            },
+            sort_keys=True,
+        )
+        content_hash = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
         return {
             "history_len": len(self.history),
             "hypotheses_len": len(self.hypotheses),
             "beliefs_len": len(self.beliefs),
             "findings_len": len(self.findings),
+            "content_hash": content_hash,
         }
 
     # ------------------------------------------------------------------

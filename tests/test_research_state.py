@@ -255,6 +255,40 @@ class TestSnapshot:
         snap = state.snapshot()
         assert "iteration" not in snap
 
+    def test_snapshot_detects_status_flip(self, tmp_path):
+        """mark_hypothesis flips status in place without changing length —
+        snapshot must still notice via content_hash."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.add_hypothesis({"hypothesis": "h1", "config": {}})
+        before = state.snapshot()
+        state.mark_hypothesis("h1", "tested")
+        after = state.snapshot()
+        assert before != after
+        assert before["hypotheses_len"] == after["hypotheses_len"] == 1
+        assert before["content_hash"] != after["content_hash"]
+
+    def test_snapshot_detects_wholesale_belief_replacement(self, tmp_path):
+        """update_beliefs replaces beliefs wholesale; same length must still
+        trip the snapshot via content_hash."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.update_beliefs(["alpha", "beta"])
+        before = state.snapshot()
+        state.update_beliefs(["gamma", "delta"])  # same length, different content
+        after = state.snapshot()
+        assert before != after
+        assert before["beliefs_len"] == after["beliefs_len"] == 2
+        assert before["content_hash"] != after["content_hash"]
+
+    def test_snapshot_detects_budget_charge(self, tmp_path):
+        """charge_hours mutates budget without touching any list — snapshot
+        must still notice."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        before = state.snapshot()
+        state.charge_hours(2.5)
+        after = state.snapshot()
+        assert before != after
+        assert before["content_hash"] != after["content_hash"]
+
 
 # ---------------------------------------------------------------------------
 # Concurrency — write_lock
