@@ -1654,6 +1654,66 @@ def research_submit(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def autonomous_research_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for the autonomous research loop.
+
+    Verb dispatch (action arg):
+      - start: begin a session, return first hypothesis prompt
+      - submit: apply response, advance stage, return next prompt or done
+      - status: read-only session state
+      - cancel: terminate session
+
+    Crucible never calls an LLM; the orchestrator handles LLM round-trips
+    between submits. State persistence under .crucible/autonomous_sessions
+    survives process restarts.
+    """
+    from crucible.researcher import autonomous_session as autos
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            return autos.action_start(
+                config,
+                iterations=int(args.get("iterations", 5)),
+                tier=str(args.get("tier", "proxy")),
+                focus_family=str(args.get("focus_family", "") or ""),
+                budget_usd=args.get("budget_usd"),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop submit: 'session_id' is required")
+            return autos.action_submit(
+                config,
+                session_id=str(session_id),
+                response=args.get("response"),
+                state_snapshot=args.get("state_snapshot"),
+            )
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop status: 'session_id' is required")
+            return autos.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop cancel: 'session_id' is required")
+            return autos.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"autonomous_research_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'status', 'cancel'."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 # ---------------------------------------------------------------------------
 # W&B tools
 # ---------------------------------------------------------------------------
@@ -6454,6 +6514,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Orchestrator-driven research loop (default path — no LLM keys in Crucible)
     "research_request_prompt": research_request_prompt,
     "research_submit": research_submit,
+    "autonomous_research_loop": autonomous_research_loop,
     # W&B tools
     "wandb_log_image": wandb_log_image,
     "wandb_get_url": wandb_get_url,

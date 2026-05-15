@@ -3385,6 +3385,88 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="autonomous_research_loop",
+        description=(
+            "Persisted-session driver for the autonomous research loop. Crucible "
+            "never calls an LLM — the orchestrator handles LLM round-trips between "
+            "submits. State persists under .crucible/autonomous_sessions/{id}.yaml "
+            "so sessions survive process restarts.\n\n"
+            "State machine per iteration: hypothesis → (submit) → reflection → "
+            "(submit) → next iteration | done.\n\n"
+            "Actions:\n"
+            "- 'start': begin a session, return the first hypothesis prompt. If a "
+            "  non-terminal session already exists for this project, returns it "
+            "  (idempotent — only one autonomous session at a time per project).\n"
+            "- 'submit': apply the orchestrator-supplied response under "
+            "  ResearchState.write_lock + state_snapshot guard, advance stage, "
+            "  return next prompt or {next_prompt: null, session_status: 'done'}.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled, persist checkpoint.\n\n"
+            "Between submits, the orchestrator drives experiment dispatch + result "
+            "collection via existing fleet tools — submit only advances the LLM "
+            "stage. After hypothesis submit, run design_batch_from_hypotheses → "
+            "design_enqueue_batch → dispatch_experiments → collect_results; then "
+            "submit reflection.\n\n"
+            "Doom-loop detection: same prompt fingerprint for 5 iterations in a "
+            "row trips the guard and the session enters 'error' state.\n\n"
+            "REQUIRES: action; for submit/status/cancel also session_id; for "
+            "submit also response.\n"
+            "RETURNS: start → first prompt + session_id. submit → "
+            "{stage_applied, next_stage, next_prompt}. status → session state. "
+            "cancel → {checkpoint_path}.\n"
+            "ERRORS: StaleSubmitError when state_snapshot mismatched. "
+            "DoomLoopDetected when prompts repeat. AutonomousSessionError when "
+            "session terminal."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "status", "cancel"],
+                    "description": "Session lifecycle verb.",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel; ignored by start.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "tier": {
+                    "type": "string",
+                    "default": "proxy",
+                    "description": "Experiment tier for hypothesis prompts (start only).",
+                },
+                "focus_family": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional — bias hypothesis generation toward a family (start only).",
+                },
+                "budget_usd": {
+                    "type": "number",
+                    "description": "Optional total spend cap in USD (start only). Not yet enforced — Phase 1.8.",
+                },
+                "response": {
+                    "description": "Orchestrator-supplied response for the current stage (submit only).",
+                },
+                "state_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot from the previous prompt (submit only). Enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    ),
     # -----------------------------------------------------------------------
     # Notebook exporter
     # -----------------------------------------------------------------------
