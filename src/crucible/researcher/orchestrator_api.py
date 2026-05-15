@@ -235,50 +235,59 @@ def submit_response(
     if stage not in _VALID_STAGES:
         raise ResearcherError(f"Unknown stage {stage!r}. Valid: {_VALID_STAGES}")
 
-    if state_snapshot is not None:
-        current = state.snapshot()
-        if current != state_snapshot:
-            raise StaleSubmitError(
-                f"State has advanced since request_prompt was issued. "
-                f"submitted_snapshot={state_snapshot} current_snapshot={current}. "
-                f"Re-request the prompt with the latest state and retry."
-            )
-
     if stage == "briefing":
         raise ResearcherError(
             "briefing stage is read-only — no submit needed (it only returns state markdown)."
         )
 
-    if stage == "hypothesis":
-        raw_list = _extract_hypotheses(response)
-        hypotheses = _validate_hypotheses(raw_list, iteration)
-        applied = apply_hypotheses(state, hypotheses)
-        state.save()
-        return {
-            "applied": applied > 0,
-            "hypotheses_added": applied,
-            "summary": f"Added {applied} hypothesis item(s) to state.",
-        }
+    # Acquire write_lock around the entire check-then-mutate sequence. The
+    # snapshot guard, the apply step, and the save() must all happen atomically
+    # vs other writers; otherwise two concurrent submit_response calls can both
+    # pass the snapshot check (TOCTOU race) and then one overwrites the other
+    # via save()'s full-file rewrite, losing the first writer's data.
+    # write_lock's _reload_in_place on entry also means the snapshot check
+    # runs against the latest persisted state, not a possibly-stale in-memory
+    # view loaded before the lock was acquired.
+    with state.write_lock():
+        if state_snapshot is not None:
+            current = state.snapshot()
+            if current != state_snapshot:
+                raise StaleSubmitError(
+                    f"State has advanced since request_prompt was issued. "
+                    f"submitted_snapshot={state_snapshot} current_snapshot={current}. "
+                    f"Re-request the prompt with the latest state and retry."
+                )
 
-    # stage == "reflection"
-    parsed = _extract_reflection(response)
-    if parsed is None:
-        raise ResearcherError(
-            "reflection submit: response is not a valid reflection object "
-            "(expected {beliefs, surprises, promote, kill} — all optional lists)."
+        if stage == "hypothesis":
+            raw_list = _extract_hypotheses(response)
+            hypotheses = _validate_hypotheses(raw_list, iteration)
+            applied = apply_hypotheses(state, hypotheses)
+            state.save()
+            return {
+                "applied": applied > 0,
+                "hypotheses_added": applied,
+                "summary": f"Added {applied} hypothesis item(s) to state.",
+            }
+
+        # stage == "reflection"
+        parsed = _extract_reflection(response)
+        if parsed is None:
+            raise ResearcherError(
+                "reflection submit: response is not a valid reflection object "
+                "(expected {beliefs, surprises, promote, kill} — all optional lists)."
+            )
+        counts = apply_reflection(state, parsed)
+        state.save()
+        counts["applied"] = sum(counts.values()) > 0
+        counts["summary"] = (
+            f"Reflection applied: {counts['beliefs_updated']} beliefs, "
+            f"{counts['promote']} promote, {counts['kill']} kill, "
+            f"{counts['surprises']} surprises."
         )
-    counts = apply_reflection(state, parsed)
-    state.save()
-    counts["applied"] = sum(counts.values()) > 0
-    counts["summary"] = (
-        f"Reflection applied: {counts['beliefs_updated']} beliefs, "
-        f"{counts['promote']} promote, {counts['kill']} kill, "
-        f"{counts['surprises']} surprises."
-    )
-    # Callers may still want the raw promote/kill lists to drive fleet tools:
-    counts["promote_names"] = list(parsed.get("promote", []))
-    counts["kill_names"] = list(parsed.get("kill", []))
-    return counts
+        # Callers may still want the raw promote/kill lists to drive fleet tools:
+        counts["promote_names"] = list(parsed.get("promote", []))
+        counts["kill_names"] = list(parsed.get("kill", []))
+        return counts
 
 
 # ---------------------------------------------------------------------------
