@@ -2,16 +2,45 @@
 
 Tracks hypothesis queue, experiment history, active beliefs, and budget.
 Storage format: JSONL with timestamped entries.
+
+Concurrency: multiple autonomous-loop sessions in the same project must
+not silently overwrite each other. ``write_lock()`` provides an advisory
+exclusive lock on ``{state_file}.lock`` using ``fcntl.flock``, plus a
+fresh read from disk so callers see peer writes before mutating.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+from crucible.core.errors import StateLockTimeout
 from crucible.core.log import utc_now_iso
+
+DEFAULT_LOCK_TIMEOUT_SECONDS = 30.0
+_LOCK_SUFFIX = ".lock"
+
+_WINDOWS_FALLBACK_WARNED = False
+
+
+def _warn_windows_fallback_once() -> None:
+    global _WINDOWS_FALLBACK_WARNED
+    if _WINDOWS_FALLBACK_WARNED:
+        return
+    _WINDOWS_FALLBACK_WARNED = True
+    try:
+        from crucible.core.log import log_warn
+        log_warn(
+            "ResearchState.write_lock: fcntl unavailable on this platform; "
+            "concurrent autonomous-loop sessions may corrupt research_state.jsonl."
+        )
+    except ImportError:
+        pass
 
 
 class ResearchState:
@@ -26,6 +55,107 @@ class ResearchState:
         self.findings: list[dict[str, Any]] = []
         self._hours_used: float = 0.0
         self._load()
+
+    # ------------------------------------------------------------------
+    # Concurrency safety
+    # ------------------------------------------------------------------
+
+    def _lock_path(self) -> Path:
+        return self.state_file.with_suffix(self.state_file.suffix + _LOCK_SUFFIX)
+
+    @contextmanager
+    def write_lock(
+        self,
+        *,
+        timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+        poll_interval: float = 0.1,
+    ) -> Iterator["ResearchState"]:
+        """Acquire an exclusive advisory lock + reload from disk.
+
+        Use for any read-modify-write sequence on the research state file:
+
+        .. code-block:: python
+
+            with state.write_lock():
+                state.add_hypothesis(...)
+                state.save()
+
+        On entry, the lock is acquired and ``_load()`` is called so the
+        caller sees the latest peer writes. The caller is responsible for
+        calling :meth:`save` before exiting the block — otherwise in-memory
+        mutations are lost on the next :meth:`_load`.
+
+        Raises :class:`StateLockTimeout` if the lock cannot be acquired
+        within ``timeout`` seconds. POSIX-only — on Windows, falls back to
+        a no-op (with a one-time warning) and concurrency safety is lost.
+        """
+        try:
+            import fcntl
+        except ImportError:
+            _warn_windows_fallback_once()
+            self._reload_in_place()
+            yield self
+            return
+
+        lock_path = self._lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + timeout
+        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as exc:
+                    if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise StateLockTimeout(
+                            f"Could not acquire research-state lock at {lock_path} "
+                            f"within {timeout:.1f}s — another Crucible process may "
+                            f"be holding it."
+                        ) from exc
+                    time.sleep(poll_interval)
+            self._reload_in_place()
+            try:
+                yield self
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+        finally:
+            os.close(fd)
+
+    def _reload_in_place(self) -> None:
+        """Drop in-memory state and reload from disk.
+
+        Called inside ``write_lock`` so the caller sees the latest peer
+        writes before modifying. Equivalent to constructing a fresh
+        ``ResearchState`` against the same file, without changing the
+        object identity.
+        """
+        self.hypotheses = []
+        self.history = []
+        self.beliefs = []
+        self.findings = []
+        self._hours_used = 0.0
+        self._load()
+
+    def snapshot(self, iteration: int = 0) -> dict[str, int]:
+        """Return an opaque snapshot for stale-submit detection.
+
+        Matches the shape returned by
+        :func:`crucible.researcher.orchestrator_api.request_prompt` so
+        callers can pass it back into
+        :func:`~crucible.researcher.orchestrator_api.submit_response`.
+        """
+        return {
+            "iteration": iteration,
+            "history_len": len(self.history),
+            "hypotheses_len": len(self.hypotheses),
+            "beliefs_len": len(self.beliefs),
+        }
 
     # ------------------------------------------------------------------
     # Persistence

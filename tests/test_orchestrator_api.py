@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 
 from crucible.core.config import load_config
-from crucible.core.errors import ResearcherError
+from crucible.core.errors import ResearcherError, StaleSubmitError
 from crucible.researcher import orchestrator_api as oa
 from crucible.researcher.state import ResearchState
 
@@ -293,3 +293,85 @@ def test_request_then_submit_roundtrip(state_in_project):
     result = oa.submit_response("hypothesis", canned, config, state)
     assert result["applied"] is True
     assert result["hypotheses_added"] == 1
+
+
+# ---------------------------------------------------------------------------
+# state_snapshot enforcement (stale-submit protection)
+# ---------------------------------------------------------------------------
+
+
+def _canned_hypothesis_response() -> dict:
+    return {
+        "hypotheses": [
+            {
+                "hypothesis": "Test",
+                "name": "test_hyp",
+                "expected_impact": 0.01,
+                "confidence": 0.5,
+                "config": {"MODEL_FAMILY": "baseline"},
+                "rationale": "test",
+                "family": "baseline",
+            }
+        ]
+    }
+
+
+def test_submit_response_accepts_matching_snapshot(state_in_project):
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=0)
+    snapshot = prompt["state_snapshot"]
+
+    # No mutation between request and submit — snapshot still matches.
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=0, state_snapshot=snapshot,
+    )
+    assert result["applied"] is True
+
+
+def test_submit_response_rejects_stale_snapshot(state_in_project):
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=0)
+    stale_snapshot = prompt["state_snapshot"]
+
+    # Concurrent process (simulated) advanced state by adding a hypothesis.
+    state.add_hypothesis({"name": "interloper", "config": {}})
+
+    with pytest.raises(StaleSubmitError, match="State has advanced"):
+        oa.submit_response(
+            "hypothesis", _canned_hypothesis_response(), config, state,
+            iteration=0, state_snapshot=stale_snapshot,
+        )
+
+
+def test_submit_response_without_snapshot_skips_check(state_in_project):
+    """state_snapshot is opt-in — callers that don't pass it bypass the check."""
+    state, _ = state_in_project
+    config = load_config()
+    oa.request_prompt("hypothesis", config, state, iteration=0)
+
+    # State advances, but caller doesn't supply a snapshot.
+    state.add_hypothesis({"name": "interloper", "config": {}})
+
+    # Submission succeeds — opt-in semantics preserve backward compat.
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=0,
+    )
+    assert result["applied"] is True
+
+
+def test_stale_submit_detects_iteration_mismatch(state_in_project):
+    """Same state but different iteration counter also trips the check."""
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=3)
+    stale_snapshot = prompt["state_snapshot"]  # iteration=3
+
+    with pytest.raises(StaleSubmitError):
+        oa.submit_response(
+            "hypothesis", _canned_hypothesis_response(), config, state,
+            iteration=4, state_snapshot=stale_snapshot,
+        )

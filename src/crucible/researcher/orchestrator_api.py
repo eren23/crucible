@@ -36,7 +36,7 @@ import json
 from typing import Any, Literal
 
 from crucible.core.config import ProjectConfig
-from crucible.core.errors import ResearcherError
+from crucible.core.errors import ResearcherError, StaleSubmitError
 from crucible.researcher.analysis import build_analysis
 from crucible.researcher.briefing import build_briefing
 from crucible.researcher.hypothesis import (
@@ -135,19 +135,15 @@ def request_prompt(
     """Build the orchestrator-facing prompt + schema for *stage*.
 
     Returns ``{stage, system, user, schema, state_snapshot}``. The
-    ``state_snapshot`` is an opaque marker (iteration counter + history
-    length) the orchestrator can pass back in ``submit_response`` for
-    sanity checking — not currently enforced but reserved.
+    ``state_snapshot`` is an opaque marker (iteration counter + history /
+    hypothesis / belief lengths) the orchestrator should pass back in
+    ``submit_response`` so stale submissions — those built against an
+    outdated view of state — are rejected with :class:`StaleSubmitError`.
     """
     if stage not in _VALID_STAGES:
         raise ResearcherError(f"Unknown stage {stage!r}. Valid: {_VALID_STAGES}")
 
-    snapshot = {
-        "iteration": iteration,
-        "history_len": len(state.history),
-        "hypotheses_len": len(state.hypotheses),
-        "beliefs_len": len(state.beliefs),
-    }
+    snapshot = state.snapshot(iteration=iteration)
 
     if stage == "briefing":
         briefing = build_briefing(config)
@@ -217,6 +213,7 @@ def submit_response(
     state: ResearchState,
     *,
     iteration: int = 0,
+    state_snapshot: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Parse + apply an orchestrator-supplied response to *state*.
 
@@ -224,10 +221,26 @@ def submit_response(
     or a raw string — JSON blobs and code-fenced JSON are both accepted
     via :func:`parse_json_from_text`.
 
+    If *state_snapshot* is provided, it must match the current state
+    snapshot (same shape as the value returned by
+    :func:`request_prompt`). If state has advanced between the prompt and
+    this submission, :class:`StaleSubmitError` is raised so the caller can
+    re-request the prompt with fresh context rather than apply stale
+    reasoning to new history.
+
     Returns a summary dict describing what was applied.
     """
     if stage not in _VALID_STAGES:
         raise ResearcherError(f"Unknown stage {stage!r}. Valid: {_VALID_STAGES}")
+
+    if state_snapshot is not None:
+        current = state.snapshot(iteration=iteration)
+        if current != state_snapshot:
+            raise StaleSubmitError(
+                f"State has advanced since request_prompt was issued. "
+                f"submitted_snapshot={state_snapshot} current_snapshot={current}. "
+                f"Re-request the prompt with the latest state and retry."
+            )
 
     if stage == "briefing":
         raise ResearcherError(
