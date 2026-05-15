@@ -229,12 +229,11 @@ class TestSnapshot:
     def test_empty_snapshot(self, tmp_path):
         state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
         snap = state.snapshot()
-        assert snap == {
-            "history_len": 0,
-            "hypotheses_len": 0,
-            "beliefs_len": 0,
-            "findings_len": 0,
-        }
+        assert snap["history_len"] == 0
+        assert snap["hypotheses_len"] == 0
+        assert snap["beliefs_len"] == 0
+        assert snap["findings_len"] == 0
+        assert "content_hash" in snap and len(snap["content_hash"]) == 16
 
     def test_snapshot_tracks_mutations(self, tmp_path):
         state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
@@ -242,12 +241,21 @@ class TestSnapshot:
         state.update_beliefs(["b1", "b2"])
         state.add_finding("f1", confidence=0.7)
         snap = state.snapshot()
-        assert snap == {
-            "history_len": 0,
-            "hypotheses_len": 1,
-            "beliefs_len": 2,
-            "findings_len": 1,
-        }
+        assert snap["history_len"] == 0
+        assert snap["hypotheses_len"] == 1
+        assert snap["beliefs_len"] == 2
+        assert snap["findings_len"] == 1
+        assert "content_hash" in snap
+
+    def test_snapshot_is_deterministic_for_same_state(self, tmp_path):
+        """Two snapshots of the same in-memory state must produce
+        identical content_hash. Pins the stability guarantee."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.add_hypothesis({"hypothesis": "h1", "config": {}})
+        state.update_beliefs(["b"])
+        first = state.snapshot()
+        second = state.snapshot()
+        assert first == second
 
     def test_snapshot_does_not_include_iteration(self, tmp_path):
         """Iteration is loop-turn identity, not state — tracked separately."""
