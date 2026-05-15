@@ -135,15 +135,17 @@ def request_prompt(
     """Build the orchestrator-facing prompt + schema for *stage*.
 
     Returns ``{stage, system, user, schema, state_snapshot}``. The
-    ``state_snapshot`` is an opaque marker (iteration counter + history /
-    hypothesis / belief lengths) the orchestrator should pass back in
+    ``state_snapshot`` is an opaque marker (history / hypothesis / belief /
+    finding lengths) the orchestrator should pass back in
     ``submit_response`` so stale submissions — those built against an
     outdated view of state — are rejected with :class:`StaleSubmitError`.
+    Iteration is intentionally not part of the snapshot; loop-turn
+    identity is tracked by the autonomous-loop session driver.
     """
     if stage not in _VALID_STAGES:
         raise ResearcherError(f"Unknown stage {stage!r}. Valid: {_VALID_STAGES}")
 
-    snapshot = state.snapshot(iteration=iteration)
+    snapshot = state.snapshot()
 
     if stage == "briefing":
         briefing = build_briefing(config)
@@ -234,7 +236,7 @@ def submit_response(
         raise ResearcherError(f"Unknown stage {stage!r}. Valid: {_VALID_STAGES}")
 
     if state_snapshot is not None:
-        current = state.snapshot(iteration=iteration)
+        current = state.snapshot()
         if current != state_snapshot:
             raise StaleSubmitError(
                 f"State has advanced since request_prompt was issued. "

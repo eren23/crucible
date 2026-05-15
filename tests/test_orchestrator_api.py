@@ -363,15 +363,33 @@ def test_submit_response_without_snapshot_skips_check(state_in_project):
     assert result["applied"] is True
 
 
-def test_stale_submit_detects_iteration_mismatch(state_in_project):
-    """Same state but different iteration counter also trips the check."""
+def test_stale_submit_detects_findings_mismatch(state_in_project):
+    """Findings count is tracked in snapshot — peer-added findings trip stale."""
     state, _ = state_in_project
     config = load_config()
-    prompt = oa.request_prompt("hypothesis", config, state, iteration=3)
-    stale_snapshot = prompt["state_snapshot"]  # iteration=3
+    prompt = oa.request_prompt("hypothesis", config, state)
+    stale_snapshot = prompt["state_snapshot"]
+
+    state.add_finding("interloper finding", confidence=0.7)
 
     with pytest.raises(StaleSubmitError):
         oa.submit_response(
             "hypothesis", _canned_hypothesis_response(), config, state,
-            iteration=4, state_snapshot=stale_snapshot,
+            state_snapshot=stale_snapshot,
         )
+
+
+def test_snapshot_iteration_drift_does_not_trip_check(state_in_project):
+    """Iteration is loop-turn identity, NOT state — different iteration
+    values for the same state must not spuriously raise StaleSubmitError."""
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=3)
+    snapshot = prompt["state_snapshot"]
+
+    # Caller increments their loop counter between request and submit — fine.
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=4, state_snapshot=snapshot,
+    )
+    assert result["applied"] is True

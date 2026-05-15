@@ -78,16 +78,23 @@ class ResearchState:
 
             with state.write_lock():
                 state.add_hypothesis(...)
-                state.save()
+                state.save()  # MUST be called inside the block
 
-        On entry, the lock is acquired and ``_load()`` is called so the
-        caller sees the latest peer writes. The caller is responsible for
-        calling :meth:`save` before exiting the block — otherwise in-memory
-        mutations are lost on the next :meth:`_load`.
+        On entry, the lock is acquired and ``_reload_in_place()`` is called
+        so the caller sees the latest peer writes. The caller is responsible
+        for calling :meth:`save` before exiting the block — otherwise the
+        next :meth:`_reload_in_place` silently discards their writes. If an
+        exception is raised inside the block, in-memory mutations are
+        intentionally NOT auto-saved (the state may be inconsistent).
 
         Raises :class:`StateLockTimeout` if the lock cannot be acquired
         within ``timeout`` seconds. POSIX-only — on Windows, falls back to
         a no-op (with a one-time warning) and concurrency safety is lost.
+
+        Do not nest. ``fcntl.flock`` semantics for same-process re-entry
+        on a fresh fd are platform-dependent (BSD-derived macOS will block
+        on itself until ``timeout``). NFS / network volumes also have
+        undefined locking semantics — keep ``state_file`` on local disk.
         """
         try:
             import fcntl
@@ -133,7 +140,10 @@ class ResearchState:
         Called inside ``write_lock`` so the caller sees the latest peer
         writes before modifying. Equivalent to constructing a fresh
         ``ResearchState`` against the same file, without changing the
-        object identity.
+        object identity. ``_total_budget_hours`` is preserved across
+        reload — ``_load()`` overwrites it via the ``budget_adjustment``
+        ledger entry when present, so the constructor default survives
+        only until the first ``save()`` (across any process).
         """
         self.hypotheses = []
         self.history = []
@@ -142,19 +152,21 @@ class ResearchState:
         self._hours_used = 0.0
         self._load()
 
-    def snapshot(self, iteration: int = 0) -> dict[str, int]:
+    def snapshot(self) -> dict[str, int]:
         """Return an opaque snapshot for stale-submit detection.
 
-        Matches the shape returned by
-        :func:`crucible.researcher.orchestrator_api.request_prompt` so
-        callers can pass it back into
-        :func:`~crucible.researcher.orchestrator_api.submit_response`.
+        Tracks the four mutable lists on ``ResearchState`` plus
+        ``budget_hours_used`` for completeness. Iteration is intentionally
+        not part of the snapshot — it is caller-controlled and would
+        cause spurious mismatches when the same state is queried at
+        different loop turns. Loop turn identity is tracked separately
+        by the autonomous-loop session driver.
         """
         return {
-            "iteration": iteration,
             "history_len": len(self.history),
             "hypotheses_len": len(self.hypotheses),
             "beliefs_len": len(self.beliefs),
+            "findings_len": len(self.findings),
         }
 
     # ------------------------------------------------------------------

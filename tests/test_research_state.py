@@ -228,25 +228,32 @@ class TestSaveAndReload:
 class TestSnapshot:
     def test_empty_snapshot(self, tmp_path):
         state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
-        snap = state.snapshot(iteration=3)
+        snap = state.snapshot()
         assert snap == {
-            "iteration": 3,
             "history_len": 0,
             "hypotheses_len": 0,
             "beliefs_len": 0,
+            "findings_len": 0,
         }
 
     def test_snapshot_tracks_mutations(self, tmp_path):
         state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
         state.add_hypothesis({"name": "h1", "config": {}})
         state.update_beliefs(["b1", "b2"])
-        snap = state.snapshot(iteration=1)
+        state.add_finding("f1", confidence=0.7)
+        snap = state.snapshot()
         assert snap == {
-            "iteration": 1,
             "history_len": 0,
             "hypotheses_len": 1,
             "beliefs_len": 2,
+            "findings_len": 1,
         }
+
+    def test_snapshot_does_not_include_iteration(self, tmp_path):
+        """Iteration is loop-turn identity, not state — tracked separately."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        snap = state.snapshot()
+        assert "iteration" not in snap
 
 
 # ---------------------------------------------------------------------------
@@ -316,14 +323,37 @@ class TestWriteLockConcurrency:
         ]
         for w in writers:
             w.start()
+
+        # Single deadline for all writers: 5 processes × (~3s spawn + 1s save)
+        # is the worst case on macOS spawn-mode. Use a shared deadline rather
+        # than per-process so a slow first process doesn't starve the last.
+        deadline = time.monotonic() + 60.0
         for w in writers:
-            w.join(timeout=15.0)
-            assert w.exitcode == 0, f"writer exited with {w.exitcode}"
+            remaining = max(0.5, deadline - time.monotonic())
+            w.join(timeout=remaining)
+            assert w.exitcode == 0, f"writer pid={w.pid} exitcode={w.exitcode}"
 
         # All five writes should be present — no last-write-wins.
         final = ResearchState(state_path, budget_hours=10.0)
         names = sorted(h.get("name", "") for h in final.hypotheses)
         assert names == [f"hyp_{i}" for i in range(5)]
+
+    def test_write_lock_without_save_loses_writes(self, tmp_path):
+        """Document the save-or-lose contract: forgetting save() loses writes."""
+        state_path = tmp_path / "state.jsonl"
+        state = ResearchState(state_path, budget_hours=10.0)
+        state.add_hypothesis({"name": "persisted", "config": {}})
+        state.save()
+
+        with state.write_lock():
+            state.add_hypothesis({"name": "forgotten", "config": {}})
+            # Caller intentionally forgets state.save() — simulates a buggy
+            # session driver. The lock releases cleanly on exit.
+
+        # Next acquisition reloads from disk; the forgotten write is lost.
+        with state.write_lock():
+            names = {h.get("name") for h in state.hypotheses}
+            assert names == {"persisted"}, f"forgotten write leaked: {names}"
 
     def test_write_lock_reloads_from_disk(self, tmp_path):
         state_path = tmp_path / "state.jsonl"
