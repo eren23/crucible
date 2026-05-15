@@ -1947,14 +1947,44 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="tree_auto_expand",
-        description="LLM-generate child experiments for a node using Claude. REQUIRES: name, node_id, ANTHROPIC_API_KEY. RETURNS: new_node_ids with hypotheses. NEXT: tree_enqueue_pending.",
+        description=(
+            "LLM-generated child expansion for a tree node — two-call contract, "
+            "no API keys inside Crucible.\n\n"
+            "Step 1: action='request_prompt' — returns {system, user, schema, tree_snapshot}.\n"
+            "Step 2: orchestrator calls its own LLM with system+user; parses response per schema.\n"
+            "Step 3: action='submit' with the response and the tree_snapshot from step 1 — "
+            "Crucible parses, validates, and attaches children to the tree.\n\n"
+            "Tree-snapshot guard: if the tree advanced between request and submit (peer "
+            "expansion, new result, status flip), submit raises StaleSubmitError so the "
+            "orchestrator re-requests the prompt with fresh tree context.\n\n"
+            "Legacy single-call (deprecated, removed in a future release): calling without "
+            "'action' runs the original in-Crucible Anthropic call. Disabled by default — "
+            "set CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND=1 to opt in. Emits DeprecationWarning.\n\n"
+            "REQUIRES: name, node_id; for action='submit' also response (and optionally tree_snapshot).\n"
+            "RETURNS: request_prompt → {system, user, schema, tree_snapshot, ...}. submit → {new_node_ids, children, total_nodes}.\n"
+            "ERRORS: StaleSubmitError when tree_snapshot is provided and tree has advanced.\n"
+            "NEXT: tree_enqueue_pending after submit."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["request_prompt", "submit"],
+                    "description": "Two-call contract verb. Omit for deprecated single-call mode.",
+                },
                 "name": {"type": "string", "description": "Tree name."},
                 "node_id": {"type": "string", "description": "Node ID to auto-expand."},
                 "n_children": {"type": "integer", "description": "Number of children to generate.", "default": 3},
-                "extra_context": {"type": "string", "description": "Additional context for LLM generation.", "default": ""},
+                "extra_context": {"type": "string", "description": "Additional context for prompt generation.", "default": ""},
+                "response": {
+                    "description": "Required for action='submit'. Orchestrator-supplied response — JSON array of child specs, a dict with 'children'/'items'/'specs' key, or a raw JSON string.",
+                },
+                "tree_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot dict from the matching action='request_prompt' call. When present in 'submit', enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
             },
             "required": ["name", "node_id"],
             "additionalProperties": False,

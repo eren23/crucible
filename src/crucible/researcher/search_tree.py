@@ -11,6 +11,8 @@ Storage layout under tree_dir (.crucible/search_trees/{name}/):
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import random
 import re
@@ -833,6 +835,47 @@ class SearchTree:
         if not path.exists():
             raise SearchTreeError(f"No candidate code at {path}")
         return path.read_text(encoding="utf-8")
+
+    def snapshot(self, node_id: str | None = None) -> dict[str, Any]:
+        """Return an opaque snapshot for stale-submit detection.
+
+        Mirrors :meth:`crucible.researcher.state.ResearchState.snapshot` —
+        used by tools that build a prompt from tree state and accept an
+        orchestrator-supplied response later. If the tree changed between
+        prompt and submit (peer expansion, status flip, new result), the
+        snapshot mismatches and the submitting tool raises
+        :class:`crucible.core.errors.StaleSubmitError`.
+
+        Tracks: per-node identity + parent + status + child shape, plus
+        the current best-node metric (results land via record_result and
+        update best). Includes optional ``node_id`` so submit-side can
+        also verify the target node still exists.
+        """
+        nodes_repr = [
+            (
+                nid,
+                n.get("parent_node_id"),
+                n.get("status"),
+                tuple(n.get("child_node_ids") or []),
+            )
+            for nid, n in sorted(self.nodes.items())
+        ]
+        digest_input = json.dumps(
+            {
+                "nodes": nodes_repr,
+                "best_node_id": self.meta.get("best_node_id"),
+                "best_metric": self.meta.get("best_metric"),
+            },
+            sort_keys=True,
+            default=str,
+        )
+        content_hash = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+        return {
+            "tree_name": self.meta.get("name"),
+            "node_id": node_id,
+            "total_nodes": self.meta.get("total_nodes", 0),
+            "content_hash": content_hash,
+        }
 
     def get_tree_summary(self) -> dict[str, Any]:
         """Get a summary of the tree state."""

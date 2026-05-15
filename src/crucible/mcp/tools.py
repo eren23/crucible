@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from crucible.core.config import ProjectConfig, load_config
-from crucible.core.errors import CrucibleError
+from crucible.core.errors import CrucibleError, StaleSubmitError
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectSpec
@@ -3422,110 +3422,315 @@ def tree_expand_grpo(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
-    """LLM-generate children for a node. Requires ANTHROPIC_API_KEY."""
+TREE_AUTO_EXPAND_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": "Array of child experiment specs to attach as children of the target node.",
+    "items": {
+        "type": "object",
+        "required": ["name", "config"],
+        "properties": {
+            "name": {"type": "string", "description": "Lowercase + underscores, no spaces."},
+            "config": {
+                "type": "object",
+                "description": "Env var overrides as a dict of string values.",
+                "additionalProperties": {"type": "string"},
+            },
+            "hypothesis": {"type": "string"},
+            "rationale": {"type": "string"},
+        },
+    },
+}
+
+
+TREE_AUTO_EXPAND_SYSTEM_PROMPT = (
+    "You are expanding a search tree of ML experiment configurations. "
+    "Given the tree state, the current node's ancestry, and its siblings, "
+    "you propose exactly N child experiment configurations as a JSON array. "
+    "Each child modifies the parent config to test a specific hypothesis. "
+    "Return only the JSON array — no prose, no code fences."
+)
+
+
+_LEGACY_TREE_AUTO_EXPAND_ENV_VAR = "CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND"
+
+
+def _tree_auto_expand_build_user_prompt(
+    tree: Any, node_id: str, n_children: int, extra_context: str
+) -> str:
+    """Build the user-facing prompt for tree expansion from current tree state."""
+    node = tree.get_node(node_id)
+    ancestry = tree.get_ancestry(node_id)
+    siblings = tree.get_siblings(node_id)
+    summary = tree.get_tree_summary()
+
+    ancestry_str = "\n".join(
+        f"  depth={a['depth']} name={a['experiment_name']} "
+        f"config={json.dumps(a['config'])} metric={a.get('result_metric')}"
+        for a in ancestry
+    )
+    sibling_str = "\n".join(
+        f"  name={s['experiment_name']} config={json.dumps(s['config'])} "
+        f"metric={s.get('result_metric')} status={s['status']}"
+        for s in siblings
+    ) or "  (none)"
+
+    parts = [
+        f"Tree: {summary.get('name')} - {summary.get('description', '')}",
+        f"Primary metric: {summary.get('primary_metric')} ({summary.get('metric_direction')})",
+        f"Best so far: {summary.get('best_metric')}",
+        "",
+        "Current node path (root to current):",
+        ancestry_str,
+        "",
+        "Siblings of current node:",
+        sibling_str,
+        "",
+        f"Current node config: {json.dumps(node['config'])}",
+        f"Current node result: metric={node.get('result_metric')}",
+        f"Current node hypothesis: {node.get('hypothesis', '')}",
+    ]
+    if extra_context:
+        parts.append("")
+        parts.append(f"Additional context: {extra_context}")
+    parts.append("")
+    parts.append(
+        f"Generate exactly {n_children} child experiment configurations as a JSON array. "
+        f"Each child should modify the parent config to test a specific hypothesis."
+    )
+    return "\n".join(parts)
+
+
+def _tree_auto_expand_request_prompt(args: dict[str, Any]) -> dict[str, Any]:
+    """Build the orchestrator-facing prompt + schema for tree expansion. No LLM call."""
+    from crucible.researcher.search_tree import SearchTree
+
     config = _get_config()
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
+
+    node_id = args["node_id"]
+    node = tree.get_node(node_id)
+    if node is None:
+        return {"error": f"Node '{node_id}' not found"}
+
+    n_children = int(args.get("n_children", 3))
+    extra_context = args.get("extra_context", "")
+    user_prompt = _tree_auto_expand_build_user_prompt(tree, node_id, n_children, extra_context)
+    return {
+        "action": "request_prompt",
+        "stage": "tree_auto_expand",
+        "system": TREE_AUTO_EXPAND_SYSTEM_PROMPT,
+        "user": user_prompt,
+        "schema": TREE_AUTO_EXPAND_SCHEMA,
+        "tree_snapshot": tree.snapshot(node_id=node_id),
+        "node_id": node_id,
+        "n_children": n_children,
+    }
+
+
+def _tree_auto_expand_parse_response(response: Any) -> list[dict[str, Any]]:
+    """Accept a list, dict, or raw JSON string; return the list of child specs."""
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict):
+        for key in ("children", "items", "specs"):
+            value = response.get(key)
+            if isinstance(value, list):
+                return value
+        raise CrucibleError(
+            "tree_auto_expand submit: response dict has no 'children'/'items'/'specs' list — "
+            "send a JSON array of child specs or a dict with one of those keys."
+        )
+    if isinstance(response, str):
+        text = response.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1])
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise CrucibleError(
+                "tree_auto_expand submit: JSON-string response did not parse to an array."
+            )
+        return parsed
+    raise CrucibleError(
+        f"tree_auto_expand submit: response must be list, dict, or JSON string — got {type(response).__name__}"
+    )
+
+
+def _tree_auto_expand_submit(args: dict[str, Any]) -> dict[str, Any]:
+    """Parse + apply an orchestrator-supplied response to the tree.
+
+    Honors ``tree_snapshot`` for stale-submit detection: if the tree advanced
+    between request_prompt and submit (peer expansion, new result, status
+    flip), raises :class:`StaleSubmitError` rather than applying the
+    response against an out-of-date tree.
+    """
+    from crucible.researcher.search_tree import SearchTree
+
+    config = _get_config()
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
+
+    node_id = args["node_id"]
+    node = tree.get_node(node_id)
+    if node is None:
+        return {"error": f"Node '{node_id}' not found"}
+
+    submitted_snapshot = args.get("tree_snapshot")
+    if submitted_snapshot is not None:
+        current = tree.snapshot(node_id=node_id)
+        if current != submitted_snapshot:
+            raise StaleSubmitError(
+                f"Tree has advanced since tree_auto_expand request_prompt was issued. "
+                f"submitted_snapshot={submitted_snapshot} current_snapshot={current}. "
+                f"Re-request the prompt with the latest tree and retry."
+            )
+
+    response = args.get("response")
+    if response is None:
+        raise CrucibleError("tree_auto_expand submit: 'response' is required")
+    children_specs = _tree_auto_expand_parse_response(response)
+    for spec in children_specs:
+        spec["generation_method"] = "llm_auto_expand"
+
+    new_ids = tree.expand_node(node_id, children_specs)
+    return {
+        "action": "submit",
+        "status": "auto_expanded",
+        "node_id": node_id,
+        "new_node_ids": new_ids,
+        "children": [
+            {
+                "node_id": nid,
+                "name": tree.get_node(nid)["experiment_name"],
+                "hypothesis": tree.get_node(nid).get("hypothesis", ""),
+            }
+            for nid in new_ids
+        ],
+        "total_nodes": tree.meta["total_nodes"],
+    }
+
+
+def _tree_auto_expand_legacy(args: dict[str, Any]) -> dict[str, Any]:
+    """Deprecated in-Crucible Anthropic call. Gated by env var; emits warning."""
+    import warnings
+
+    if os.environ.get(_LEGACY_TREE_AUTO_EXPAND_ENV_VAR) != "1":
+        raise CrucibleError(
+            "tree_auto_expand: the legacy in-Crucible Anthropic call is deprecated. "
+            "Use the orchestrator-contract pattern instead: call with "
+            "action='request_prompt' to get the prompt + schema + tree_snapshot, "
+            "feed them to your LLM, then call again with action='submit', the "
+            "response, and the tree_snapshot. To temporarily restore the legacy "
+            f"behavior (one release only), set {_LEGACY_TREE_AUTO_EXPAND_ENV_VAR}=1."
+        )
+
+    warnings.warn(
+        "tree_auto_expand legacy mode (in-Crucible Anthropic call) is deprecated "
+        "and will be removed in a future release. Migrate to "
+        "action='request_prompt' + action='submit' which carries no LLM keys.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    from crucible.researcher.search_tree import SearchTree
+
+    config = _get_config()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"error": "ANTHROPIC_API_KEY not set. Required for legacy auto-expansion."}
+
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
+
+    node_id = args["node_id"]
+    node = tree.get_node(node_id)
+    if node is None:
+        return {"error": f"Node '{node_id}' not found"}
+
+    n_children = int(args.get("n_children", 3))
+    extra_context = args.get("extra_context", "")
+    user_prompt = _tree_auto_expand_build_user_prompt(tree, node_id, n_children, extra_context)
+
     try:
-        import os
+        import anthropic
+    except ImportError:
+        return {"error": "anthropic package not installed. Run: pip install anthropic"}
 
-        from crucible.researcher.search_tree import SearchTree
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            return {"error": "ANTHROPIC_API_KEY not set. Required for auto-expansion."}
-
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
-
-        node_id = args["node_id"]
-        node = tree.get_node(node_id)
-        if node is None:
-            return {"error": f"Node '{node_id}' not found"}
-
-        n_children = args.get("n_children", 3)
-        extra_context = args.get("extra_context", "")
-
-        ancestry = tree.get_ancestry(node_id)
-        siblings = tree.get_siblings(node_id)
-        summary = tree.get_tree_summary()
-
-        ancestry_str = "\n".join(
-            f"  depth={a['depth']} name={a['experiment_name']} "
-            f"config={json.dumps(a['config'])} metric={a.get('result_metric')}"
-            for a in ancestry
-        )
-        sibling_str = "\n".join(
-            f"  name={s['experiment_name']} config={json.dumps(s['config'])} "
-            f"metric={s.get('result_metric')} status={s['status']}"
-            for s in siblings
-        ) or "  (none)"
-
-        prompt = (
-            f"You are expanding a search tree of ML experiment configurations.\n\n"
-            f"Tree: {summary.get('name')} - {summary.get('description', '')}\n"
-            f"Primary metric: {summary.get('primary_metric')} ({summary.get('metric_direction')})\n"
-            f"Best so far: {summary.get('best_metric')}\n\n"
-            f"Current node path (root to current):\n{ancestry_str}\n\n"
-            f"Siblings of current node:\n{sibling_str}\n\n"
-            f"Current node config: {json.dumps(node['config'])}\n"
-            f"Current node result: metric={node.get('result_metric')}\n"
-            f"Current node hypothesis: {node.get('hypothesis', '')}\n\n"
-        )
-        if extra_context:
-            prompt += f"Additional context: {extra_context}\n\n"
-
-        prompt += (
-            f"Generate exactly {n_children} child experiment configurations as JSON.\n"
-            f"Each child should modify the parent config to test a specific hypothesis.\n"
-            f"Return a JSON array of objects with: name, config (dict of overrides), "
-            f"hypothesis, rationale.\n"
-            f"Only return the JSON array, no other text."
-        )
-
-        try:
-            import anthropic
-        except ImportError:
-            return {"error": "anthropic package not installed. Run: pip install anthropic"}
-
+    try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
+            system=TREE_AUTO_EXPAND_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
         )
-
         response_text = response.content[0].text.strip()
         if response_text.startswith("```"):
             lines = response_text.split("\n")
             response_text = "\n".join(lines[1:-1])
-
         children_specs = json.loads(response_text)
         if not isinstance(children_specs, list):
             return {"error": "LLM response was not a JSON array"}
-
-        for spec in children_specs:
-            spec["generation_method"] = "llm_auto_expand"
-
-        new_ids = tree.expand_node(node_id, children_specs)
-        return {
-            "status": "auto_expanded",
-            "node_id": node_id,
-            "new_node_ids": new_ids,
-            "children": [
-                {
-                    "node_id": nid,
-                    "name": tree.get_node(nid)["experiment_name"],
-                    "hypothesis": tree.get_node(nid).get("hypothesis", ""),
-                }
-                for nid in new_ids
-            ],
-            "total_nodes": tree.meta["total_nodes"],
-        }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
     except json.JSONDecodeError as exc:
         return {"error": f"Failed to parse LLM response as JSON: {exc}"}
+
+    for spec in children_specs:
+        spec["generation_method"] = "llm_auto_expand_legacy"
+
+    new_ids = tree.expand_node(node_id, children_specs)
+    return {
+        "action": "legacy",
+        "status": "auto_expanded",
+        "node_id": node_id,
+        "new_node_ids": new_ids,
+        "children": [
+            {
+                "node_id": nid,
+                "name": tree.get_node(nid)["experiment_name"],
+                "hypothesis": tree.get_node(nid).get("hypothesis", ""),
+            }
+            for nid in new_ids
+        ],
+        "total_nodes": tree.meta["total_nodes"],
+    }
+
+
+def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
+    """LLM-generated child expansion for a tree node.
+
+    Two-call contract (preferred — no API keys inside Crucible):
+      1. ``action="request_prompt"`` returns ``{system, user, schema, tree_snapshot}``.
+         The orchestrator calls its own LLM with the prompts and parses
+         per schema.
+      2. ``action="submit"`` accepts the orchestrator's response plus the
+         ``tree_snapshot`` from step 1. Applies the children to the tree
+         or raises :class:`StaleSubmitError` if the tree advanced.
+
+    Legacy single-call (deprecated): calling without ``action`` runs the
+    original in-Crucible ``anthropic.Anthropic`` flow. Disabled by
+    default — set ``CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND=1`` to
+    temporarily enable. Emits :class:`DeprecationWarning` when used.
+    """
+    action = args.get("action")
+    try:
+        if action == "request_prompt":
+            return _tree_auto_expand_request_prompt(args)
+        if action == "submit":
+            return _tree_auto_expand_submit(args)
+        if action is None:
+            return _tree_auto_expand_legacy(args)
+        raise CrucibleError(
+            f"tree_auto_expand: unknown action {action!r}. "
+            f"Valid: 'request_prompt', 'submit', or omit for deprecated legacy mode."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
 def tree_prune(args: dict[str, Any]) -> dict[str, Any]:

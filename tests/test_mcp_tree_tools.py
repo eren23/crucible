@@ -381,3 +381,244 @@ class TestTreeSyncResults:
         result = tree_sync_results({"name": "nosync-tree"})
         assert result["status"] == "synced"
         assert result["synced_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# tree_auto_expand (Phase 1.3) — action-based contract, no LLM keys in Crucible
+# ---------------------------------------------------------------------------
+
+
+def _make_expandable_tree(tmp_path: Path) -> tuple[str, str]:
+    """Create a tree with a single root that's been completed and is expandable.
+    Returns (tree_name, root_node_id)."""
+    from crucible.mcp.tools import tree_create
+    from crucible.researcher.search_tree import SearchTree
+
+    res = tree_create({
+        "name": "ae-tree",
+        "roots": [{"name": "root", "config": {"LR": "3e-4"}}],
+    })
+    root_id = res["root_node_ids"][0]
+    tree_dir = tmp_path / ".crucible" / "search_trees" / "ae-tree"
+    tree = SearchTree.load(tree_dir)
+    tree.record_result(root_id, {"val_loss": 2.0})
+    return "ae-tree", root_id
+
+
+class TestSearchTreeSnapshot:
+    def test_snapshot_shape(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        from crucible.researcher.search_tree import SearchTree
+        tree = SearchTree.load(tmp_path / ".crucible" / "search_trees" / name)
+
+        snap = tree.snapshot(node_id=root_id)
+        assert snap["tree_name"] == name
+        assert snap["node_id"] == root_id
+        assert snap["total_nodes"] == 1
+        assert "content_hash" in snap and len(snap["content_hash"]) == 16
+
+    def test_snapshot_changes_when_node_added(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        from crucible.researcher.search_tree import SearchTree
+        tree = SearchTree.load(tmp_path / ".crucible" / "search_trees" / name)
+
+        before = tree.snapshot(node_id=root_id)
+        tree.expand_node(root_id, [{"name": "child", "config": {}, "hypothesis": ""}])
+        after = tree.snapshot(node_id=root_id)
+        assert before != after
+        assert before["content_hash"] != after["content_hash"]
+
+    def test_snapshot_changes_when_result_recorded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """A new result updates best_metric, which the snapshot tracks."""
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        from crucible.researcher.search_tree import SearchTree
+        tree = SearchTree.load(tmp_path / ".crucible" / "search_trees" / name)
+        new_ids = tree.expand_node(root_id, [{"name": "c", "config": {}, "hypothesis": ""}])
+        child_id = new_ids[0]
+
+        before = tree.snapshot(node_id=root_id)
+        tree.record_result(child_id, {"val_loss": 1.0})  # beats root's 2.0
+        after = tree.snapshot(node_id=root_id)
+        assert before["content_hash"] != after["content_hash"]
+
+
+class TestTreeAutoExpandRequestPrompt:
+    def test_returns_prompt_schema_and_snapshot(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "request_prompt",
+            "name": name,
+            "node_id": root_id,
+            "n_children": 2,
+        })
+        assert out["action"] == "request_prompt"
+        assert out["stage"] == "tree_auto_expand"
+        assert isinstance(out["system"], str) and len(out["system"]) > 0
+        assert isinstance(out["user"], str) and "LR" in out["user"]
+        assert out["schema"]["type"] == "array"
+        assert out["tree_snapshot"]["tree_name"] == name
+        assert out["tree_snapshot"]["node_id"] == root_id
+        assert out["n_children"] == 2
+
+    def test_unknown_node_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "request_prompt",
+            "name": "ae-tree",
+            "node_id": "no-such-node",
+        })
+        assert "error" in out and "not found" in out["error"]
+
+
+class TestTreeAutoExpandSubmit:
+    def test_applies_response(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        prompt = tree_auto_expand({
+            "action": "request_prompt", "name": name, "node_id": root_id, "n_children": 2,
+        })
+        response = [
+            {"name": "low_lr", "config": {"LR": "1e-4"}, "hypothesis": "lower"},
+            {"name": "high_lr", "config": {"LR": "1e-3"}, "hypothesis": "higher"},
+        ]
+        out = tree_auto_expand({
+            "action": "submit",
+            "name": name,
+            "node_id": root_id,
+            "response": response,
+            "tree_snapshot": prompt["tree_snapshot"],
+        })
+        assert out["action"] == "submit"
+        assert out["status"] == "auto_expanded"
+        assert len(out["new_node_ids"]) == 2
+        assert out["total_nodes"] == 3
+
+    def test_submit_accepts_json_string_response(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "submit",
+            "name": name,
+            "node_id": root_id,
+            "response": json.dumps([
+                {"name": "a", "config": {"LR": "1e-4"}, "hypothesis": ""},
+            ]),
+        })
+        assert out["status"] == "auto_expanded"
+        assert len(out["new_node_ids"]) == 1
+
+    def test_submit_accepts_dict_with_children_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "submit",
+            "name": name,
+            "node_id": root_id,
+            "response": {"children": [
+                {"name": "a", "config": {"LR": "1e-4"}, "hypothesis": ""},
+            ]},
+        })
+        assert out["status"] == "auto_expanded"
+
+    def test_submit_rejects_stale_tree_snapshot(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """If the tree advanced between request_prompt and submit, raise."""
+        from crucible.mcp.tools import tree_auto_expand
+        from crucible.core.errors import StaleSubmitError
+        from crucible.researcher.search_tree import SearchTree
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        prompt = tree_auto_expand({
+            "action": "request_prompt", "name": name, "node_id": root_id,
+        })
+        stale = prompt["tree_snapshot"]
+
+        # Simulate a peer process: load tree, expand, save (expand_node persists).
+        peer = SearchTree.load(tmp_path / ".crucible" / "search_trees" / name)
+        peer.expand_node(root_id, [{"name": "peer", "config": {}, "hypothesis": ""}])
+
+        with pytest.raises(StaleSubmitError, match="advanced"):
+            tree_auto_expand({
+                "action": "submit",
+                "name": name,
+                "node_id": root_id,
+                "response": [{"name": "x", "config": {}, "hypothesis": ""}],
+                "tree_snapshot": stale,
+            })
+
+    def test_submit_without_snapshot_skips_check(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Snapshot is opt-in for backward compat."""
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "submit",
+            "name": name,
+            "node_id": root_id,
+            "response": [{"name": "x", "config": {}, "hypothesis": ""}],
+        })
+        assert out["status"] == "auto_expanded"
+
+
+class TestTreeAutoExpandLegacy:
+    def test_legacy_raises_without_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Default: legacy single-call (no action) is disabled."""
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+        monkeypatch.delenv("CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND", raising=False)
+
+        out = tree_auto_expand({"name": name, "node_id": root_id})
+        assert "error" in out
+        assert "deprecated" in out["error"].lower()
+        assert "request_prompt" in out["error"]
+
+    def test_legacy_emits_deprecation_when_enabled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """With env var set, legacy runs but emits DeprecationWarning."""
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+        monkeypatch.setenv("CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND", "1")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # ensure clean fail path
+
+        with pytest.warns(DeprecationWarning, match="legacy mode"):
+            out = tree_auto_expand({"name": name, "node_id": root_id})
+        # No ANTHROPIC_API_KEY → legacy returns error after warning
+        assert "ANTHROPIC_API_KEY" in out.get("error", "")
+
+    def test_unknown_action_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({"action": "banana", "name": name, "node_id": root_id})
+        assert "error" in out and "unknown action" in out["error"].lower()
