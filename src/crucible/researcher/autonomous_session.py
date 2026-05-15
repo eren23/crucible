@@ -28,6 +28,7 @@ iterations trip :func:`detect_doom_loop` and the session aborts.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -49,6 +50,55 @@ from crucible.researcher.state import ResearchState
 _SESSIONS_DIRNAME = "autonomous_sessions"
 _DOOM_LOOP_WINDOW = 5
 _DEFAULT_BUDGET_HOURS_FALLBACK = 10.0
+_DEFAULT_SESSION_LOCK_TIMEOUT = 30.0
+_CREATE_LOCK_FILENAME = ".create.lock"
+
+
+@contextmanager
+def _file_lock(
+    lock_path: Path,
+    *,
+    timeout: float = _DEFAULT_SESSION_LOCK_TIMEOUT,
+    poll_interval: float = 0.1,
+) -> Iterator[None]:
+    """Acquire an exclusive advisory fcntl lock on ``lock_path``.
+
+    POSIX-only; on platforms without ``fcntl`` (Windows), degrades to a
+    no-op so callers still work but lose cross-process exclusivity.
+    Raises :class:`AutonomousSessionError` on timeout.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise AutonomousSessionError(
+                        f"Could not acquire session lock at {lock_path} within "
+                        f"{timeout:.1f}s — another Crucible process may be holding it."
+                    ) from exc
+                time.sleep(poll_interval)
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
 
 
 class AutonomousSessionError(ResearcherError):
@@ -123,6 +173,11 @@ class AutonomousSession:
     def jsonl_path(self) -> Path:
         return _session_jsonl_path(self.config.project_root, self.session_id)
 
+    @property
+    def lock_path(self) -> Path:
+        """Per-session advisory lock — serializes apply_response / cancel."""
+        return _sessions_dir(self.config.project_root) / f"{self.session_id}.lock"
+
     def load(self) -> "AutonomousSession":
         if not self.yaml_path.exists():
             raise AutonomousSessionError(
@@ -173,6 +228,10 @@ class AutonomousSession:
         return session
 
     @classmethod
+    def _create_lock_path(cls, config: ProjectConfig) -> Path:
+        return _sessions_dir(config.project_root) / _CREATE_LOCK_FILENAME
+
+    @classmethod
     def create(
         cls,
         config: ProjectConfig,
@@ -182,41 +241,44 @@ class AutonomousSession:
         focus_family: str = "",
         budget_usd: float | None = None,
     ) -> "AutonomousSession":
-        existing = cls.find_active(config)
-        if existing is not None:
-            # Idempotent: second start while session running returns the same one.
-            return existing
-        session_id = _new_session_id()
-        session = cls(config, session_id)
-        now = utc_now_iso()
-        session.state_data = {
-            "schema_version": cls.SCHEMA_VERSION,
-            "session_id": session_id,
-            "created_at": now,
-            "updated_at": now,
-            "status": cls.STATUS_RUNNING,
-            "iterations_planned": int(iterations),
-            "iterations_completed": 0,
-            "current_iteration": 0,
-            "current_stage": cls.STAGE_HYPOTHESIS,
-            "tier": tier,
-            "focus_family": focus_family,
-            "budget_usd": budget_usd,
-            "budget_spent_usd": 0.0,
-            "last_state_snapshot": None,
-            "last_prompt_fingerprint": None,
-            "recent_fingerprints": [],
-            "last_error": None,
-        }
-        session.save()
-        session.append_event(
-            "started",
-            iterations_planned=iterations,
-            tier=tier,
-            focus_family=focus_family,
-            budget_usd=budget_usd,
-        )
-        return session
+        # Lock around find_active + write to prevent two concurrent
+        # action_start calls from each creating distinct sessions.
+        with _file_lock(cls._create_lock_path(config)):
+            existing = cls.find_active(config)
+            if existing is not None:
+                # Idempotent: second start while session running returns the same one.
+                return existing
+            session_id = _new_session_id()
+            session = cls(config, session_id)
+            now = utc_now_iso()
+            session.state_data = {
+                "schema_version": cls.SCHEMA_VERSION,
+                "session_id": session_id,
+                "created_at": now,
+                "updated_at": now,
+                "status": cls.STATUS_RUNNING,
+                "iterations_planned": int(iterations),
+                "iterations_completed": 0,
+                "current_iteration": 0,
+                "current_stage": cls.STAGE_HYPOTHESIS,
+                "tier": tier,
+                "focus_family": focus_family,
+                "budget_usd": budget_usd,
+                "budget_spent_usd": 0.0,
+                "last_state_snapshot": None,
+                "last_prompt_fingerprint": None,
+                "recent_fingerprints": [],
+                "last_error": None,
+            }
+            session.save()
+            session.append_event(
+                "started",
+                iterations_planned=iterations,
+                tier=tier,
+                focus_family=focus_family,
+                budget_usd=budget_usd,
+            )
+            return session
 
     # ------------------------------------------------------------------
     # Driving
@@ -287,7 +349,27 @@ class AutonomousSession:
         response: Any,
         submitted_snapshot: dict | None,
     ) -> dict[str, Any]:
-        """Apply an orchestrator-supplied response, advance stage."""
+        """Apply an orchestrator-supplied response, advance stage.
+
+        Holds a per-session advisory lock around the full check-apply-advance
+        sequence so concurrent ``submit`` calls (e.g., orchestrator network
+        retries) cannot double-advance the state machine. The inner
+        ``oa.submit_response`` separately holds ``ResearchState.write_lock``
+        for the research-state file; the two locks are nested in this
+        consistent order (session → research-state) by every caller.
+        """
+        with _file_lock(self.lock_path):
+            # Reload to see any state written by a peer that held the lock
+            # before us.
+            self.load()
+            return self._apply_response_locked(state, response, submitted_snapshot)
+
+    def _apply_response_locked(
+        self,
+        state: ResearchState,
+        response: Any,
+        submitted_snapshot: dict | None,
+    ) -> dict[str, Any]:
         if self.is_terminal():
             raise AutonomousSessionError(
                 f"Session {self.session_id} is {self.state_data['status']!r} — cannot submit."
@@ -354,23 +436,26 @@ class AutonomousSession:
         }
 
     def cancel(self, reason: str = "") -> dict[str, Any]:
-        if self.is_terminal():
+        with _file_lock(self.lock_path):
+            # Reload to see whether a concurrent submit already terminated us.
+            self.load()
+            if self.is_terminal():
+                return {
+                    "session_id": self.session_id,
+                    "session_status": self.state_data["status"],
+                    "checkpoint_path": str(self.yaml_path),
+                    "already_terminal": True,
+                }
+            self.state_data["status"] = self.STATUS_CANCELED
+            self.state_data["last_error"] = reason or None
+            self.save()
+            self.append_event("canceled", reason=reason)
             return {
                 "session_id": self.session_id,
-                "session_status": self.state_data["status"],
+                "session_status": self.STATUS_CANCELED,
                 "checkpoint_path": str(self.yaml_path),
-                "already_terminal": True,
+                "already_terminal": False,
             }
-        self.state_data["status"] = self.STATUS_CANCELED
-        self.state_data["last_error"] = reason or None
-        self.save()
-        self.append_event("canceled", reason=reason)
-        return {
-            "session_id": self.session_id,
-            "session_status": self.STATUS_CANCELED,
-            "checkpoint_path": str(self.yaml_path),
-            "already_terminal": False,
-        }
 
     def _mark_error(self, message: str) -> None:
         self.state_data["status"] = self.STATUS_ERROR
@@ -419,8 +504,19 @@ def action_submit(
     response: Any,
     state_snapshot: dict | None = None,
 ) -> dict[str, Any]:
-    """Apply an orchestrator-supplied response and advance the session."""
+    """Apply an orchestrator-supplied response and advance the session.
+
+    If ``state_snapshot`` is None, falls back to the session's
+    ``last_state_snapshot`` (set by the most recent ``build_prompt``). This
+    keeps the Phase 1.2 stale-submit guard active by default even when the
+    caller (CLI, simpler MCP client) doesn't track snapshots explicitly.
+    Pass an explicit snapshot to override; the session's tracked one is
+    the safe default but does not capture races where the orchestrator
+    delayed long enough that the session itself didn't move.
+    """
     session = AutonomousSession(config, session_id).load()
+    if state_snapshot is None:
+        state_snapshot = session.state_data.get("last_state_snapshot")
     state = _load_state(config)
     applied = session.apply_response(state, response, state_snapshot)
 

@@ -447,6 +447,33 @@ class TestSearchTreeSnapshot:
         after = tree.snapshot(node_id=root_id)
         assert before["content_hash"] != after["content_hash"]
 
+    def test_snapshot_tracks_parent_children_field(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Regression test: snapshot reads the node 'children' field, not the
+        non-existent 'child_node_ids'. The original Phase 1.3 commit had the
+        wrong field name; this test pins the parent's child-list contribution
+        to the content hash."""
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        from crucible.researcher.search_tree import SearchTree
+        tree = SearchTree.load(tmp_path / ".crucible" / "search_trees" / name)
+
+        # Confirm the field name on a real node, then verify the snapshot
+        # changes when that field grows.
+        root_node = tree.get_node(root_id)
+        assert "children" in root_node, "schema invariant: nodes have 'children' key"
+
+        before = tree.snapshot(node_id=root_id)
+        tree.expand_node(root_id, [
+            {"name": "c1", "config": {}, "hypothesis": ""},
+            {"name": "c2", "config": {}, "hypothesis": ""},
+        ])
+        after = tree.snapshot(node_id=root_id)
+        assert before["content_hash"] != after["content_hash"]
+        # Pinpoint: the root node's children list grew; that's now reflected
+        # in the per-node tuples that compose the content hash.
+        assert len(tree.get_node(root_id)["children"]) == 2
+
 
 class TestTreeAutoExpandRequestPrompt:
     def test_returns_prompt_schema_and_snapshot(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

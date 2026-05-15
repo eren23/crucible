@@ -87,6 +87,64 @@ class TestStart:
         second = autos.action_start(project_config, iterations=3, tier="proxy")
         assert first["session_id"] == second["session_id"]
 
+    def test_create_lock_file_exists(self, project_config):
+        """Phase 1.1 review fix: a project-level create lock must exist so
+        concurrent action_start calls cannot create two distinct sessions."""
+        autos.action_start(project_config, iterations=2, tier="proxy")
+        lock_path = (
+            project_config.project_root
+            / ".crucible" / "autonomous_sessions" / ".create.lock"
+        )
+        assert lock_path.exists()
+
+
+class TestStartConcurrency:
+    """Phase 1.1 review fix: prevent two concurrent action_start from creating
+    distinct sessions. Uses multiprocessing to simulate real cross-process race."""
+
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="fcntl locks are POSIX-only; create-lock degrades to no-op on Windows.",
+    )
+    def test_concurrent_starts_produce_single_session(self, project_dir):
+        import multiprocessing
+
+        # The project_config fixture changes cwd; this test needs to do that
+        # inside the child processes too.
+        os.chdir(project_dir)
+        (project_dir / "program.md").write_text("Minimise val_loss.", encoding="utf-8")
+
+        ctx = multiprocessing.get_context("spawn")
+        queue: multiprocessing.Queue = ctx.Queue()
+        procs = [
+            ctx.Process(target=_concurrent_start_worker, args=(str(project_dir), queue))
+            for _ in range(3)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=20.0)
+            assert p.exitcode == 0, f"worker exited with {p.exitcode}"
+
+        ids: set[str] = set()
+        while not queue.empty():
+            ids.add(queue.get())
+        assert len(ids) == 1, (
+            f"expected exactly one session_id across concurrent starts, got {ids}"
+        )
+
+
+def _concurrent_start_worker(project_dir_str: str, queue) -> None:
+    """Subprocess target: cd into project, start a session, put session_id."""
+    import os as _os
+    from pathlib import Path as _Path
+    _os.chdir(_Path(project_dir_str))
+    from crucible.core.config import load_config as _lc
+    from crucible.researcher import autonomous_session as _autos
+    config = _lc()
+    out = _autos.action_start(config, iterations=2, tier="proxy")
+    queue.put(out["session_id"])
+
 
 # ---------------------------------------------------------------------------
 # submit — happy path
@@ -207,6 +265,33 @@ class TestSubmitErrors:
     def test_unknown_session_raises(self, project_config):
         with pytest.raises(AutonomousSessionError, match="not found"):
             autos.action_status(project_config, session_id="not-a-real-uuid")
+
+    def test_action_submit_falls_back_to_session_snapshot(self, project_config):
+        """Phase 1.1 review fix: if caller (e.g., CLI) omits state_snapshot,
+        action_submit auto-loads the session's last_state_snapshot so stale-
+        submit detection still kicks in. Bypassing it is no longer the default."""
+        first = autos.action_start(project_config, iterations=2, tier="proxy")
+        sid = first["session_id"]
+
+        # Concurrent process advances state on disk (persists).
+        from crucible.researcher.state import ResearchState
+        state = ResearchState(
+            project_config.project_root / project_config.research_state_file,
+            budget_hours=project_config.researcher.budget_hours,
+        )
+        state.add_finding("peer", confidence=0.7)
+        state.save()
+
+        # Caller passes no state_snapshot — action_submit must load the
+        # session's last_state_snapshot (captured at start) and detect the
+        # mismatch.
+        with pytest.raises(StaleSubmitError):
+            autos.action_submit(
+                project_config,
+                session_id=sid,
+                response=_canned_hypothesis_response(),
+                # No state_snapshot — relies on the auto-load.
+            )
 
 
 # ---------------------------------------------------------------------------

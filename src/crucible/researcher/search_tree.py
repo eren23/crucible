@@ -856,7 +856,7 @@ class SearchTree:
                 nid,
                 n.get("parent_node_id"),
                 n.get("status"),
-                tuple(n.get("child_node_ids") or []),
+                tuple(n.get("children") or []),
             )
             for nid, n in sorted(self.nodes.items())
         ]
