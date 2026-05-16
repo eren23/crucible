@@ -233,6 +233,11 @@ class AutonomousSession:
             session_id = _new_session_id()
             session = cls(config, session_id)
             now = utc_now_iso()
+            # Capture project_name for literature search query fallback (Phase 1.7
+            # review fix: the original fallback `focus_family or project_name or
+            # "machine learning"` had project_name as a dead key because it was
+            # never persisted in state_data).
+            project_name = getattr(config, "name", "") or ""
             session.state_data = {
                 "schema_version": cls.SCHEMA_VERSION,
                 "session_id": session_id,
@@ -245,6 +250,7 @@ class AutonomousSession:
                 "current_stage": cls.STAGE_HYPOTHESIS,
                 "tier": tier,
                 "focus_family": focus_family,
+                "project_name": project_name,
                 "budget_usd": budget_usd,
                 "budget_spent_usd": 0.0,
                 "with_literature": bool(with_literature),

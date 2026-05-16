@@ -121,6 +121,38 @@ class TestStart:
         out = autos.action_start(project_config, iterations=2, tier="proxy")
         assert "session_id" in out
 
+    def test_project_name_persisted_in_state(self, project_config):
+        """Phase 1.7 review fix: project_name was a dead key in the literature
+        query fallback because it was never stored in state_data. The fix
+        captures config.name at create-time."""
+        out = autos.action_start(project_config, iterations=2, tier="proxy")
+        status = autos.action_status(project_config, session_id=out["session_id"])
+        # Should be the config's project name (or empty string for empty config).
+        assert "project_name" in status
+
+    def test_with_literature_doesnt_crash_on_network_failure(
+        self, project_config, monkeypatch
+    ):
+        """Phase 1.7 contract: literature pre-injection is best-effort.
+        Even if search_papers blows up (network down, parse error),
+        build_prompt must NOT crash — literature_context degrades to
+        empty string and the prompt is still returned."""
+        from crucible.researcher import literature
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated network down")
+
+        monkeypatch.setattr(literature, "search_papers", boom)
+
+        out = autos.action_start(
+            project_config, iterations=2, tier="proxy",
+            with_literature=True, literature_k=3,
+        )
+        # No crash — prompt returned normally.
+        assert "session_id" in out
+        assert "system" in out
+        assert "user" in out
+
 
 class TestStartConcurrency:
     """Phase 1.1 review fix: prevent two concurrent action_start from creating

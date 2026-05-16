@@ -31,6 +31,8 @@ class _FakeConfig:
         self.metrics = _FakeMeta()
         self.nodes_file = "nodes.json"
         self.wandb = _FakeWandb()
+        # Needed by context_push_finding (Phase 1.6 auto-promote tests).
+        self.research_state_file = "research_state.jsonl"
 
 
 def _patch_config(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
@@ -250,6 +252,52 @@ class TestTreePrune:
 
         with pytest.raises(CrucibleError, match="unknown mode"):
             tree_prune({"name": "bad-mode", "mode": "banana"})
+
+
+class TestContextPushFindingAutoPromote:
+    """Phase 1.6 auto-promote findings — review-driven test coverage."""
+
+    def test_auto_promote_false_records_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Default: auto_promote omitted → records to state only, no hub call."""
+        from crucible.mcp.tools import context_push_finding
+
+        _patch_config(monkeypatch, tmp_path)
+        result = context_push_finding({
+            "finding": "test finding",
+            "confidence": 0.95,
+        })
+        assert result["status"] == "recorded"
+        assert "promoted" not in result
+
+    def test_auto_promote_below_threshold_skipped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """auto_promote=True but confidence below the promotion-rule
+        threshold (0.6 for project→track) → records + auto_promote_skipped."""
+        from crucible.mcp.tools import context_push_finding
+
+        _patch_config(monkeypatch, tmp_path)
+        result = context_push_finding({
+            "finding": "weak signal",
+            "confidence": 0.3,  # well below 0.6 threshold for project→track
+            "auto_promote": True,
+        })
+        assert result["status"] == "recorded"
+        assert result.get("auto_promote_skipped") is True
+        assert "0.30" in result["reason"] or "below threshold" in result["reason"]
+
+    def test_auto_promote_global_scope_has_high_threshold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Phase 1.6 review fix: ('project', 'global') key was missing from
+        PROMOTION_RULES, so auto_promote_scope='global' silently bypassed
+        the confidence gate. Now there's an explicit 0.9 threshold."""
+        from crucible.core.finding import PROMOTION_RULES
+        # Confirm the rule exists with a high bar.
+        assert ("project", "global") in PROMOTION_RULES
+        assert PROMOTION_RULES[("project", "global")]["min_confidence"] >= 0.9
 
     def test_prune_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create, tree_prune
