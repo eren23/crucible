@@ -3479,6 +3479,67 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ------------------------------------------------------------------
+    # External MCP consumption (Phase 3.5)
+    # ------------------------------------------------------------------
+    Tool(
+        name="external_mcp_list_servers",
+        description=(
+            "List external MCP servers configured under external_mcp.servers "
+            "in crucible.yaml. Use cases: Spider Chat (taste curation), "
+            "Codex (code mutations), any community MCP exposing domain tools.\n\n"
+            "REQUIRES: Nothing (returns count=0 when no external_mcp config).\n"
+            "RETURNS: {count, servers: [{name, command, args, has_env}]}\n"
+            "NEXT: external_mcp_list_tools(server=...) to enumerate one "
+            "server's tools, then external_mcp_call to invoke one."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="external_mcp_list_tools",
+        description=(
+            "Spawn the named external MCP server, enumerate its tools, "
+            "shut down. ~100-500ms latency.\n\n"
+            "REQUIRES: server (name from external_mcp.servers config).\n"
+            "RETURNS: {server, count, tools: [{name, description}]}\n"
+            "NEXT: external_mcp_call with one of the listed tool names."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"server": {"type": "string"}},
+            "required": ["server"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="external_mcp_call",
+        description=(
+            "Invoke a tool on the named external MCP server with JSON args. "
+            "Fresh subprocess per call (no connection pooling); use for "
+            "infrequent reflection-loop hooks, not hot-path inference.\n\n"
+            "REQUIRES: server, tool, args.\n"
+            "RETURNS: {server, tool, is_error, content: [{type, text}]}\n"
+            "NEXT: depends on the external tool; check its description."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server": {"type": "string"},
+                "tool": {"type": "string"},
+                "args": {
+                    "type": "object",
+                    "description": "JSON args forwarded to the external tool.",
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["server", "tool"],
+            "additionalProperties": False,
+        },
+    ),
     Tool(
         name="evaluator_list",
         description=(

@@ -1799,6 +1799,38 @@ def _hpo_load_or_create(args: dict[str, Any]):
     return study
 
 
+def external_mcp_list_servers(args: dict[str, Any]) -> dict[str, Any]:
+    """List external MCP servers configured under external_mcp.servers."""
+    try:
+        from crucible.researcher.external_mcp import list_servers
+        return list_servers(_get_config())
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def external_mcp_list_tools(args: dict[str, Any]) -> dict[str, Any]:
+    """Spawn an external server and enumerate its tools."""
+    try:
+        from crucible.researcher.external_mcp import list_remote_tools
+        return list_remote_tools(_get_config(), args["server"])
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def external_mcp_call(args: dict[str, Any]) -> dict[str, Any]:
+    """Invoke a tool on an external MCP server with JSON args."""
+    try:
+        from crucible.researcher.external_mcp import call_remote_tool
+        return call_remote_tool(
+            _get_config(),
+            args["server"],
+            args["tool"],
+            dict(args.get("args") or {}),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered evaluator plugins.
 
@@ -7058,6 +7090,9 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "hpo_ask_trial": hpo_ask_trial,
     "hpo_tell_result": hpo_tell_result,
     "hpo_status": hpo_status,
+    "external_mcp_list_servers": external_mcp_list_servers,
+    "external_mcp_list_tools": external_mcp_list_tools,
+    "external_mcp_call": external_mcp_call,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,
