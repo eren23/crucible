@@ -840,6 +840,54 @@ class SearchTree:
             raise SearchTreeError(f"No candidate code at {path}")
         return path.read_text(encoding="utf-8")
 
+    def auto_prune(self, threshold: float | None = None) -> dict[str, Any]:
+        """Prune branches whose completed-result metric is worse than threshold.
+
+        Phase 1.10: previously lived on ``TreeSearchResearcher.auto_prune``
+        in ``tree_loop.py`` — moved to ``SearchTree`` itself so the MCP
+        ``tree_prune(mode='auto')`` surface doesn't need to instantiate a
+        researcher just for pruning. The legacy method delegates here.
+
+        If *threshold* is None, reads from ``meta['pruning_config']
+        ['metric_threshold']`` and returns ``{pruned_count: 0,
+        message: "No threshold configured"}`` if absent. Otherwise:
+        for each completed node, if its ``result_metric`` is worse than
+        the threshold (in the tree's metric_direction), prune the branch
+        rooted at that node.
+
+        Returns ``{pruned_count, pruned_node_ids}`` (plus ``message``
+        when no threshold is configured).
+        """
+        if threshold is None:
+            pc = self.meta.get("pruning_config") or {}
+            threshold = pc.get("metric_threshold")
+            if threshold is None:
+                return {"pruned_count": 0, "message": "No threshold configured"}
+            threshold = float(threshold)
+
+        minimize = self.meta.get("metric_direction", "minimize") == "minimize"
+        pruned: list[str] = []
+        for node in list(self.nodes.values()):
+            if node.get("status") != "completed":
+                continue
+            metric = node.get("result_metric")
+            if metric is None:
+                continue
+            should_prune = (
+                (minimize and metric > threshold)
+                or (not minimize and metric < threshold)
+            )
+            if should_prune:
+                self.prune_branch(
+                    node["node_id"],
+                    reason=f"metric {metric} {'>' if minimize else '<'} threshold {threshold}",
+                )
+                pruned.append(node["node_id"])
+        return {
+            "pruned_count": len(pruned),
+            "pruned_node_ids": pruned,
+        }
+
     def snapshot(self, node_id: str | None = None) -> dict[str, Any]:
         """Return an opaque snapshot for stale-submit detection.
 

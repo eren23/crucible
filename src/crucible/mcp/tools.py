@@ -1148,7 +1148,14 @@ def context_get_analysis(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
-    """Record a research finding in the context store."""
+    """Record a research finding in the context store.
+
+    Phase 1.6 auto-promote: pass ``auto_promote=True`` and the finding will
+    additionally be pushed to the hub (track-scope by default, global if
+    ``auto_promote_scope='global'``) provided the confidence meets the
+    promotion-rule threshold. Auto-promote is opt-in per call — the
+    default behavior records to ResearchState only.
+    """
     config = _get_config()
     from crucible.researcher.state import ResearchState
 
@@ -1164,7 +1171,50 @@ def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
     )
     state.save()
 
-    return {"status": "recorded", "entry": entry}
+    auto_promote = bool(args.get("auto_promote", False))
+    if not auto_promote:
+        return {"status": "recorded", "entry": entry}
+
+    # Auto-promote: confidence-gated push to the hub.
+    try:
+        from crucible.core.finding import PROMOTION_RULES
+        target_scope = str(args.get("auto_promote_scope", "track"))
+        target_track = args.get("auto_promote_track")
+        rule = PROMOTION_RULES.get(("project", target_scope), {})
+        min_conf = rule.get("min_confidence", 0.0)
+        if entry.get("confidence", 0) < min_conf:
+            return {
+                "status": "recorded",
+                "entry": entry,
+                "auto_promote_skipped": True,
+                "reason": (
+                    f"confidence {entry.get('confidence', 0):.2f} below threshold "
+                    f"{min_conf:.2f} for project→{target_scope}"
+                ),
+            }
+        hub = _get_hub()
+        if hub is None:
+            return {
+                "status": "recorded",
+                "entry": entry,
+                "auto_promote_skipped": True,
+                "reason": "hub not initialized",
+            }
+        hub_finding = _research_finding_to_hub_finding(entry, config)
+        promoted = hub.store_finding(hub_finding, target_scope, track=target_track)
+        return {
+            "status": "recorded_and_promoted",
+            "entry": entry,
+            "promoted": promoted,
+            "auto_promote_scope": target_scope,
+        }
+    except CrucibleError as exc:
+        return {
+            "status": "recorded",
+            "entry": entry,
+            "auto_promote_skipped": True,
+            "reason": f"[{type(exc).__name__}] {exc}",
+        }
 
 
 def context_get_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1679,6 +1729,8 @@ def autonomous_research_loop(args: dict[str, Any]) -> dict[str, Any]:
                 tier=str(args.get("tier", "proxy")),
                 focus_family=str(args.get("focus_family", "") or ""),
                 budget_usd=args.get("budget_usd"),
+                with_literature=bool(args.get("with_literature", False)),
+                literature_k=int(args.get("literature_k", 5)),
             )
         if action == "submit":
             session_id = args.get("session_id")
@@ -3979,7 +4031,16 @@ def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
-    """Prune a node or entire branch in the search tree."""
+    """Prune a node, branch, or run deterministic auto-prune over the tree.
+
+    Modes:
+    - ``"manual"`` (default): prune the named node_id (or its branch if
+      ``prune_branch=True``).
+    - ``"auto"``: walk all completed nodes and prune branches whose
+      ``result_metric`` is worse than the tree's configured
+      ``pruning_config.metric_threshold`` (or the passed ``threshold``).
+      ``node_id`` becomes optional in this mode.
+    """
     config = _get_config()
     from crucible.researcher.search_tree import SearchTree
 
@@ -3987,7 +4048,32 @@ def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
     tree_dir = _get_tree_dir(config, name)
     tree = SearchTree.load(tree_dir)
 
-    node_id = args["node_id"]
+    mode = args.get("mode", "manual")
+
+    if mode == "auto":
+        threshold = args.get("threshold")
+        if threshold is not None:
+            threshold = float(threshold)
+        # Hold tree.write_lock around the auto-prune mutation. Mirrors
+        # tree_auto_expand submit's pattern (Phase 1.4a).
+        with tree.write_lock():
+            result = tree.auto_prune(threshold=threshold)
+        return {
+            "status": "auto_pruned",
+            "mode": "auto",
+            **result,
+            "total_pruned": tree.meta.get("pruned_nodes", 0),
+        }
+
+    if mode != "manual":
+        raise CrucibleError(
+            f"tree_prune: unknown mode {mode!r}. Valid: 'manual' (default) or 'auto'."
+        )
+
+    # Manual mode: explicit node_id required.
+    node_id = args.get("node_id")
+    if not node_id:
+        raise CrucibleError("tree_prune manual mode: 'node_id' is required")
     reason = args.get("reason", "")
     prune_branch = args.get("prune_branch", False)
 

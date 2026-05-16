@@ -211,6 +211,8 @@ class AutonomousSession:
         tier: str,
         focus_family: str = "",
         budget_usd: float | None = None,
+        with_literature: bool = False,
+        literature_k: int = 5,
     ) -> "AutonomousSession":
         # Lock around find_active + write to prevent two concurrent
         # action_start calls from each creating distinct sessions.
@@ -219,6 +221,15 @@ class AutonomousSession:
             if existing is not None:
                 # Idempotent: second start while session running returns the same one.
                 return existing
+
+            # Phase 1.9: judge-separation enforcement at session start so
+            # mis-separated judge panels (reward == eval model or family)
+            # fail before any pod time is consumed. Mirrors the harness
+            # session's identical check at create-time + HarnessOptimizer
+            # .run_iteration's per-iteration assert.
+            panel = getattr(config, "judges", None)
+            if panel is not None and panel.is_configured():
+                panel.assert_separated()
             session_id = _new_session_id()
             session = cls(config, session_id)
             now = utc_now_iso()
@@ -236,6 +247,8 @@ class AutonomousSession:
                 "focus_family": focus_family,
                 "budget_usd": budget_usd,
                 "budget_spent_usd": 0.0,
+                "with_literature": bool(with_literature),
+                "literature_k": int(literature_k),
                 "last_state_snapshot": None,
                 "last_prompt_fingerprint": None,
                 "recent_fingerprints": [],
@@ -268,12 +281,29 @@ class AutonomousSession:
         iteration = self.state_data["current_iteration"]
         focus_family = self.state_data.get("focus_family") or ""
 
+        # Phase 1.7: literature pre-injection (opt-in). When the session
+        # was started with with_literature=True, fetch top-K HF Papers via
+        # researcher.literature and pass as literature_context. Best-
+        # effort: network failures return empty string, never block.
+        literature_context = ""
+        if self.state_data.get("with_literature") and stage == self.STAGE_HYPOTHESIS:
+            try:
+                from crucible.researcher import literature as _lit
+                query = focus_family or self.state_data.get("project_name") or "machine learning"
+                papers = _lit.search_papers(query, limit=int(self.state_data.get("literature_k", 5)))
+                literature_context = _lit.format_literature_context(papers, max_papers=int(self.state_data.get("literature_k", 5)))
+            except Exception:
+                # Best-effort. literature module already swallows network
+                # errors; this is a belt-and-suspenders catch-all.
+                literature_context = ""
+
         prompt = oa.request_prompt(
             stage=stage,
             config=self.config,
             state=state,
             focus_family=focus_family,
             iteration=iteration,
+            literature_context=literature_context,
         )
         fingerprint = _fingerprint(prompt.get("system"), prompt.get("user"))
 
@@ -453,8 +483,15 @@ def action_start(
     tier: str = "proxy",
     focus_family: str = "",
     budget_usd: float | None = None,
+    with_literature: bool = False,
+    literature_k: int = 5,
 ) -> dict[str, Any]:
-    """Start (or resume the active session of) an autonomous research loop."""
+    """Start (or resume the active session of) an autonomous research loop.
+
+    Set ``with_literature=True`` to inject HuggingFace Papers as context
+    into each hypothesis prompt (best-effort; network failures degrade
+    silently). ``literature_k`` controls the number of papers (default 5).
+    """
     if iterations < 1:
         raise CrucibleError("autonomous_research_loop: iterations must be >= 1")
     session = AutonomousSession.create(
@@ -463,6 +500,8 @@ def action_start(
         tier=tier,
         focus_family=focus_family,
         budget_usd=budget_usd,
+        with_literature=with_literature,
+        literature_k=literature_k,
     )
     state = _load_state(config)
     return session.build_prompt(state)

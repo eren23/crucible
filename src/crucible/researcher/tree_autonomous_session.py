@@ -191,6 +191,15 @@ class TreeAutonomousSession:
             existing = cls.find_active(config, tree_name)
             if existing is not None:
                 return existing
+
+            # Phase 1.9: judge-separation enforcement at session start.
+            # Tree GRPO + auto-expand can ride on LM-as-judge loops;
+            # mis-separated panels would let reward and eval collapse to
+            # the same model. Fail-fast before pod time.
+            panel = getattr(config, "judges", None)
+            if panel is not None and panel.is_configured():
+                panel.assert_separated()
+
             session_id = str(uuid.uuid4())
             session = cls(config, session_id)
             now = utc_now_iso()

@@ -97,6 +97,30 @@ class TestStart:
         )
         assert lock_path.exists()
 
+    def test_judge_separation_enforced_at_start(self, project_config):
+        """Phase 1.9: AutonomousSession.create calls panel.assert_separated()
+        before minting a session, so misconfigured judges fail before any pod
+        time is consumed."""
+        from crucible.core.config import JudgeConfig, JudgePanel
+        from crucible.core.errors import ConfigError
+
+        # Force a misconfiguration: same model, same family.
+        project_config.judges = JudgePanel(
+            reward_judge=JudgeConfig(model="claude-3", family="claude"),
+            eval_judge=JudgeConfig(model="claude-3", family="claude"),
+            enforce_separation=True,
+        )
+        with pytest.raises(ConfigError):
+            autos.action_start(project_config, iterations=2, tier="proxy")
+
+    def test_judge_separation_skipped_when_unconfigured(self, project_config):
+        """An empty (unconfigured) JudgePanel must NOT block session start —
+        the contract is opt-in via populated model strings."""
+        from crucible.core.config import JudgePanel
+        project_config.judges = JudgePanel()  # empty model strings
+        out = autos.action_start(project_config, iterations=2, tier="proxy")
+        assert "session_id" in out
+
 
 class TestStartConcurrency:
     """Phase 1.1 review fix: prevent two concurrent action_start from creating

@@ -936,9 +936,13 @@ TOOLS: list[Tool] = [
         name="context_push_finding",
         description=(
             "Record a research finding or observation. Persists across sessions and informs hypothesis generation.\n\n"
+            "Phase 1.6 auto-promote: set ``auto_promote=true`` and the finding will also be pushed to the hub "
+            "(track-scope by default; pass ``auto_promote_scope='global'`` for global) provided the confidence "
+            "meets the promotion-rule minimum. Pass ``auto_promote_track`` to target a specific track. "
+            "Auto-promote is per-call opt-in; default behavior records only to ResearchState.\n\n"
             "REQUIRES: Nothing. Categories: belief, observation, constraint, rejected_hypothesis.\n"
-            "RETURNS: {status, finding_index}\n"
-            "NEXT: finding_promote to elevate to hub scope, annotate_run to link to specific experiments."
+            "RETURNS: {status: 'recorded' | 'recorded_and_promoted', entry, ...}\n"
+            "NEXT: finding_promote to elevate to hub scope manually, annotate_run to link to specific experiments."
         ),
         inputSchema={
             "type": "object",
@@ -947,6 +951,10 @@ TOOLS: list[Tool] = [
                 "category": {"type": "string", "description": "Category: belief, observation, constraint, rejected_hypothesis.", "default": "observation"},
                 "source_experiments": {"type": "array", "items": {"type": "string"}, "description": "Experiment names supporting this finding.", "default": []},
                 "confidence": {"type": "number", "description": "Confidence in this finding (0-1).", "default": 0.7},
+                "created_by": {"type": "string", "description": "Optional author identifier.", "default": "mcp-agent"},
+                "auto_promote": {"type": "boolean", "description": "Phase 1.6: push to hub if confidence meets promotion threshold.", "default": False},
+                "auto_promote_scope": {"type": "string", "enum": ["track", "global"], "description": "Hub scope to promote into.", "default": "track"},
+                "auto_promote_track": {"type": "string", "description": "Track name when auto_promote_scope='track'."},
             },
             "required": ["finding"],
             "additionalProperties": False,
@@ -1992,16 +2000,41 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="tree_prune",
-        description="Prune a node or entire branch in the search tree. REQUIRES: name, node_id. RETURNS: pruned count. NEXT: tree_get.",
+        description=(
+            "Prune a node, branch, or run deterministic auto-prune over the tree.\n\n"
+            "Modes:\n"
+            "- 'manual' (default): prune the named node_id (or its branch if "
+            "  prune_branch=true). Requires node_id.\n"
+            "- 'auto': walk all completed nodes and prune branches whose "
+            "  result_metric is worse than the configured pruning threshold "
+            "  (or the passed 'threshold'). node_id is optional in this mode.\n\n"
+            "REQUIRES: name; for mode='manual' also node_id.\n"
+            "RETURNS: manual → {status, pruned_count, total_pruned}. "
+            "auto → {status, mode, pruned_count, pruned_node_ids, total_pruned}.\n"
+            "NEXT: tree_get."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Tree name."},
-                "node_id": {"type": "string", "description": "Node ID to prune."},
+                "mode": {
+                    "type": "string",
+                    "enum": ["manual", "auto"],
+                    "default": "manual",
+                    "description": "Pruning mode. 'auto' uses the tree's metric threshold.",
+                },
+                "node_id": {
+                    "type": "string",
+                    "description": "Node ID to prune (manual mode only).",
+                },
                 "reason": {"type": "string", "description": "Why this node/branch is being pruned.", "default": ""},
-                "prune_branch": {"type": "boolean", "description": "If true, recursively prune all descendants.", "default": False},
+                "prune_branch": {"type": "boolean", "description": "If true, recursively prune all descendants (manual mode only).", "default": False},
+                "threshold": {
+                    "type": "number",
+                    "description": "Override the tree's pruning_config metric_threshold (auto mode only).",
+                },
             },
-            "required": ["name", "node_id"],
+            "required": ["name"],
             "additionalProperties": False,
         },
     ),
@@ -3449,6 +3482,16 @@ TOOLS: list[Tool] = [
                 "budget_usd": {
                     "type": "number",
                     "description": "Optional total spend cap in USD (start only). Not yet enforced — Phase 1.8.",
+                },
+                "with_literature": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Inject HuggingFace Papers context into hypothesis prompts (start only, best-effort).",
+                },
+                "literature_k": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Number of papers to inject when with_literature=True (start only).",
                 },
                 "response": {
                     "description": "Orchestrator-supplied response for the current stage (submit only).",

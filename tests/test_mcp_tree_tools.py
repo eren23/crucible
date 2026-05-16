@@ -194,6 +194,63 @@ class TestTreePrune:
         assert result["node_id"] == root_id
         assert result["total_pruned"] == 1
 
+    def test_prune_auto_mode_no_threshold_returns_zero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Phase 1.10: tree_prune(mode='auto') with no threshold configured
+        returns pruned_count=0 with a clear message rather than erroring."""
+        from crucible.mcp.tools import tree_create, tree_prune
+
+        _patch_config(monkeypatch, tmp_path)
+        tree_create({"name": "auto-noth"})
+
+        result = tree_prune({"name": "auto-noth", "mode": "auto"})
+        assert result["mode"] == "auto"
+        assert result["pruned_count"] == 0
+        assert "message" in result and "threshold" in result["message"].lower()
+
+    def test_prune_auto_mode_with_explicit_threshold(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Auto mode with an explicit threshold prunes worse-than-threshold
+        completed nodes."""
+        from crucible.mcp.tools import tree_create, tree_prune
+        from crucible.researcher.search_tree import SearchTree
+
+        _patch_config(monkeypatch, tmp_path)
+        tree_create({
+            "name": "auto-th",
+            "roots": [{"name": "good", "config": {"LR": "3e-4"}}],
+        })
+
+        # Add a "bad" node and complete both with metrics.
+        tree_dir = tmp_path / ".crucible" / "search_trees" / "auto-th"
+        tree = SearchTree.load(tree_dir)
+        good_id = tree.meta["root_node_ids"][0]
+        tree.record_result(good_id, {"val_loss": 1.0})  # below threshold
+        # Expand a sibling root: not natively supported; instead expand a child
+        # of good with a "bad" result.
+        child_ids = tree.expand_node(good_id, [{"name": "bad", "config": {}, "hypothesis": ""}])
+        bad_id = child_ids[0]
+        tree.record_result(bad_id, {"val_loss": 99.0})  # well above threshold
+
+        result = tree_prune({"name": "auto-th", "mode": "auto", "threshold": 5.0})
+        assert result["mode"] == "auto"
+        assert result["pruned_count"] >= 1
+        assert bad_id in result["pruned_node_ids"]
+
+    def test_prune_unknown_mode_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        from crucible.mcp.tools import tree_create, tree_prune
+        from crucible.core.errors import CrucibleError
+
+        _patch_config(monkeypatch, tmp_path)
+        tree_create({"name": "bad-mode"})
+
+        with pytest.raises(CrucibleError, match="unknown mode"):
+            tree_prune({"name": "bad-mode", "mode": "banana"})
+
     def test_prune_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create, tree_prune
         from crucible.researcher.search_tree import SearchTree
