@@ -3541,6 +3541,48 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="note_generate_paper_draft",
+        description=(
+            "Generate a structured markdown paper draft from a research track "
+            "(Phase 4.1). Two-call orchestrator-contract: action='request_prompt' "
+            "returns {system, user, schema, sections} composed from track findings + "
+            "leaderboard + notes + hypotheses; orchestrator calls its own LLM with "
+            "the prompt and submits the JSON response back via action='submit', "
+            "which validates section completeness and returns the rendered "
+            "markdown. No LLM keys in Crucible.\n\n"
+            "Required sections: abstract, introduction, method, results, "
+            "discussion, limitations, related_work. Optional: title, key_findings.\n\n"
+            "REQUIRES: track_name; for action='submit' also response.\n"
+            "RETURNS: request_prompt → {system, user, schema, sections, ...}; "
+            "submit → {title, key_findings, markdown, section_counts}.\n"
+            "NEXT: hf_publish_findings to share, or note_post_to_hf_discussions "
+            "to publish the draft to a HF Discussion thread."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["request_prompt", "submit"],
+                    "default": "request_prompt",
+                },
+                "track_name": {"type": "string"},
+                "response": {
+                    "description": (
+                        "Required for action='submit'. Orchestrator's JSON "
+                        "response: either a dict matching the schema, or a "
+                        "JSON-string blob from the LLM."
+                    ),
+                },
+                "max_findings": {"type": "integer", "default": 25},
+                "max_leaderboard": {"type": "integer", "default": 10},
+                "max_notes": {"type": "integer", "default": 10},
+            },
+            "required": ["track_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="evaluator_list",
         description=(
             "List registered evaluator plugins (Phase 3.3 plugin family). "

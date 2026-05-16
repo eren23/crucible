@@ -1855,6 +1855,101 @@ def external_mcp_call(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def note_generate_paper_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Generate a markdown paper draft from a research track.
+
+    Two-call orchestrator-contract:
+      action='request_prompt' → returns {system, user, schema, sections}
+      action='submit'         → validates the orchestrator's JSON
+                                response + returns the rendered markdown
+    """
+    action = args.get("action", "request_prompt")
+    track_name = args.get("track_name", "").strip()
+    if not track_name:
+        return {"error": "[CrucibleError] 'track_name' is required."}
+
+    try:
+        from crucible.researcher.paper_writer import (
+            PaperDraftError,
+            build_paper_draft_prompt,
+            gather_track_context,
+            parse_paper_draft_response,
+        )
+
+        if action == "request_prompt":
+            config = _get_config()
+            hub = _get_hub_store()
+            # Best-effort: pull leaderboard + notes + hypotheses for
+            # the context dump. Each is optional; the prompt builder
+            # tolerates absent sections.
+            leaderboard_rows: list[dict[str, Any]] = []
+            notes: list[dict[str, Any]] = []
+            hypotheses: list[dict[str, Any]] = []
+            try:
+                from crucible.analysis.leaderboard import leaderboard as build_lb
+                from crucible.analysis.results import completed_results
+                results = completed_results(config)
+                if results:
+                    leaderboard_rows = build_lb(
+                        results, top_n=int(args.get("max_leaderboard", 10)),
+                    )
+            except Exception:
+                leaderboard_rows = []
+            try:
+                from crucible.runner.notes import NoteStore
+                store = NoteStore(config.project_root / config.store_dir)
+                notes = store.recent_notes(limit=int(args.get("max_notes", 10)))
+            except Exception:
+                notes = []
+            try:
+                from crucible.researcher.state import ResearchState
+                state_path = config.project_root / config.research_state_file
+                if state_path.exists():
+                    rs = ResearchState(state_path)
+                    hypotheses = list(rs.hypotheses or [])
+            except Exception:
+                hypotheses = []
+
+            context = gather_track_context(
+                track_name=track_name,
+                hub_store=hub,
+                leaderboard_rows=leaderboard_rows,
+                notes=notes,
+                hypotheses=hypotheses,
+                max_findings=int(args.get("max_findings", 25)),
+                max_leaderboard=int(args.get("max_leaderboard", 10)),
+                max_notes=int(args.get("max_notes", 10)),
+            )
+            prompt = build_paper_draft_prompt(context)
+            return {
+                "action": "request_prompt",
+                "track_name": track_name,
+                **prompt,
+            }
+
+        if action == "submit":
+            if "response" not in args:
+                return {"error": "[CrucibleError] 'response' is required for action='submit'."}
+            try:
+                rendered = parse_paper_draft_response(args["response"], track_name)
+            except PaperDraftError as exc:
+                return {"error": f"[PaperDraftError] {exc}"}
+            return {
+                "action": "submit",
+                "track_name": track_name,
+                "title": rendered["title"],
+                "key_findings": rendered["key_findings"],
+                "markdown": rendered["markdown"],
+                "section_counts": {
+                    k: len(v) for k, v in rendered["sections"].items()
+                },
+            }
+
+        return {"error": f"[CrucibleError] Unknown action {action!r}. Valid: request_prompt, submit."}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered evaluator plugins.
 
@@ -7110,6 +7205,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_arxiv_search": research_arxiv_search,
     "research_openreview_search": research_openreview_search,
     "evaluator_list": evaluator_list,
+    "note_generate_paper_draft": note_generate_paper_draft,
     "hpo_create_study": hpo_create_study,
     "hpo_ask_trial": hpo_ask_trial,
     "hpo_tell_result": hpo_tell_result,
