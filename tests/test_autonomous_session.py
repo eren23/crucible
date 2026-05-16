@@ -130,6 +130,48 @@ class TestStart:
         # Should be the config's project name (or empty string for empty config).
         assert "project_name" in status
 
+    def test_budget_exceeded_auto_cancels_session(
+        self, project_config, monkeypatch
+    ):
+        """Phase 1.8: when wall-clock × declared rate exceeds budget_usd,
+        the next prompt build auto-cancels the session and raises
+        BudgetExceeded. State persists last_error + budget_spent_usd."""
+        from crucible.researcher.autonomous_session import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        # Mock the spend computation to return a value already over the cap.
+        def over_budget(config, session_started_at, *, now=None):
+            return {
+                "spend_usd": 100.0,
+                "hours_elapsed": 1.0,
+                "hourly_rate": 100.0,
+                "active_pods": 1,
+            }
+        monkeypatch.setattr(cost_tracker, "compute_session_spend", over_budget)
+        # The autonomous_session module imports compute_session_spend lazily
+        # inside _refresh_budget_and_maybe_cancel, so monkeypatching the
+        # source module is sufficient.
+
+        with pytest.raises(BudgetExceeded, match="budget exceeded"):
+            autos.action_start(
+                project_config, iterations=5, tier="proxy", budget_usd=5.0,
+            )
+
+    def test_budget_none_skips_check(self, project_config, monkeypatch):
+        """budget_usd=None opts out of budget enforcement entirely."""
+        from crucible.runner import cost_tracker
+
+        called = {"n": 0}
+        def tracking(config, session_started_at, *, now=None):
+            called["n"] += 1
+            return {"spend_usd": 0.0, "hours_elapsed": 0.0, "hourly_rate": 0.0, "active_pods": 0}
+        monkeypatch.setattr(cost_tracker, "compute_session_spend", tracking)
+
+        autos.action_start(project_config, iterations=2, tier="proxy")
+        # Default budget_usd is None — compute_session_spend should never
+        # be invoked.
+        assert called["n"] == 0
+
     def test_with_literature_doesnt_crash_on_network_failure(
         self, project_config, monkeypatch
     ):

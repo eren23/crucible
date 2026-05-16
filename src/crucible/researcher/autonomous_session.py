@@ -85,6 +85,15 @@ class DoomLoopDetected(ResearcherError):
     """
 
 
+class BudgetExceeded(ResearcherError):
+    """Session's wall-clock × declared-pod-rate spend exceeded budget_usd.
+
+    Session is automatically marked canceled with the reason captured in
+    state_data.last_error. The orchestrator can inspect ``budget_spent_usd``
+    in the session state to confirm.
+    """
+
+
 def _sessions_dir(project_root: Path) -> Path:
     return Path(project_root) / ".crucible" / _SESSIONS_DIRNAME
 
@@ -281,8 +290,51 @@ class AutonomousSession:
             self.STATUS_ERROR,
         )
 
+    def _refresh_budget_and_maybe_cancel(self) -> None:
+        """Recompute spend; if over budget, mark session canceled + raise.
+
+        Phase 1.8: per-session cost guard. ``budget_usd`` was already
+        accepted by ``create()`` but never enforced. Now each prompt
+        build and each successful submit refreshes the spend estimate
+        (wall-clock × declared pod rate from cost_tracker) and
+        auto-cancels the session when the cap is reached.
+
+        Skipped when ``budget_usd`` is None (no cap configured).
+        """
+        budget = self.state_data.get("budget_usd")
+        if budget is None:
+            return
+        from crucible.runner.cost_tracker import compute_session_spend
+
+        spend = compute_session_spend(
+            self.config, self.state_data.get("created_at", "")
+        )
+        self.state_data["budget_spent_usd"] = spend["spend_usd"]
+        self.state_data["last_budget_check"] = spend
+        if spend["spend_usd"] >= float(budget):
+            reason = (
+                f"budget exceeded: spent ${spend['spend_usd']:.2f} "
+                f"(${spend['hourly_rate']:.2f}/hr × {spend['hours_elapsed']:.2f}h) "
+                f"≥ cap ${float(budget):.2f}"
+            )
+            self.state_data["status"] = self.STATUS_CANCELED
+            self.state_data["last_error"] = reason
+            self.save()
+            self.append_event(
+                "budget_exceeded",
+                budget_usd=float(budget),
+                spend_usd=spend["spend_usd"],
+                hourly_rate=spend["hourly_rate"],
+                hours_elapsed=spend["hours_elapsed"],
+            )
+            raise BudgetExceeded(reason)
+
     def build_prompt(self, state: ResearchState) -> dict[str, Any]:
         """Build the prompt for the session's current stage."""
+        # Phase 1.8: refresh budget before each prompt build. Auto-cancels
+        # + raises BudgetExceeded if the cap is hit.
+        self._refresh_budget_and_maybe_cancel()
+
         stage = self.state_data["current_stage"]
         iteration = self.state_data["current_iteration"]
         focus_family = self.state_data.get("focus_family") or ""
@@ -569,6 +621,7 @@ def action_cancel(
 __all__ = [
     "AutonomousSession",
     "AutonomousSessionError",
+    "BudgetExceeded",
     "DoomLoopDetected",
     "action_start",
     "action_submit",
