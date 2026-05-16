@@ -102,7 +102,15 @@ def _fetch(
     use v2 exclusively; older ones still serve from v1.
     """
     for base in (_OR_API_V2, _OR_API_V1):
-        params = {"term": query, "limit": str(max(1, int(limit)))}
+        # ``source=forum`` filters out review notes / comments and
+        # returns only top-level paper submissions. Without it the
+        # endpoint returns a mix and most rows have empty title/authors
+        # (they're reviewer fields like ``summary``, ``rating``, etc.).
+        params = {
+            "term": query,
+            "limit": str(max(1, int(limit))),
+            "source": "forum",
+        }
         if venue:
             params["venue"] = venue
         url = f"{base}/notes/search?{urllib.parse.urlencode(params)}"
