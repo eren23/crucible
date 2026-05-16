@@ -3366,6 +3366,62 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="research_arxiv_search",
+        description=(
+            "Search arXiv via the public Atom-feed API (no auth, no API key). "
+            "Returns paper records normalized to the same shape as research_hf_search "
+            "(title, summary, authors, url, published_at), so callers can interleave "
+            "results without per-source branching.\n\n"
+            "Use this when the autonomous loop needs literature context for "
+            "hypothesis generation beyond HuggingFace Papers — e.g., for theoretical "
+            "ML, statistics, or older work not indexed by HF.\n\n"
+            "REQUIRES: query.\n"
+            "RETURNS: {query, count, results: [{arxiv_id, title, summary, authors, "
+            "categories, published_at, url}, ...]}\n"
+            "NEXT: research_request_prompt(stage='hypothesis') with the results as "
+            "literature context, or research_hf_search to cross-reference."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Free-text query (e.g., 'predictor collapse JEPA').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Max papers to return.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["relevance", "lastUpdatedDate", "submittedDate"],
+                    "default": "relevance",
+                },
+                "sort_order": {
+                    "type": "string",
+                    "enum": ["ascending", "descending"],
+                    "default": "descending",
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional arXiv subject filter, e.g., ['cs.LG', 'cs.AI']. "
+                        "Omit for all categories."
+                    ),
+                },
+                "multi_angle": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Expand the query via LLM and dedup across angles (3-5x slower).",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
     # ------------------------------------------------------------------
     # GitHub search
     # ------------------------------------------------------------------
