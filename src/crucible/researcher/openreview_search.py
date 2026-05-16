@@ -102,15 +102,16 @@ def _fetch(
     use v2 exclusively; older ones still serve from v1.
     """
     for base in (_OR_API_V2, _OR_API_V1):
-        # ``source=forum`` filters out review notes / comments and
-        # returns only top-level paper submissions. Without it the
-        # endpoint returns a mix and most rows have empty title/authors
-        # (they're reviewer fields like ``summary``, ``rating``, etc.).
         params = {
             "term": query,
             "limit": str(max(1, int(limit))),
-            "source": "forum",
         }
+        # ``source=forum`` filters out review notes / comments and
+        # returns only top-level paper submissions. The v2 API supports
+        # this; v1 doesn't and may silently return empty results when
+        # an unknown param is passed, so we scope the filter to v2.
+        if base == _OR_API_V2:
+            params["source"] = "forum"
         if venue:
             params["venue"] = venue
         url = f"{base}/notes/search?{urllib.parse.urlencode(params)}"

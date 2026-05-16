@@ -26,6 +26,17 @@ from crucible.core.log import log_warn
 from crucible.researcher.literature import multi_angle_dedup
 
 
+# Prefer defusedxml when available to neutralize billion-laughs / external-
+# entity expansion on the parse path. Falls back to stdlib ElementTree
+# when defusedxml isn't installed — the failure mode is DoS (loop hangs
+# on a poisoned response), not exfiltration. ``fromstring`` here is the
+# only network-bytes-to-XML entry point.
+try:
+    from defusedxml.ElementTree import fromstring as _fromstring  # type: ignore[import-not-found]
+except ImportError:
+    _fromstring = ET.fromstring
+
+
 _ARXIV_FAILURES = (
     urllib.error.URLError,
     TimeoutError,
@@ -146,8 +157,14 @@ def _fetch(
 
 
 def _parse_atom(body: bytes, limit: int) -> list[dict[str, Any]]:
-    """Parse arXiv's Atom feed into the standard paper-dict shape."""
-    root = ET.fromstring(body)
+    """Parse arXiv's Atom feed into the standard paper-dict shape.
+
+    Uses defusedxml's ``fromstring`` when available (neutralizes
+    billion-laughs / external-entity attacks); falls back to stdlib
+    ``ET.fromstring`` otherwise. arXiv is trusted, but a MITM /
+    redirected response could still be poisoned.
+    """
+    root = _fromstring(body)
     entries = root.findall("atom:entry", _NS)
     out: list[dict[str, Any]] = []
     for entry in entries[:limit]:

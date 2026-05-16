@@ -112,6 +112,120 @@ class HPOStudy:
         self._study = self._build_optuna_study(sampler=sampler, seed=seed)
 
     # ------------------------------------------------------------------
+    # Cross-process resume
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load(
+        cls,
+        *,
+        name: str,
+        storage_dir: Path,
+        sampler: str = "tpe",
+        seed: int | None = None,
+    ) -> "HPOStudy":
+        """Reconstruct an HPOStudy from its persisted JSON.
+
+        Replays completed trials into the underlying Optuna study via
+        :func:`optuna.trial.create_trial` + ``study.add_trial`` so the
+        sampler's belief is current — not just the bookkeeping. Trials
+        whose params don't match the persisted distributions are
+        skipped (with a warning) rather than failing the whole load.
+
+        Raises :class:`HPOConfigError` if the persisted file is missing
+        or malformed.
+        """
+        import json
+
+        path = storage_dir / f"{name}.json"
+        if not path.exists():
+            raise HPOConfigError(
+                f"No persisted HPO study at {path}. "
+                f"Call HPOStudy(...) directly to create."
+            )
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise HPOConfigError(
+                f"Persisted HPO study at {path} is malformed: {exc}"
+            ) from exc
+
+        study = cls(
+            name=name,
+            params=data["params"],
+            direction=data.get("direction", "minimize"),
+            sampler=sampler,
+            seed=seed,
+            storage_dir=storage_dir,
+        )
+
+        # Replay persisted trials through Optuna so the sampler updates
+        # its posterior. The previous implementation only repopulated
+        # _trial_records, leaving Optuna's study counter at 0 — which
+        # broke subsequent tell() calls referencing old trial_ids.
+        import optuna
+        distributions = study._optuna_distributions()
+        for t in data.get("trials", []):
+            tid = t.get("trial_id")
+            if not isinstance(tid, int):
+                continue
+            status = t.get("status", "complete")
+            score = t.get("score")
+            try:
+                state = {
+                    "complete": optuna.trial.TrialState.COMPLETE,
+                    "failed": optuna.trial.TrialState.FAIL,
+                    "pruned": optuna.trial.TrialState.PRUNED,
+                }.get(status, optuna.trial.TrialState.FAIL)
+                ft = optuna.trial.create_trial(
+                    params=t.get("params", {}),
+                    distributions=distributions,
+                    value=float(score) if (status == "complete" and score is not None) else None,
+                    state=state,
+                )
+                study._study.add_trial(ft)
+            except Exception as exc:  # pragma: no cover — defensive
+                from crucible.core.log import log_warn
+                log_warn(
+                    f"HPOStudy.load: skipping trial {tid} of study {name!r}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                continue
+            study._trial_records[tid] = TrialRecord(
+                trial_id=tid,
+                params=t.get("params", {}),
+                score=score,
+                status=status,
+                created_at=t.get("created_at", 0.0),
+                completed_at=t.get("completed_at"),
+            )
+        return study
+
+    def _optuna_distributions(self):
+        """Build the Optuna distribution objects matching ``self.params``."""
+        import optuna.distributions as od
+
+        out = {}
+        for name, spec in self.params.items():
+            ptype = spec["type"]
+            if ptype == "float":
+                out[name] = od.FloatDistribution(
+                    low=float(spec["low"]), high=float(spec["high"]),
+                )
+            elif ptype == "log_float":
+                out[name] = od.FloatDistribution(
+                    low=float(spec["low"]), high=float(spec["high"]), log=True,
+                )
+            elif ptype == "int":
+                out[name] = od.IntDistribution(
+                    low=int(spec["low"]), high=int(spec["high"]),
+                )
+            elif ptype == "categorical":
+                out[name] = od.CategoricalDistribution(choices=spec["choices"])
+        return out
+
+    # ------------------------------------------------------------------
     # ask + tell
     # ------------------------------------------------------------------
 

@@ -200,6 +200,52 @@ class TestAskTellRoundtrip:
         assert all("trial_id" in r for r in hist)
         assert all(r["status"] == "complete" for r in hist)
 
+    def test_load_replays_trials_through_optuna(self, tmp_path):
+        """G.4-style live-test fix: reloading a study from disk used to
+        keep _trial_records but leave Optuna's study at trial 0. Then
+        the next ask returned trial_id=0 and tell with the persisted
+        ids raised "Unknown trial_id". HPOStudy.load now replays
+        trials via Optuna's create_trial + add_trial so the sampler's
+        belief is current and trial_ids stay monotonic."""
+        from crucible.training.hpo_bridge import HPOStudy
+
+        # Run a fresh study and persist 3 trials.
+        first = HPOStudy(
+            name="resume-test",
+            params={"LR": {"type": "float", "low": 0.0, "high": 1.0}},
+            sampler="random", seed=42, storage_dir=tmp_path,
+        )
+        for s in (0.5, 0.3, 0.7):
+            t = first.ask()
+            first.tell(t["trial_id"], s)
+
+        # Reload from disk.
+        reloaded = HPOStudy.load(
+            name="resume-test", storage_dir=tmp_path,
+            sampler="random", seed=99,
+        )
+
+        # Best survives the reload (read from _trial_records).
+        best = reloaded.best()
+        assert best is not None
+        assert best["score"] == 0.3
+
+        # Next ask returns trial_id >= 3 — Optuna's counter advanced
+        # because we replayed the 3 persisted trials via add_trial.
+        next_trial = reloaded.ask()
+        assert next_trial["trial_id"] >= 3, (
+            f"sampler counter not replayed; got trial_id={next_trial['trial_id']}"
+        )
+
+        # And tell on the new id works.
+        reloaded.tell(next_trial["trial_id"], 0.1)
+        assert reloaded.best()["score"] == 0.1
+
+    def test_load_missing_file_raises(self, tmp_path):
+        from crucible.training.hpo_bridge import HPOStudy, HPOConfigError
+        with pytest.raises(HPOConfigError, match="No persisted HPO study"):
+            HPOStudy.load(name="nonexistent", storage_dir=tmp_path)
+
     def test_maximize_direction(self, tmp_path):
         from crucible.training.hpo_bridge import HPOStudy
         study = HPOStudy(
@@ -213,3 +259,140 @@ class TestAskTellRoundtrip:
             t = study.ask()
             study.tell(t["trial_id"], s)
         assert study.best()["score"] == 0.9
+
+
+# ---------------------------------------------------------------------------
+# MCP-level review-fix tests
+# ---------------------------------------------------------------------------
+
+
+@pytestmark_optuna
+class TestMCPLayerFixes:
+    """Tests for the review-driven fixes to the MCP wrappers."""
+
+    def _fake_config(self, tmp_path):
+        class _C:
+            project_root = tmp_path
+        return _C()
+
+    def test_hpo_create_study_idempotency_guard(self, tmp_path, monkeypatch):
+        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        _HPO_STUDY_CACHE.clear()
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config",
+            lambda: self._fake_config(tmp_path),
+        )
+        args = {
+            "name": "dup-test",
+            "params": {"LR": {"type": "float", "low": 0, "high": 1}},
+            "sampler": "random", "seed": 1,
+        }
+        first = TOOL_DISPATCH["hpo_create_study"](args)
+        assert "persisted_path" in first
+        # Second call without force = idempotency error.
+        second = TOOL_DISPATCH["hpo_create_study"](args)
+        assert "error" in second
+        assert "already exists" in second["error"]
+        assert second.get("already_exists") is True
+        # With force=True it overwrites.
+        forced = TOOL_DISPATCH["hpo_create_study"](dict(args, force=True))
+        assert "persisted_path" in forced
+        assert "error" not in forced
+
+    def test_hpo_tell_result_missing_trial_id_is_clean_error(
+        self, tmp_path, monkeypatch
+    ):
+        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        _HPO_STUDY_CACHE.clear()
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config",
+            lambda: self._fake_config(tmp_path),
+        )
+        TOOL_DISPATCH["hpo_create_study"]({
+            "name": "bad-args",
+            "params": {"LR": {"type": "float", "low": 0, "high": 1}},
+        })
+        # Missing trial_id.
+        out = TOOL_DISPATCH["hpo_tell_result"]({
+            "name": "bad-args", "score": 0.5,
+        })
+        assert "error" in out
+        assert "trial_id" in out["error"]
+
+    def test_hpo_tell_result_non_numeric_score_is_clean_error(
+        self, tmp_path, monkeypatch
+    ):
+        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        _HPO_STUDY_CACHE.clear()
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config",
+            lambda: self._fake_config(tmp_path),
+        )
+        TOOL_DISPATCH["hpo_create_study"]({
+            "name": "score-coerce",
+            "params": {"LR": {"type": "float", "low": 0, "high": 1}},
+        })
+        out = TOOL_DISPATCH["hpo_tell_result"]({
+            "name": "score-coerce", "trial_id": 0, "score": "not-a-number",
+        })
+        assert "error" in out
+        assert "score" in out["error"]
+
+    def test_hpo_cross_process_resume_via_mcp(self, tmp_path, monkeypatch):
+        """End-to-end: create + 3 trials + clear cache + tell continues
+        without 'Unknown trial_id'."""
+        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        _HPO_STUDY_CACHE.clear()
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config",
+            lambda: self._fake_config(tmp_path),
+        )
+        TOOL_DISPATCH["hpo_create_study"]({
+            "name": "resume",
+            "params": {"LR": {"type": "float", "low": 0, "high": 1}},
+            "sampler": "random", "seed": 1,
+        })
+        for s in (0.5, 0.3, 0.7):
+            t = TOOL_DISPATCH["hpo_ask_trial"]({"name": "resume"})
+            TOOL_DISPATCH["hpo_tell_result"]({
+                "name": "resume", "trial_id": t["trial_id"], "score": s,
+            })
+
+        # Simulate process restart by clearing the cache.
+        _HPO_STUDY_CACHE.clear()
+
+        # Next ask must return a trial_id > 2 (Optuna's counter caught up).
+        nxt = TOOL_DISPATCH["hpo_ask_trial"]({"name": "resume"})
+        assert nxt["trial_id"] > 2, (
+            f"cross-process resume left Optuna counter at 0; got "
+            f"trial_id={nxt['trial_id']}"
+        )
+        # And tell still works.
+        out = TOOL_DISPATCH["hpo_tell_result"]({
+            "name": "resume", "trial_id": nxt["trial_id"], "score": 0.1,
+        })
+        assert out.get("ok") is True
+        assert out["best"]["score"] == 0.1
+
+
+# ---------------------------------------------------------------------------
+# code_mutation default registration (review fix)
+# ---------------------------------------------------------------------------
+
+
+def test_code_mutation_policy_default_name():
+    """Stub is registered under the canonical 'code_mutation' name so
+    callers can use get_code_mutation_policy() (no args) to reach it.
+    """
+    from crucible.researcher.code_mutation import (
+        get_code_mutation_policy,
+        list_code_mutation_policies,
+        StubCodeMutationPolicy,
+    )
+    assert "code_mutation" in list_code_mutation_policies()
+    # Legacy alias still works.
+    assert "stub" in list_code_mutation_policies()
+    # Default name resolves.
+    assert isinstance(get_code_mutation_policy(), StubCodeMutationPolicy)
+    assert isinstance(get_code_mutation_policy("code_mutation"), StubCodeMutationPolicy)
+    assert isinstance(get_code_mutation_policy("stub"), StubCodeMutationPolicy)

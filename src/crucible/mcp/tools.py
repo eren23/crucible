@@ -1651,12 +1651,31 @@ def hpo_create_study(args: dict[str, Any]) -> dict[str, Any]:
     REQUIRES: name, params (dict of env_var → distribution spec).
     RETURNS: {name, direction, sampler, persisted_path}
     NEXT: hpo_ask_trial.
+
+    Idempotency: calling with a name that already has a persisted
+    study or in-process cache entry returns an error unless
+    ``force=True``. Without the guard, a careless second call would
+    silently discard the running study + overwrite the JSON.
     """
     try:
         from crucible.training.hpo_bridge import HPOStudy
 
+        name = args["name"]
+        cache_key = _hpo_cache_key(name)
+        persisted = _hpo_studies_dir() / f"{name}.json"
+        if not args.get("force"):
+            if cache_key in _HPO_STUDY_CACHE or persisted.exists():
+                return {
+                    "error": (
+                        f"[CrucibleError] HPO study {name!r} already exists. "
+                        f"Pass force=true to overwrite + restart the sampler, "
+                        f"or use hpo_status to inspect / hpo_ask_trial to continue."
+                    ),
+                    "name": name,
+                    "already_exists": True,
+                }
         study = HPOStudy(
-            name=args["name"],
+            name=name,
             params=args["params"],
             direction=args.get("direction", "minimize"),
             sampler=args.get("sampler", "tpe"),
@@ -1669,14 +1688,12 @@ def hpo_create_study(args: dict[str, Any]) -> dict[str, Any]:
         study._persist()
         # Cache in-process so successive ask/tell share the same
         # Optuna sampler state.
-        _HPO_STUDY_CACHE[_hpo_cache_key(args["name"])] = study
+        _HPO_STUDY_CACHE[cache_key] = study
         return {
             "name": study.name,
             "direction": study.direction,
             "sampler": args.get("sampler", "tpe"),
-            "persisted_path": str(
-                _hpo_studies_dir() / f"{study.name}.json"
-            ),
+            "persisted_path": str(persisted),
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
@@ -1703,14 +1720,34 @@ def hpo_tell_result(args: dict[str, Any]) -> dict[str, Any]:
     REQUIRES: name, trial_id, score.
     RETURNS: {ok: True, best: {trial_id, score, params} | None}
     NEXT: hpo_ask_trial for the next iteration.
+
+    Coerces trial_id/score to int/float and catches the resulting
+    TypeError/ValueError as a typed CrucibleError so a missing or
+    non-numeric arg surfaces as a clean tool error rather than a
+    KeyError / TypeError leaking out of the dispatcher.
     """
     try:
+        if "trial_id" not in args:
+            raise CrucibleError("hpo_tell_result: missing required arg 'trial_id'.")
+        if "score" not in args:
+            raise CrucibleError("hpo_tell_result: missing required arg 'score'.")
+        try:
+            trial_id = int(args["trial_id"])
+        except (TypeError, ValueError) as exc:
+            raise CrucibleError(
+                f"hpo_tell_result: 'trial_id' must be an int, got "
+                f"{args['trial_id']!r}: {exc}"
+            ) from exc
+        try:
+            score = float(args["score"])
+        except (TypeError, ValueError) as exc:
+            raise CrucibleError(
+                f"hpo_tell_result: 'score' must be a number, got "
+                f"{args['score']!r}: {exc}"
+            ) from exc
+
         study = _hpo_load_or_create(args)
-        study.tell(
-            int(args["trial_id"]),
-            float(args["score"]),
-            status=args.get("status", "complete"),
-        )
+        study.tell(trial_id, score, status=args.get("status", "complete"))
         return {"ok": True, "best": study.best(), "name": study.name}
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
@@ -1771,30 +1808,17 @@ def _hpo_load_or_create(args: dict[str, Any]):
             f"or pass 'params' to recreate."
         )
 
-    import json
-    data = json.loads(persisted.read_text(encoding="utf-8"))
-    study = HPOStudy(
+    # Use HPOStudy.load which replays trials through Optuna's API so
+    # the sampler's internal trial counter + posterior are current.
+    # Previously this path only repopulated _trial_records, leaving
+    # Optuna's study at trial 0 — subsequent tell() rejected the
+    # legitimate persisted trial_ids as "unknown".
+    study = HPOStudy.load(
         name=name,
-        params=data["params"],
-        direction=data.get("direction", "minimize"),
+        storage_dir=storage_dir,
         sampler=args.get("sampler", "tpe"),
         seed=args.get("seed"),
-        storage_dir=storage_dir,
     )
-    # Re-attach persisted trial records so best() / history() see the
-    # full search. The Optuna sampler itself starts fresh.
-    from crucible.training.hpo_bridge import TrialRecord
-    for t in data.get("trials", []):
-        if not isinstance(t.get("trial_id"), int):
-            continue
-        study._trial_records[t["trial_id"]] = TrialRecord(
-            trial_id=t["trial_id"],
-            params=t.get("params", {}),
-            score=t.get("score"),
-            status=t.get("status", "complete"),
-            created_at=t.get("created_at", 0.0),
-            completed_at=t.get("completed_at"),
-        )
     _HPO_STUDY_CACHE[cache_key] = study
     return study
 

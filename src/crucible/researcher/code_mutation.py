@@ -167,8 +167,8 @@ def list_code_mutation_policies() -> list[str]:
     return sorted(_POLICY_REGISTRY.keys())
 
 
-def get_code_mutation_policy(name: str = "stub") -> CodeMutationPolicy:
-    """Look up + instantiate a policy by name (default: the stub)."""
+def get_code_mutation_policy(name: str = "code_mutation") -> CodeMutationPolicy:
+    """Look up + instantiate a policy by name (default: ``code_mutation``)."""
     cls = _POLICY_REGISTRY.get(name)
     if cls is None:
         raise CodeMutationError(
@@ -178,5 +178,11 @@ def get_code_mutation_policy(name: str = "stub") -> CodeMutationPolicy:
     return cls()
 
 
-# Register the stub at import time so the registry is never empty.
+# Register the stub under the canonical ``code_mutation`` name so the
+# tree-expand registry has a policy under that key from day 1. When a
+# real Phase 5+ policy lands, it re-registers under the same name and
+# shadows the stub (last writer wins per the project plugin
+# convention). The legacy ``stub`` alias stays for tests that want to
+# reach the stub specifically even after a real policy ships.
+register_code_mutation_policy("code_mutation", StubCodeMutationPolicy)
 register_code_mutation_policy("stub", StubCodeMutationPolicy)

@@ -82,9 +82,23 @@ async def _connect(server_spec: dict[str, Any]):
             yield session
 
 
-async def _list_tools_async(server_spec: dict[str, Any]) -> list[dict[str, Any]]:
+# Default per-call timeout. Configurable via ``timeout`` field on the
+# server spec or per-MCP-call ``timeout`` arg. Without a cap, a server
+# that starts but never responds blocks the worker thread forever.
+_DEFAULT_EXT_MCP_TIMEOUT = 30.0
+
+
+def _spec_timeout(server_spec: dict[str, Any], override: float | None) -> float:
+    if override is not None:
+        return float(override)
+    return float(server_spec.get("timeout", _DEFAULT_EXT_MCP_TIMEOUT))
+
+
+async def _list_tools_async(
+    server_spec: dict[str, Any], *, timeout: float = _DEFAULT_EXT_MCP_TIMEOUT,
+) -> list[dict[str, Any]]:
     async with _connect(server_spec) as session:
-        listed = await session.list_tools()
+        listed = await asyncio.wait_for(session.list_tools(), timeout=timeout)
         return [
             {
                 "name": t.name,
@@ -99,9 +113,13 @@ async def _call_tool_async(
     server_spec: dict[str, Any],
     tool_name: str,
     tool_args: dict[str, Any],
+    *,
+    timeout: float = _DEFAULT_EXT_MCP_TIMEOUT,
 ) -> dict[str, Any]:
     async with _connect(server_spec) as session:
-        result = await session.call_tool(tool_name, tool_args)
+        result = await asyncio.wait_for(
+            session.call_tool(tool_name, tool_args), timeout=timeout,
+        )
         # MCP CallToolResult has a `content` list of TextContent /
         # ImageContent etc. Flatten to plain dicts for JSON transport.
         content = []
@@ -120,8 +138,14 @@ async def _call_tool_async(
 def _run_async(coro):
     """Bridge: run an async coroutine from a sync MCP tool dispatcher.
 
-    Creates a fresh event loop each call to avoid leaking state when
-    the parent MCP server is also running an event loop.
+    Safe because the parent MCP server routes sync handlers through
+    ``asyncio.to_thread()`` — the handler executes in a thread-pool
+    worker that has no running event loop of its own, so
+    ``asyncio.run`` here creates a fresh loop without colliding.
+
+    DO NOT call this from an async context directly — it will raise
+    ``RuntimeError: asyncio.run() cannot be called from a running event
+    loop``. Stay inside a thread or propagate ``async`` all the way up.
     """
     return asyncio.run(coro)
 
@@ -149,11 +173,18 @@ def list_servers(config: Any) -> dict[str, Any]:
     return {"count": len(out), "servers": out}
 
 
-def list_remote_tools(config: Any, server_name: str) -> dict[str, Any]:
-    """Spawn the named server, enumerate its tools, shut down."""
+def list_remote_tools(
+    config: Any, server_name: str, *, timeout: float | None = None,
+) -> dict[str, Any]:
+    """Spawn the named server, enumerate its tools, shut down.
+
+    ``timeout`` caps how long we'll wait for the server to respond to
+    list_tools. Defaults to the per-spec ``timeout`` or 30s.
+    """
     spec = _resolve_server(config, server_name)
+    t = _spec_timeout(spec, timeout)
     try:
-        tools = _run_async(_list_tools_async(spec))
+        tools = _run_async(_list_tools_async(spec, timeout=t))
     except Exception as exc:
         raise ExternalMCPError(
             f"external_mcp[{server_name}]: list_tools failed: "
@@ -163,13 +194,25 @@ def list_remote_tools(config: Any, server_name: str) -> dict[str, Any]:
 
 
 def call_remote_tool(
-    config: Any, server_name: str, tool_name: str, tool_args: dict[str, Any],
+    config: Any,
+    server_name: str,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    *,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Invoke a tool on the named external server."""
+    """Invoke a tool on the named external server.
+
+    ``timeout`` caps how long we'll wait for the server's tool call to
+    return. Defaults to the per-spec ``timeout`` or 30s. A hanging
+    server raises ExternalMCPError(asyncio.TimeoutError) — the worker
+    thread does not block forever.
+    """
     spec = _resolve_server(config, server_name)
+    t = _spec_timeout(spec, timeout)
     try:
         result = _run_async(
-            _call_tool_async(spec, tool_name, dict(tool_args or {}))
+            _call_tool_async(spec, tool_name, dict(tool_args or {}), timeout=t)
         )
     except Exception as exc:
         raise ExternalMCPError(
