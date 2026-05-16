@@ -234,6 +234,40 @@ class TestStatusAndCancel:
                 project_config, tree_name=tree_name, iterations=3, budget_usd=5.0,
             )
 
+    def test_budget_check_after_submit_under_session_lock(
+        self, project_config, monkeypatch
+    ):
+        """Defense-in-depth: budget refresh also fires after a successful
+        submit, mirroring autonomous_session.py. Even though tree-search
+        submit doesn't dispatch synchronously, wall-clock cost may have
+        jumped while the orchestrator deliberated."""
+        from crucible.researcher.session_base import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        call_count = {"n": 0}
+
+        def spend_grows(config, session_started_at, *, now=None):
+            call_count["n"] += 1
+            if call_count["n"] <= 1:
+                return {"spend_usd": 1.0, "hours_elapsed": 0.1,
+                        "hourly_rate": 10.0, "active_pods": 1}
+            return {"spend_usd": 100.0, "hours_elapsed": 1.0,
+                    "hourly_rate": 100.0, "active_pods": 1}
+
+        monkeypatch.setattr(cost_tracker, "compute_session_spend", spend_grows)
+        tree_name = _make_expandable_tree(project_config)
+        first = tas.action_start(
+            project_config, tree_name=tree_name,
+            iterations=5, budget_usd=5.0,
+        )
+        sid = first["session_id"]
+        with pytest.raises(BudgetExceeded):
+            tas.action_submit(
+                project_config, session_id=sid,
+                response=_canned_expansion_response(),
+                tree_snapshot=first["tree_snapshot"],
+            )
+
     def test_cancel_marks_canceled(self, project_config):
         tree_name = _make_expandable_tree(project_config)
         first = tas.action_start(project_config, tree_name=tree_name, iterations=2)

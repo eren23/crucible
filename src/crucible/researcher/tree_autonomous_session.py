@@ -306,6 +306,14 @@ class TreeAutonomousSession(SessionBase):
                 }
 
             self.save()
+            # Budget check fires after a successful expand. Although
+            # tree-search submit doesn't dispatch synchronously (the
+            # orchestrator drives dispatch between iterations), the
+            # wall-clock-since-start cost may have jumped while the
+            # orchestrator was deliberating. Mirrors the research-loop
+            # post-apply check for defense-in-depth.
+            if self.state_data.get("status") == self.STATUS_RUNNING:
+                self._refresh_budget_and_maybe_cancel()
             return {
                 "session_id": self.session_id,
                 "session_status": self.STATUS_RUNNING,

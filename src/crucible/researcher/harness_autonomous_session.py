@@ -325,6 +325,12 @@ class HarnessAutonomousSession(SessionBase):
             # then calls continue to advance to the next proposal.
             self.state_data["stage"] = self.STAGE_BENCHMARK_WAIT
             self.save()
+            # Budget check fires after the synchronous benchmark step. The
+            # benchmark call above can dispatch (and locally execute) real
+            # pod work, so wall-clock cost may have just jumped. Mirrors the
+            # research-loop pattern (autonomous_session.py:_apply_response_locked).
+            if self.state_data.get("status") == self.STATUS_RUNNING:
+                self._refresh_budget_and_maybe_cancel()
             return {
                 "session_id": self.session_id,
                 "session_status": self.STATUS_RUNNING,

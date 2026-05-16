@@ -241,6 +241,35 @@ class TestStatusAndCancel:
         with pytest.raises(BudgetExceeded):
             _start(config, spec, tree_name="bud", iterations=3, budget_usd=5.0)
 
+    def test_budget_check_after_submit_under_session_lock(
+        self, project_config, monkeypatch
+    ):
+        """Defense-in-depth: budget refresh fires after a successful submit.
+        Harness submit runs validate_candidates + optimizer.benchmark()
+        synchronously (and benchmark can dispatch + locally execute), so
+        wall-clock cost can jump during a single submit call."""
+        from crucible.researcher.session_base import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        call_count = {"n": 0}
+
+        def spend_grows(config, session_started_at, *, now=None):
+            call_count["n"] += 1
+            if call_count["n"] <= 1:
+                return {"spend_usd": 1.0, "hours_elapsed": 0.1,
+                        "hourly_rate": 10.0, "active_pods": 1}
+            return {"spend_usd": 100.0, "hours_elapsed": 1.0,
+                    "hourly_rate": 100.0, "active_pods": 1}
+
+        monkeypatch.setattr(cost_tracker, "compute_session_spend", spend_grows)
+        config, spec = project_config
+        # Iterations=5 so submit advances to benchmark_wait (running branch),
+        # not done (terminal branch which short-circuits the budget check).
+        started = _start(config, spec, tree_name="bsub", iterations=5, budget_usd=5.0)
+        sid = started["session_id"]
+        with pytest.raises(BudgetExceeded):
+            has.action_submit(config, session_id=sid, response=_CANNED_RESPONSE)
+
     def test_cancel_marks_canceled(self, project_config):
         config, spec = project_config
         started = _start(config, spec, tree_name="cnc", iterations=2
