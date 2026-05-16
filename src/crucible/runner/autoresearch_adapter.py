@@ -56,6 +56,15 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _DEFAULT_WORKSPACE_PREFIX = "/workspace"
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """Polyfill for Path.is_relative_to (3.9+); supports older Pythons too."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 @dataclass
 class AutoresearchSource:
     """Parsed pieces of an autoresearch source directory."""
@@ -130,6 +139,25 @@ def parse_autoresearch_source(source_dir: Path) -> AutoresearchSource:
         for line in req_path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
+                continue
+            # Recursive includes and editable installs don't survive
+            # Crucible's flat-line `pip install` per-entry pattern in
+            # fleet/bootstrap.py — pip treats "-r other.txt" as a literal
+            # package name when passed as a quoted argument to install.
+            # Skip with a warning rather than poison the bootstrap.
+            if stripped.startswith(("-r ", "--requirement ")):
+                log_warn(
+                    f"autoresearch import: skipping recursive include {stripped!r} "
+                    "in requirements.txt — Crucible installs entries individually; "
+                    "flatten the include manually or add the dependencies explicitly."
+                )
+                continue
+            if stripped.startswith(("-e ", "--editable ")):
+                log_warn(
+                    f"autoresearch import: skipping editable install {stripped!r} "
+                    "in requirements.txt — fleet pods don't have the local dir; "
+                    "ship the package via local_files + a normal install line instead."
+                )
                 continue
             requirements.append(stripped)
 
@@ -244,6 +272,23 @@ def import_autoresearch(
         f"autoresearch import: emitted {project_name!r} project spec at {spec_path} "
         f"(local_files={len(parsed.local_files)}, requirements={len(parsed.requirements)})"
     )
+
+    # Portability warning: local_files are absolute paths to the source
+    # directory. If the spec is shared across machines or the source dir
+    # moves, fleet sync will silently fall back to "local file not found"
+    # and the pod will fail at runtime with a confusing "No such file".
+    # Surface that loudly at import time so users can plan accordingly.
+    outside_root = [
+        p for p in parsed.local_files
+        if not _is_relative_to(p, root)
+    ]
+    if outside_root:
+        log_warn(
+            f"autoresearch import: {len(outside_root)} local_files are outside "
+            f"project_root ({root}). The emitted spec embeds absolute paths and is "
+            f"non-portable across machines. If you share this spec or move the "
+            f"source directory ({parsed.source_dir}), re-import or fix paths by hand."
+        )
 
     return {
         "name": project_name,

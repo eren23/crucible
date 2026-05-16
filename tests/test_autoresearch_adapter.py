@@ -101,6 +101,26 @@ class TestParseSource:
         parsed = parse_autoresearch_source(source)
         assert parsed.requirements == ["torch==2.4.0", "numpy>=1.24"]
 
+    def test_parses_requirements_skips_recursive_includes_and_editable(
+        self, tmp_path: Path
+    ):
+        """Review-driven fix: -r and -e lines don't survive Crucible's
+        per-entry install pattern, so the importer must skip them with a
+        warning rather than poison the bootstrap."""
+        source = _make_autoresearch_dir(
+            tmp_path,
+            requirements=(
+                "torch==2.4.0",
+                "-r other-requirements.txt",
+                "--requirement deep.txt",
+                "-e .",
+                "--editable ./pkg",
+                "numpy",
+            ),
+        )
+        parsed = parse_autoresearch_source(source)
+        assert parsed.requirements == ["torch==2.4.0", "numpy"]
+
     def test_missing_train_py_raises(self, tmp_path: Path):
         source = tmp_path / "broken"
         source.mkdir()
@@ -236,6 +256,40 @@ class TestImport:
         program_dest = tmp_path / ".crucible" / "projects" / "rollback_test.md"
         assert not spec_path.exists()
         assert not program_dest.exists()
+
+    def test_warns_when_local_files_outside_project_root(
+        self, tmp_path: Path, capsys
+    ):
+        """Review-driven fix: when local_files paths are outside project_root,
+        the emitted spec is non-portable. Surface that loudly at import time
+        rather than letting the user discover it on first dispatch.
+
+        ``log_warn`` writes directly to stderr (not through Python's
+        ``logging``), so we capture stderr via ``capsys`` not ``caplog``.
+        """
+        source_parent = tmp_path / "external_source"
+        source = _make_autoresearch_dir(source_parent, name="autoresearch_src")
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        import_autoresearch(source, project_root=project_root)
+
+        stderr = capsys.readouterr().err
+        assert "non-portable" in stderr, (
+            f"expected portability warning in stderr; got: {stderr!r}"
+        )
+
+    def test_no_warning_when_local_files_inside_project_root(
+        self, tmp_path: Path, capsys
+    ):
+        """If the source is INSIDE the project root, no portability warning."""
+        source = _make_autoresearch_dir(tmp_path, name="inside_src")
+        # tmp_path acts as both project_root and parent of the source dir,
+        # so local_files paths are inside project_root.
+        import_autoresearch(source, project_root=tmp_path)
+
+        stderr = capsys.readouterr().err
+        assert "non-portable" not in stderr
 
     def test_metrics_passthrough(self, tmp_path: Path):
         source = _make_autoresearch_dir(tmp_path, name="metric_test")
