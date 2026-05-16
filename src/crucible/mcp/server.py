@@ -3497,8 +3497,9 @@ TOOLS: list[Tool] = [
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["start", "submit", "status", "cancel"],
-                    "description": "Session lifecycle verb.",
+                    "enum": ["start", "submit", "continue", "status", "cancel"],
+                    "description": "Session lifecycle verb. 'continue' re-checks "
+                    "for expandable nodes after external dispatch + collect.",
                 },
                 "tree_name": {
                     "type": "string",

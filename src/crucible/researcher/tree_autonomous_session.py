@@ -317,8 +317,8 @@ class TreeAutonomousSession:
                     "message": (
                         f"{len(pending)} pending node(s) await dispatch + collect. "
                         "Run tree_enqueue_pending → dispatch_experiments → "
-                        "collect_results → tree_sync_results, then call submit "
-                        "with action=continue."
+                        "collect_results → tree_sync_results, then call action='continue' "
+                        "to re-check for expandable nodes."
                     ),
                     "pending_node_ids": [n["node_id"] for n in pending],
                 }
@@ -416,6 +416,10 @@ class TreeAutonomousSession:
                 new_node_ids=new_ids,
             )
 
+            # Keep current_iteration synced with iterations_completed even on
+            # terminal — confusing otherwise: a 1-iteration session would end
+            # with iterations_completed=1 but current_iteration=0 (Codex review).
+            self.state_data["current_iteration"] = next_iter
             if next_iter >= self.state_data["iterations_planned"]:
                 self.state_data["status"] = self.STATUS_DONE
                 self.save()
@@ -431,7 +435,6 @@ class TreeAutonomousSession:
                     "next_prompt": None,
                 }
 
-            self.state_data["current_iteration"] = next_iter
             self.save()
             return {
                 "session_id": self.session_id,
@@ -521,6 +524,24 @@ def action_status(config: ProjectConfig, *, session_id: str) -> dict[str, Any]:
     return data
 
 
+def action_continue(config: ProjectConfig, *, session_id: str) -> dict[str, Any]:
+    """Re-trigger build_next_prompt without applying a response.
+
+    Used after the orchestrator drove external fleet ops in response to
+    ``next_action='external_dispatch'``: once new results land in the tree
+    via ``tree_sync_results``, calling ``continue`` re-checks for expandable
+    nodes and returns the next prompt (or the same external_dispatch hint
+    if nothing has advanced, or done if exhausted).
+    """
+    session = TreeAutonomousSession(config, session_id).load()
+    if session.is_terminal():
+        raise TreeAutonomousSessionError(
+            f"Session {session.session_id} is {session.state_data['status']!r} "
+            "— continue is only valid for running sessions."
+        )
+    return session.build_next_prompt()
+
+
 def action_cancel(
     config: ProjectConfig, *, session_id: str, reason: str = ""
 ) -> dict[str, Any]:
@@ -536,4 +557,5 @@ __all__ = [
     "action_submit",
     "action_status",
     "action_cancel",
+    "action_continue",
 ]

@@ -1722,6 +1722,8 @@ def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
         expandable node's prompt
       - submit: apply orchestrator response, advance, return next prompt
         or done
+      - continue: re-check for expandable nodes (after orchestrator drove
+        fleet ops in response to next_action='external_dispatch')
       - status: read-only session state
       - cancel: terminate session
 
@@ -1760,6 +1762,13 @@ def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
                 response=args.get("response"),
                 tree_snapshot=args.get("tree_snapshot"),
             )
+        if action == "continue":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop continue: 'session_id' is required"
+                )
+            return tas.action_continue(config, session_id=str(session_id))
         if action == "status":
             session_id = args.get("session_id")
             if not session_id:
@@ -1780,7 +1789,7 @@ def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
             )
         raise CrucibleError(
             f"tree_autonomous_loop: unknown action {action!r}. "
-            f"Valid: 'start', 'submit', 'status', 'cancel'."
+            f"Valid: 'start', 'submit', 'continue', 'status', 'cancel'."
         )
     except StaleSubmitError:
         raise

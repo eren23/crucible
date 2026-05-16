@@ -1,7 +1,10 @@
 """Tests for the tree_autonomous_loop session driver (Phase 1.4b)."""
 from __future__ import annotations
 
+import multiprocessing
 import os
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,7 @@ from crucible.researcher import tree_autonomous_session as tas
 from crucible.researcher.tree_autonomous_session import (
     TreeAutonomousSession,
     TreeAutonomousSessionError,
+    TreeDoomLoopDetected,
 )
 
 
@@ -115,7 +119,8 @@ class TestSubmitFlow:
 
     def test_session_done_when_iterations_complete(self, project_config):
         """After N submits, session reaches DONE — even if more expandable
-        nodes exist."""
+        nodes exist. Also: iterations_completed and current_iteration
+        are synced even on terminal."""
         tree_name = _make_expandable_tree(project_config)
         first = tas.action_start(project_config, tree_name=tree_name, iterations=1)
         sid = first["session_id"]
@@ -126,9 +131,14 @@ class TestSubmitFlow:
             tree_snapshot=first["tree_snapshot"],
         )
         assert result["session_status"] == TreeAutonomousSession.STATUS_DONE
-        # Single-iteration sessions don't return a next prompt (the response
-        # is a terminal apply, not a continuation).
-        assert result.get("next_prompt") is None or result.get("next_prompt") == {}
+        # Terminal submit returns next_prompt: None (not {}).
+        assert result["next_prompt"] is None
+
+        # Codex sync fix: a 1-iteration session ends with both counters at 1,
+        # not iterations_completed=1 / current_iteration=0.
+        status = tas.action_status(project_config, session_id=sid)
+        assert status["iterations_completed"] == 1
+        assert status["current_iteration"] == 1
 
     def test_submit_falls_back_to_session_snapshot(self, project_config):
         """If caller omits tree_snapshot, session uses last_tree_snapshot."""
@@ -215,3 +225,182 @@ class TestStatusAndCancel:
         # Idempotent
         again = tas.action_cancel(project_config, session_id=sid)
         assert again["already_terminal"] is True
+
+
+# ---------------------------------------------------------------------------
+# external_dispatch + continue action (Codex review fix)
+# ---------------------------------------------------------------------------
+
+
+class TestExternalDispatchAndContinue:
+    def test_external_dispatch_hint_when_pending_exist(self, project_config):
+        """When no expandable nodes but pending nodes exist, build returns
+        next_action='external_dispatch' rather than marking DONE."""
+        from crucible.researcher.search_tree import SearchTree
+
+        # Build a tree with an UN-expandable pending root (no recorded result).
+        tree_dir = project_config.project_root / ".crucible" / "search_trees" / "pending-tree"
+        tree = SearchTree.create(
+            tree_dir=tree_dir,
+            name="pending-tree",
+            description="test",
+            primary_metric="val_loss",
+            metric_direction="minimize",
+        )
+        tree.add_root(name="root", config={"LR": "3e-4"})
+        # No record_result — root stays pending, not expandable.
+
+        out = tas.action_start(project_config, tree_name="pending-tree", iterations=3)
+        assert out["next_action"] == "external_dispatch"
+        assert "tree_enqueue_pending" in out["message"]
+        # No 'action=continue' should appear in the hint as a string — it
+        # was a contract bug before; we expect 'continue' instead.
+        assert "submit with action=continue" not in out["message"]
+        assert "action='continue'" in out["message"]
+
+    def test_continue_action_re_runs_build_next_prompt(self, project_config):
+        """After external_dispatch, calling 'continue' re-checks the tree.
+        If a peer recorded a result in the meantime, the next expandable
+        node's prompt is returned."""
+        from crucible.researcher.search_tree import SearchTree
+
+        tree_dir = project_config.project_root / ".crucible" / "search_trees" / "cont-tree"
+        tree = SearchTree.create(
+            tree_dir=tree_dir,
+            name="cont-tree",
+            description="test",
+            primary_metric="val_loss",
+            metric_direction="minimize",
+        )
+        root_id = tree.add_root(name="root", config={"LR": "3e-4"})
+        # Start in pending state.
+
+        first = tas.action_start(project_config, tree_name="cont-tree", iterations=3)
+        assert first["next_action"] == "external_dispatch"
+        sid = first["session_id"]
+
+        # Peer records the result — root is now expandable.
+        peer = SearchTree.load(tree_dir)
+        peer.record_result(root_id, {"val_loss": 2.0})
+
+        # continue re-checks and now returns an actual prompt.
+        next_prompt = tas.action_continue(project_config, session_id=sid)
+        assert next_prompt["node_id"] == root_id
+        assert "system" in next_prompt and "user" in next_prompt
+
+    def test_continue_on_terminal_session_raises(self, project_config):
+        tree_name = _make_expandable_tree(project_config)
+        first = tas.action_start(project_config, tree_name=tree_name, iterations=1)
+        sid = first["session_id"]
+        tas.action_submit(
+            project_config,
+            session_id=sid,
+            response=_canned_expansion_response(),
+            tree_snapshot=first["tree_snapshot"],
+        )
+        # Session is DONE.
+        with pytest.raises(TreeAutonomousSessionError, match="done|canceled|error"):
+            tas.action_continue(project_config, session_id=sid)
+
+
+# ---------------------------------------------------------------------------
+# Doom-loop detection (Codex review gap)
+# ---------------------------------------------------------------------------
+
+
+class TestDoomLoop:
+    def test_repeated_fingerprint_aborts(self, project_config, monkeypatch):
+        """Force every prompt build to produce the same fingerprint —
+        after 5 iterations the session errors out.
+
+        Uses a 1-child response so we don't hit max_expansions_per_node (5)
+        before the doom-loop window (5) trips."""
+        monkeypatch.setattr(tas, "_fingerprint", lambda system, user: "STUCK")
+
+        tree_name = _make_expandable_tree(project_config)
+        first = tas.action_start(project_config, tree_name=tree_name, iterations=99)
+        sid = first["session_id"]
+        latest = first
+        single_child = [{"name": "c", "config": {}, "hypothesis": ""}]
+
+        with pytest.raises(TreeDoomLoopDetected):
+            for _ in range(10):
+                latest = tas.action_submit(
+                    project_config,
+                    session_id=sid,
+                    response=single_child,
+                    tree_snapshot=latest.get("tree_snapshot"),
+                )
+                if latest.get("session_status") in (
+                    TreeAutonomousSession.STATUS_DONE,
+                    TreeAutonomousSession.STATUS_ERROR,
+                ):
+                    break
+                next_prompt = latest.get("next_prompt")
+                if next_prompt is None:
+                    break
+                latest = next_prompt
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — create-time lock (Codex review gap)
+# ---------------------------------------------------------------------------
+
+
+def _concurrent_tree_start_worker(project_dir_str: str, tree_name: str, queue) -> None:
+    """Subprocess target: cd into project, start a tree session, put session_id."""
+    import os as _os
+    from pathlib import Path as _Path
+    _os.chdir(_Path(project_dir_str))
+    from crucible.core.config import load_config as _lc
+    from crucible.researcher import tree_autonomous_session as _tas
+    config = _lc()
+    out = _tas.action_start(config, tree_name=tree_name, iterations=2)
+    queue.put(out["session_id"])
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="fcntl locks are POSIX-only; create-lock degrades to no-op on Windows.",
+)
+class TestStartConcurrency:
+    def test_concurrent_tree_starts_produce_single_session(self, project_dir):
+        """Three processes call action_start against the same tree
+        simultaneously — exactly one session is created."""
+        os.chdir(project_dir)
+        (project_dir / "program.md").write_text("Minimise val_loss.", encoding="utf-8")
+
+        # Build an expandable tree in the project.
+        from crucible.researcher.search_tree import SearchTree
+        tree_dir = project_dir / ".crucible" / "search_trees" / "race-tree"
+        tree = SearchTree.create(
+            tree_dir=tree_dir,
+            name="race-tree",
+            description="test",
+            primary_metric="val_loss",
+            metric_direction="minimize",
+        )
+        root_id = tree.add_root(name="root", config={"LR": "3e-4"})
+        tree.record_result(root_id, {"val_loss": 2.0})
+
+        ctx = multiprocessing.get_context("spawn")
+        queue: multiprocessing.Queue = ctx.Queue()
+        procs = [
+            ctx.Process(
+                target=_concurrent_tree_start_worker,
+                args=(str(project_dir), "race-tree", queue),
+            )
+            for _ in range(3)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=20.0)
+            assert p.exitcode == 0, f"worker exitcode={p.exitcode}"
+
+        ids: set[str] = set()
+        while not queue.empty():
+            ids.add(queue.get())
+        assert len(ids) == 1, (
+            f"expected exactly one session_id across concurrent tree starts; got {ids}"
+        )
