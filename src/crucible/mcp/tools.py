@@ -1714,6 +1714,80 @@ def autonomous_research_loop(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for tree-search autonomous expansion.
+
+    Verb dispatch (action arg):
+      - start: begin a session against an existing tree, return first
+        expandable node's prompt
+      - submit: apply orchestrator response, advance, return next prompt
+        or done
+      - status: read-only session state
+      - cancel: terminate session
+
+    Crucible never calls an LLM. Between submits the orchestrator drives
+    fleet ops (tree_enqueue_pending → dispatch_experiments →
+    collect_results → tree_sync_results). Session state persists under
+    .crucible/tree_autonomous_sessions/{uuid}.yaml so sessions survive
+    process restarts.
+    """
+    from crucible.researcher import tree_autonomous_session as tas
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            tree_name = args.get("tree_name")
+            if not tree_name:
+                raise CrucibleError(
+                    "tree_autonomous_loop start: 'tree_name' is required"
+                )
+            return tas.action_start(
+                config,
+                tree_name=str(tree_name),
+                iterations=int(args.get("iterations", 5)),
+                n_children=int(args.get("n_children", 3)),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop submit: 'session_id' is required"
+                )
+            return tas.action_submit(
+                config,
+                session_id=str(session_id),
+                response=args.get("response"),
+                tree_snapshot=args.get("tree_snapshot"),
+            )
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop status: 'session_id' is required"
+                )
+            return tas.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop cancel: 'session_id' is required"
+                )
+            return tas.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"tree_autonomous_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'status', 'cancel'."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 # ---------------------------------------------------------------------------
 # W&B tools
 # ---------------------------------------------------------------------------
@@ -6522,6 +6596,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_request_prompt": research_request_prompt,
     "research_submit": research_submit,
     "autonomous_research_loop": autonomous_research_loop,
+    "tree_autonomous_loop": tree_autonomous_loop,
     # W&B tools
     "wandb_log_image": wandb_log_image,
     "wandb_get_url": wandb_get_url,

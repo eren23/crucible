@@ -3467,6 +3467,75 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="tree_autonomous_loop",
+        description=(
+            "Persisted-session driver for tree-search autonomous expansion. "
+            "Mirrors autonomous_research_loop but for tree expansion: each "
+            "iteration picks one expandable node, hands the orchestrator a "
+            "tree_auto_expand-style prompt, applies the response under "
+            "SearchTree.write_lock, and advances. Crucible never calls an LLM.\n\n"
+            "Between submits, drive the fleet: tree_enqueue_pending → "
+            "dispatch_experiments → collect_results → tree_sync_results. "
+            "When no expandable nodes remain but pending nodes exist, build "
+            "returns next_action='external_dispatch' as a hint.\n\n"
+            "Actions:\n"
+            "- 'start': begin a session against an existing tree, return first prompt.\n"
+            "- 'submit': apply response, advance, return next prompt or done.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled, persist checkpoint.\n\n"
+            "Doom-loop detection: 5 identical expansion prompts in a row trip "
+            "the guard and the session enters 'error' state.\n\n"
+            "REQUIRES: action; for start also tree_name; for submit/status/cancel also session_id.\n"
+            "RETURNS: start → first prompt + session_id + tree_snapshot. submit → "
+            "{node_id, new_node_ids, next_prompt}. status → session state. cancel → checkpoint.\n"
+            "ERRORS: StaleSubmitError when tree_snapshot mismatched. TreeDoomLoopDetected when "
+            "prompts repeat. TreeAutonomousSessionError when session terminal."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "status", "cancel"],
+                    "description": "Session lifecycle verb.",
+                },
+                "tree_name": {
+                    "type": "string",
+                    "description": "Name of an existing SearchTree (start only).",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel; ignored by start.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "n_children": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Children to generate per expansion (start only).",
+                },
+                "response": {
+                    "description": "Orchestrator-supplied response for the current node (submit only).",
+                },
+                "tree_snapshot": {
+                    "type": "object",
+                    "description": "Opaque tree snapshot from the previous prompt (submit only). "
+                    "Enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    ),
     # -----------------------------------------------------------------------
     # Notebook exporter
     # -----------------------------------------------------------------------
