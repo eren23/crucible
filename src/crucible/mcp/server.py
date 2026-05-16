@@ -3366,6 +3366,119 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ------------------------------------------------------------------
+    # HPO bridge (Phase 3.4 — Optuna)
+    # ------------------------------------------------------------------
+    Tool(
+        name="hpo_create_study",
+        description=(
+            "Create an Optuna-backed HPO study (Phase 3.4). Defines the "
+            "search space + sampler; doesn't sample yet. Optuna is an "
+            "optional dependency — if absent the call raises a clear "
+            "install hint.\n\n"
+            "REQUIRES: name, params (dict of env_var → {type, low?, high?, choices?}).\n"
+            "RETURNS: {name, direction, sampler, persisted_path}\n"
+            "NEXT: hpo_ask_trial."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Study identifier."},
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "Map env_var → spec. Each spec: {type: float|log_float|"
+                        "int|categorical, low/high for numeric, choices for categorical}."
+                    ),
+                    "additionalProperties": {"type": "object"},
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["minimize", "maximize"],
+                    "default": "minimize",
+                },
+                "sampler": {
+                    "type": "string",
+                    "enum": ["tpe", "random", "cmaes", "botorch"],
+                    "default": "tpe",
+                },
+                "seed": {"type": "integer"},
+            },
+            "required": ["name", "params"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_ask_trial",
+        description=(
+            "Sample the next trial from an HPO study. Returns env_var "
+            "overrides ready to enqueue as a Crucible experiment.\n\n"
+            "REQUIRES: name (study previously created).\n"
+            "RETURNS: {trial_id, params: {ENV_VAR: stringified_value, ...}}\n"
+            "NEXT: enqueue_experiment or design_enqueue_batch, then "
+            "hpo_tell_result once the score is known."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "Optional — re-spec the study on the fly. Usually omitted; "
+                        "the persisted spec is reused."
+                    ),
+                    "additionalProperties": {"type": "object"},
+                },
+                "sampler": {
+                    "type": "string",
+                    "enum": ["tpe", "random", "cmaes", "botorch"],
+                },
+                "seed": {"type": "integer"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_tell_result",
+        description=(
+            "Report a trial outcome to an HPO study.\n\n"
+            "REQUIRES: name, trial_id, score.\n"
+            "RETURNS: {ok, best: {trial_id, score, params}, name}\n"
+            "NEXT: hpo_ask_trial for the next iteration."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "trial_id": {"type": "integer"},
+                "score": {"type": "number"},
+                "status": {
+                    "type": "string",
+                    "enum": ["complete", "failed", "pruned"],
+                    "default": "complete",
+                },
+            },
+            "required": ["name", "trial_id", "score"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_status",
+        description=(
+            "Inspect an HPO study's running best + full history.\n\n"
+            "REQUIRES: name.\n"
+            "RETURNS: {name, direction, best, trial_count, history: [...]}\n"
+            "NEXT: hpo_ask_trial or hpo_tell_result."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
     Tool(
         name="evaluator_list",
         description=(

@@ -1624,6 +1624,181 @@ def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
     return {"query": query, "count": len(results), "results": results}
 
 
+# ---------------------------------------------------------------------------
+# HPO bridge (Phase 3.4) — persisted Optuna studies via MCP
+# ---------------------------------------------------------------------------
+
+
+def _hpo_studies_dir() -> Path:
+    config = _get_config()
+    return Path(config.project_root) / ".crucible" / "hpo_studies"
+
+
+# In-process cache so successive MCP calls share the same Optuna sampler
+# state. Keyed by (project_root, study_name). Lost on process restart;
+# operators wanting cross-process persistence should use Optuna's RDB
+# storage directly (out of MVP scope).
+_HPO_STUDY_CACHE: dict[tuple[str, str], Any] = {}
+
+
+def _hpo_cache_key(name: str) -> tuple[str, str]:
+    return (str(_hpo_studies_dir().parent.parent), name)
+
+
+def hpo_create_study(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new HPO study (Optuna-backed).
+
+    REQUIRES: name, params (dict of env_var → distribution spec).
+    RETURNS: {name, direction, sampler, persisted_path}
+    NEXT: hpo_ask_trial.
+    """
+    try:
+        from crucible.training.hpo_bridge import HPOStudy
+
+        study = HPOStudy(
+            name=args["name"],
+            params=args["params"],
+            direction=args.get("direction", "minimize"),
+            sampler=args.get("sampler", "tpe"),
+            seed=args.get("seed"),
+            storage_dir=_hpo_studies_dir(),
+        )
+        # Force an initial persist so subsequent ask/tell can find the
+        # study on disk (HPOStudy._persist normally only fires after a
+        # trial is asked/told).
+        study._persist()
+        # Cache in-process so successive ask/tell share the same
+        # Optuna sampler state.
+        _HPO_STUDY_CACHE[_hpo_cache_key(args["name"])] = study
+        return {
+            "name": study.name,
+            "direction": study.direction,
+            "sampler": args.get("sampler", "tpe"),
+            "persisted_path": str(
+                _hpo_studies_dir() / f"{study.name}.json"
+            ),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_ask_trial(args: dict[str, Any]) -> dict[str, Any]:
+    """Sample the next trial from a study.
+
+    REQUIRES: name (study previously created via hpo_create_study).
+    RETURNS: {trial_id, params: {ENV_VAR: stringified_value, ...}}
+    NEXT: enqueue the trial as a Crucible experiment, then hpo_tell_result.
+    """
+    try:
+        study = _hpo_load_or_create(args)
+        out = study.ask()
+        return out
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_tell_result(args: dict[str, Any]) -> dict[str, Any]:
+    """Report a trial outcome back to the study.
+
+    REQUIRES: name, trial_id, score.
+    RETURNS: {ok: True, best: {trial_id, score, params} | None}
+    NEXT: hpo_ask_trial for the next iteration.
+    """
+    try:
+        study = _hpo_load_or_create(args)
+        study.tell(
+            int(args["trial_id"]),
+            float(args["score"]),
+            status=args.get("status", "complete"),
+        )
+        return {"ok": True, "best": study.best(), "name": study.name}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Show a study's history + running best."""
+    try:
+        study = _hpo_load_or_create(args)
+        return {
+            "name": study.name,
+            "direction": study.direction,
+            "best": study.best(),
+            "trial_count": len(study.history()),
+            "history": study.history(),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _hpo_load_or_create(args: dict[str, Any]):
+    """Helper: build an HPOStudy from cache, persisted spec, or fresh args.
+
+    Resolution order:
+    1. In-process cache (same MCP server lifetime) — fast path, full
+       sampler state preserved.
+    2. Disk persistence (cross-process) — params + trial history
+       reload; sampler restarts.
+    3. Fresh from args['params'] — first-time creation.
+    """
+    from crucible.training.hpo_bridge import HPOStudy
+
+    name = args["name"]
+    cache_key = _hpo_cache_key(name)
+    cached = _HPO_STUDY_CACHE.get(cache_key)
+    if cached is not None and "params" not in args:
+        return cached
+
+    storage_dir = _hpo_studies_dir()
+    persisted = storage_dir / f"{name}.json"
+
+    if "params" in args:
+        # Caller supplied a fresh spec — use it.
+        study = HPOStudy(
+            name=name,
+            params=args["params"],
+            direction=args.get("direction", "minimize"),
+            sampler=args.get("sampler", "tpe"),
+            seed=args.get("seed"),
+            storage_dir=storage_dir,
+        )
+        _HPO_STUDY_CACHE[cache_key] = study
+        return study
+
+    if not persisted.exists():
+        raise CrucibleError(
+            f"No persisted HPO study {name!r}. Call hpo_create_study first "
+            f"or pass 'params' to recreate."
+        )
+
+    import json
+    data = json.loads(persisted.read_text(encoding="utf-8"))
+    study = HPOStudy(
+        name=name,
+        params=data["params"],
+        direction=data.get("direction", "minimize"),
+        sampler=args.get("sampler", "tpe"),
+        seed=args.get("seed"),
+        storage_dir=storage_dir,
+    )
+    # Re-attach persisted trial records so best() / history() see the
+    # full search. The Optuna sampler itself starts fresh.
+    from crucible.training.hpo_bridge import TrialRecord
+    for t in data.get("trials", []):
+        if not isinstance(t.get("trial_id"), int):
+            continue
+        study._trial_records[t["trial_id"]] = TrialRecord(
+            trial_id=t["trial_id"],
+            params=t.get("params", {}),
+            score=t.get("score"),
+            status=t.get("status", "complete"),
+            created_at=t.get("created_at", 0.0),
+            completed_at=t.get("completed_at"),
+        )
+    _HPO_STUDY_CACHE[cache_key] = study
+    return study
+
+
 def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered evaluator plugins.
 
@@ -6879,6 +7054,10 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_arxiv_search": research_arxiv_search,
     "research_openreview_search": research_openreview_search,
     "evaluator_list": evaluator_list,
+    "hpo_create_study": hpo_create_study,
+    "hpo_ask_trial": hpo_ask_trial,
+    "hpo_tell_result": hpo_tell_result,
+    "hpo_status": hpo_status,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,
