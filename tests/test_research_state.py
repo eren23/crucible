@@ -1,10 +1,14 @@
 """Tests for crucible.researcher.state."""
 from __future__ import annotations
 
+import multiprocessing
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from crucible.core.errors import StateLockTimeout
 from crucible.researcher.state import ResearchState
 
 
@@ -215,3 +219,202 @@ class TestSaveAndReload:
         reloaded = ResearchState(path, budget_hours=10.0)
         # Budget adjustment from file overrides constructor param
         assert reloaded.budget_remaining == 15.0
+
+
+# ---------------------------------------------------------------------------
+# Snapshot
+# ---------------------------------------------------------------------------
+
+class TestSnapshot:
+    def test_empty_snapshot(self, tmp_path):
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        snap = state.snapshot()
+        assert snap["history_len"] == 0
+        assert snap["hypotheses_len"] == 0
+        assert snap["beliefs_len"] == 0
+        assert snap["findings_len"] == 0
+        assert "content_hash" in snap and len(snap["content_hash"]) == 16
+
+    def test_snapshot_tracks_mutations(self, tmp_path):
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.add_hypothesis({"name": "h1", "config": {}})
+        state.update_beliefs(["b1", "b2"])
+        state.add_finding("f1", confidence=0.7)
+        snap = state.snapshot()
+        assert snap["history_len"] == 0
+        assert snap["hypotheses_len"] == 1
+        assert snap["beliefs_len"] == 2
+        assert snap["findings_len"] == 1
+        assert "content_hash" in snap
+
+    def test_snapshot_is_deterministic_for_same_state(self, tmp_path):
+        """Two snapshots of the same in-memory state must produce
+        identical content_hash. Pins the stability guarantee."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.add_hypothesis({"hypothesis": "h1", "config": {}})
+        state.update_beliefs(["b"])
+        first = state.snapshot()
+        second = state.snapshot()
+        assert first == second
+
+    def test_snapshot_does_not_include_iteration(self, tmp_path):
+        """Iteration is loop-turn identity, not state — tracked separately."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        snap = state.snapshot()
+        assert "iteration" not in snap
+
+    def test_snapshot_detects_status_flip(self, tmp_path):
+        """mark_hypothesis flips status in place without changing length —
+        snapshot must still notice via content_hash."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.add_hypothesis({"hypothesis": "h1", "config": {}})
+        before = state.snapshot()
+        state.mark_hypothesis("h1", "tested")
+        after = state.snapshot()
+        assert before != after
+        assert before["hypotheses_len"] == after["hypotheses_len"] == 1
+        assert before["content_hash"] != after["content_hash"]
+
+    def test_snapshot_detects_wholesale_belief_replacement(self, tmp_path):
+        """update_beliefs replaces beliefs wholesale; same length must still
+        trip the snapshot via content_hash."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        state.update_beliefs(["alpha", "beta"])
+        before = state.snapshot()
+        state.update_beliefs(["gamma", "delta"])  # same length, different content
+        after = state.snapshot()
+        assert before != after
+        assert before["beliefs_len"] == after["beliefs_len"] == 2
+        assert before["content_hash"] != after["content_hash"]
+
+    def test_snapshot_detects_budget_charge(self, tmp_path):
+        """charge_hours mutates budget without touching any list — snapshot
+        must still notice."""
+        state = ResearchState(tmp_path / "state.jsonl", budget_hours=10.0)
+        before = state.snapshot()
+        state.charge_hours(2.5)
+        after = state.snapshot()
+        assert before != after
+        assert before["content_hash"] != after["content_hash"]
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — write_lock
+# ---------------------------------------------------------------------------
+
+def _holder_process(state_path_str: str, hold_seconds: float, ready_marker_str: str) -> None:
+    """Subprocess target: acquire the lock and hold it for *hold_seconds*."""
+    from pathlib import Path as _Path
+    from crucible.researcher.state import ResearchState as _State
+
+    state = _State(_Path(state_path_str), budget_hours=10.0)
+    with state.write_lock(timeout=5.0):
+        _Path(ready_marker_str).write_text("ready", encoding="utf-8")
+        time.sleep(hold_seconds)
+
+
+def _writer_process(state_path_str: str, name: str) -> None:
+    """Subprocess target: lock, add a hypothesis, save, release."""
+    from pathlib import Path as _Path
+    from crucible.researcher.state import ResearchState as _State
+
+    state = _State(_Path(state_path_str), budget_hours=10.0)
+    with state.write_lock(timeout=10.0):
+        state.add_hypothesis({"name": name, "expected_impact": 0.5, "config": {}})
+        state.save()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fcntl locks are POSIX-only")
+class TestWriteLockConcurrency:
+    def test_write_lock_blocks_concurrent_acquire(self, tmp_path):
+        state_path = tmp_path / "state.jsonl"
+        ready_marker = tmp_path / "ready"
+        # Initialise the file so the holder doesn't race on _load().
+        ResearchState(state_path, budget_hours=10.0).save()
+
+        ctx = multiprocessing.get_context("spawn")
+        holder = ctx.Process(
+            target=_holder_process,
+            args=(str(state_path), 3.0, str(ready_marker)),
+            daemon=True,
+        )
+        holder.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while not ready_marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert ready_marker.exists(), "holder failed to acquire lock"
+
+            state = ResearchState(state_path, budget_hours=10.0)
+            with pytest.raises(StateLockTimeout):
+                with state.write_lock(timeout=0.5):
+                    pass
+        finally:
+            holder.join(timeout=10.0)
+            if holder.is_alive():
+                holder.terminate()
+
+    def test_write_lock_serializes_writers(self, tmp_path):
+        state_path = tmp_path / "state.jsonl"
+        ResearchState(state_path, budget_hours=10.0).save()
+
+        ctx = multiprocessing.get_context("spawn")
+        writers = [
+            ctx.Process(target=_writer_process, args=(str(state_path), f"hyp_{i}"))
+            for i in range(5)
+        ]
+        for w in writers:
+            w.start()
+
+        # Single deadline for all writers: 5 processes × (~3s spawn + 1s save)
+        # is the worst case on macOS spawn-mode. Use a shared deadline rather
+        # than per-process so a slow first process doesn't starve the last.
+        deadline = time.monotonic() + 60.0
+        for w in writers:
+            remaining = max(0.5, deadline - time.monotonic())
+            w.join(timeout=remaining)
+            assert w.exitcode == 0, f"writer pid={w.pid} exitcode={w.exitcode}"
+
+        # All five writes should be present — no last-write-wins.
+        final = ResearchState(state_path, budget_hours=10.0)
+        names = sorted(h.get("name", "") for h in final.hypotheses)
+        assert names == [f"hyp_{i}" for i in range(5)]
+
+    def test_write_lock_without_save_loses_writes(self, tmp_path):
+        """Document the save-or-lose contract: forgetting save() loses writes."""
+        state_path = tmp_path / "state.jsonl"
+        state = ResearchState(state_path, budget_hours=10.0)
+        state.add_hypothesis({"name": "persisted", "config": {}})
+        state.save()
+
+        with state.write_lock():
+            state.add_hypothesis({"name": "forgotten", "config": {}})
+            # Caller intentionally forgets state.save() — simulates a buggy
+            # session driver. The lock releases cleanly on exit.
+
+        # Next acquisition reloads from disk; the forgotten write is lost.
+        with state.write_lock():
+            names = {h.get("name") for h in state.hypotheses}
+            assert names == {"persisted"}, f"forgotten write leaked: {names}"
+
+    def test_write_lock_reloads_from_disk(self, tmp_path):
+        state_path = tmp_path / "state.jsonl"
+        # Parent constructs state and saves an initial hypothesis.
+        parent = ResearchState(state_path, budget_hours=10.0)
+        parent.add_hypothesis({"name": "parent_h", "config": {}})
+        parent.save()
+
+        # Peer process writes a new hypothesis to disk.
+        ctx = multiprocessing.get_context("spawn")
+        peer = ctx.Process(target=_writer_process, args=(str(state_path), "peer_h"))
+        peer.start()
+        peer.join(timeout=10.0)
+        assert peer.exitcode == 0
+
+        # Parent's in-memory state is stale (still 1). write_lock must reload
+        # so the parent sees both hypotheses before mutating.
+        assert len(parent.hypotheses) == 1
+        with parent.write_lock():
+            assert len(parent.hypotheses) == 2
+            names = {h.get("name") for h in parent.hypotheses}
+            assert names == {"parent_h", "peer_h"}

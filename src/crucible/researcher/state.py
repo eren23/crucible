@@ -2,16 +2,30 @@
 
 Tracks hypothesis queue, experiment history, active beliefs, and budget.
 Storage format: JSONL with timestamped entries.
+
+Concurrency: multiple autonomous-loop sessions in the same project must
+not silently overwrite each other. ``write_lock()`` provides an advisory
+exclusive lock on ``{state_file}.lock`` using ``fcntl.flock``, plus a
+fresh read from disk so callers see peer writes before mutating.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+from crucible.core.errors import StateLockTimeout
+from crucible.core.file_lock import (
+    DEFAULT_TIMEOUT_SECONDS as DEFAULT_LOCK_TIMEOUT_SECONDS,
+    file_lock,
+)
 from crucible.core.log import utc_now_iso
+
+_LOCK_SUFFIX = ".lock"
 
 
 class ResearchState:
@@ -26,6 +40,120 @@ class ResearchState:
         self.findings: list[dict[str, Any]] = []
         self._hours_used: float = 0.0
         self._load()
+
+    # ------------------------------------------------------------------
+    # Concurrency safety
+    # ------------------------------------------------------------------
+
+    def _lock_path(self) -> Path:
+        return self.state_file.with_suffix(self.state_file.suffix + _LOCK_SUFFIX)
+
+    @contextmanager
+    def write_lock(
+        self,
+        *,
+        timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+        poll_interval: float = 0.1,
+    ) -> Iterator["ResearchState"]:
+        """Acquire an exclusive advisory lock + reload from disk.
+
+        Use for any read-modify-write sequence on the research state file:
+
+        .. code-block:: python
+
+            with state.write_lock():
+                state.add_hypothesis(...)
+                state.save()  # MUST be called inside the block
+
+        On entry, the lock is acquired (via :func:`crucible.core.file_lock.file_lock`)
+        and ``_reload_in_place()`` runs so the caller sees the latest peer
+        writes. The caller is responsible for calling :meth:`save` before
+        exiting the block — otherwise the next :meth:`_reload_in_place`
+        silently discards their writes. If an exception is raised inside
+        the block, in-memory mutations are intentionally NOT auto-saved
+        (the state may be inconsistent).
+
+        Raises :class:`StateLockTimeout` if the lock cannot be acquired
+        within ``timeout`` seconds. POSIX-only — on Windows the underlying
+        lock degrades to a no-op (with a one-time warning) and concurrency
+        safety is lost.
+
+        Do not nest. ``fcntl.flock`` semantics for same-process re-entry
+        on a fresh fd are platform-dependent. NFS / network volumes have
+        undefined locking semantics — keep ``state_file`` on local disk.
+        """
+        with file_lock(
+            self._lock_path(),
+            timeout=timeout,
+            poll_interval=poll_interval,
+            on_timeout=lambda msg: StateLockTimeout(
+                msg.replace("file lock", "research-state lock")
+            ),
+        ):
+            self._reload_in_place()
+            yield self
+
+    def _reload_in_place(self) -> None:
+        """Drop in-memory state and reload from disk.
+
+        Called inside ``write_lock`` so the caller sees the latest peer
+        writes before modifying. Equivalent to constructing a fresh
+        ``ResearchState`` against the same file, without changing the
+        object identity. ``_total_budget_hours`` is preserved across
+        reload — ``_load()`` overwrites it via the ``budget_adjustment``
+        ledger entry when present, so the constructor default survives
+        only until the first ``save()`` (across any process).
+        """
+        self.hypotheses = []
+        self.history = []
+        self.beliefs = []
+        self.findings = []
+        self._hours_used = 0.0
+        self._load()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return an opaque snapshot for stale-submit detection.
+
+        Includes both four list-length counters AND a content hash so the
+        guard catches mutations that don't change a list length:
+        ``mark_hypothesis`` (status flip in place), ``update_beliefs``
+        (wholesale replacement with same length), ``charge_hours``
+        (budget-only mutation). The hash is a truncated sha256 of a
+        stable JSON serialization of all mutable fields.
+
+        Iteration is intentionally not part of the snapshot — it is
+        caller-controlled and would cause spurious mismatches when the
+        same state is queried at different loop turns. Loop turn
+        identity is tracked separately by the autonomous-loop session
+        driver.
+        """
+        digest_input = json.dumps(
+            {
+                "hypotheses": [
+                    (h.get("hypothesis", h.get("name", "")), h.get("status", "pending"))
+                    for h in self.hypotheses
+                ],
+                "history": [
+                    (rec.get("experiment", {}).get("name", ""), rec.get("ts", ""))
+                    for rec in self.history
+                ],
+                "beliefs": list(self.beliefs),
+                "findings": [
+                    (f.get("finding", ""), f.get("ts", ""), f.get("category", ""))
+                    for f in self.findings
+                ],
+                "hours_used": round(self._hours_used, 6),
+            },
+            sort_keys=True,
+        )
+        content_hash = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+        return {
+            "history_len": len(self.history),
+            "hypotheses_len": len(self.hypotheses),
+            "beliefs_len": len(self.beliefs),
+            "findings_len": len(self.findings),
+            "content_hash": content_hash,
+        }
 
     # ------------------------------------------------------------------
     # Persistence

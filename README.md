@@ -2,22 +2,27 @@
 
 > **Alpha software.** APIs will change. Bug reports and PRs welcome.
 
-**Crucible is a plugin-based ML research platform.** It provisions GPUs (RunPod, SSH, anything you can ssh into), runs training jobs across a fleet, collects and ranks results, and can drive the whole loop autonomously with a Claude-powered researcher.
+**Crucible is the open research operating system for autonomous ML discovery on commodity GPUs** — where hypothesis synthesis, fleet orchestration, and judge-separated loops compose into one closed loop.
 
-You bring a training script. Crucible owns the orchestration.
+Short version: **for labs that can't afford DeepMind's compute but want Sakana's autonomy.**
 
-**Works for any modality** — language models, diffusion, vision, world models, custom — via a generic training backend and pluggable components. The project was born from the OpenAI Parameter Golf language-modeling competition, but the platform is modality-agnostic by design.
+You bring a training script and a rented GPU. Crucible owns the loop — hypothesize, dispatch across a fleet, collect, reflect, synthesize across findings, repeat. Model-agnostic (Claude, GPT, Gemini, Llama via your orchestrator), modality-agnostic (LM, diffusion, vision, world models, custom), vendor-agnostic (RunPod today, SSH anywhere, SkyPilot coming).
 
 ## Why Crucible?
 
-No single existing tool combines fleet orchestration on rental GPUs with autonomous experiment design. The closest alternatives:
+The AI-native discovery engine frontier is shifting from copilots to systems that run closed loops on their own. Today's options each cover one slice:
 
-- **SkyPilot** provisions GPUs across 20+ clouds but doesn't decide what experiments to run
-- **Optuna / Ax** optimize hyperparameters mathematically but don't provision compute or reason about architectures
-- **AI Scientist** generates hypotheses but runs single-machine with a 42% failure rate and no fleet management
-- **W&B / MLflow** track experiments but don't execute them autonomously
+- **Sakana AI Scientist** — closed-loop and peer-review-validated, but single-machine and paper-shaped, no fleet, no plugin architecture.
+- **AlphaEvolve / FunSearch** (DeepMind) — algorithm-discovery via evolution, but paper-only releases, monolithic Gemini, no orchestration story.
+- **FutureHouse Platform** — open Aviary framework + biomedical SaaS, but copilot-shaped (human in the loop) and domain-locked.
+- **DeepMind AI Co-Scientist / OpenAI Deep Research / Anthropic Managed Agents** — frontier-vendor SaaS, closed weights, no on-your-GPU reproducibility.
+- **SkyPilot / Modal / Anyscale** — fleet orchestration, but no hypothesis loop.
+- **Optuna / Ax** — mathematical HPO, but no LLM-driven exploration or cross-experiment synthesis.
+- **W&B / MLflow** — tracking, not autonomous execution.
 
-Crucible connects these concerns into one loop: **analyze → hypothesize → provision → execute → reflect → promote or kill**.
+Crucible is the only stack that connects all of these concerns: **hypothesize → batch design → provision → dispatch → collect → reflect → synthesize across findings → promote or kill**, with judge separation enforced at the contract layer and full reproducibility from fleet logs to configs to model weights.
+
+See [`docs/positioning.md`](docs/positioning.md) for the full landscape map and what Crucible explicitly is NOT.
 
 ## Quick Start
 
@@ -64,22 +69,31 @@ For anything else, start from `--template generic` and override.
 - **Project templates** — `crucible project new --template <modality>` generates a spec, no copy-paste editing
 - **Reliable bootstrap** — per-step state tracking, SSH timeout with exponential backoff, config-driven data probe
 - **Experiment execution** — live output parsing, OOM retry, tier presets, per-backend timeout maps
-- **Claude-driven autonomous researcher** — hypothesis → batch → execute → reflect, via MCP tool use
-- **Model zoo** — RMSNorm, RoPE, GQA, SmearGate, BigramHash, MoE, declarative composition
+- **Orchestrator-contract researcher** — hypothesis → batch → execute → reflect via `research_request_prompt` / `research_submit`. No LLM keys baked into Crucible — bring your own orchestrator (Claude Code, GPT, Gemini, smolagents)
+- **GIANTS-style cross-finding synthesis** — `design_synthesize_from_findings` mines hub findings across projects/tracks and emits orchestrator-shaped prompts with `parent_finding_ids` provenance
+- **Judge-separation contract** — reward judge ≠ eval judge in different model families, enforced before pod time burns ([`docs/judge-separation.md`](docs/judge-separation.md))
+- **Tree search + GRPO** — UCB1 / greedy / agent-directed / GRPO selection policies, multi-metric Pareto frontiers
+- **Harness optimizer** — meta-harness evolutionary loop for memory systems / agent scaffolds with N-D Pareto tracking
+- **Auto-eval daemon** — `eval_watch_start` polls running pods, SCPs new checkpoints, runs your eval suite on each, SHA-deduplicated
+- **Model zoo** — RMSNorm, RoPE, GQA, SmearGate, BigramHash, MoE, declarative YAML composition
 - **Analysis** — leaderboard, sensitivity analysis, Pareto frontier
 - **Experiment notes** and **research tracks** persisted under `.crucible/`
-- **Crucible Hub** (`~/.crucible-hub/`) — cross-project knowledge sharing, git-synced
-- **REST API** (`crucible serve`) and **MCP server** (`crucible mcp serve`) exposing 130+ tools
-- **Community taps** — Homebrew-style git-based plugin sharing
+- **Crucible Hub** (`~/.crucible-hub/`) — cross-project knowledge sharing, git-synced findings with confidence-gated promotion
+- **HuggingFace collab** — publish leaderboards, findings, recipes, model artifacts to HF; read peer-agent prior attempts and discussions
+- **REST API** (`crucible serve`) and **MCP server** (`crucible mcp serve`) exposing 200+ tools
+- **Community taps** — Homebrew-style git-based plugin sharing across 15 plugin types
 - **Unified plugin system** — 13 pluggable types (optimizers, schedulers, callbacks, loggers, providers, architectures, data adapters, objectives, block types, stack patterns, augmentations, activations, data sources) with 3-tier precedence and auto-discovery
 - **Interactive TUI** for browsing experiment designs grouped by status
 
 ## What's coming
 
-- SkyPilot provider (20+ cloud support)
-- Optuna / Ax integration (mathematical HPO alongside LLM-driven search)
-- Code-level search (LLM modifies training scripts, not just configs)
-- PyPI release
+A five-phase plan toward closed-loop autonomous discovery. See [`ROADMAP.md`](ROADMAP.md) for the full breakdown.
+
+- **Phase 1 — Close the autonomy loop**: `autonomous_research_loop` / `tree_autonomous_loop` / `harness_autonomous_loop` MCP tools so one call drives N iterations end-to-end
+- **Phase 2 — Discoverability surge**: tool router for the 200+ MCP surface, live TUI cockpit (fleet + queue + leaderboard + briefing), 5-minute quickstart, semantic experiment search
+- **Phase 3 — Ecosystem connections**: benchmark ingestion (lm-eval-harness, BIG-bench, papers-with-code), Optuna/Ax bridge, external MCP consumption, code-level mutation MVP, arxiv/OpenReview ingestion
+- **Phase 4 — Niche showcase**: paper-draft generator, memory-aware GIANTS synthesis, real-time peer coordination via shared HF Discussions, end-to-end demo project
+- **Always coming**: SkyPilot provider, PyPI release
 
 ## Core concepts
 
@@ -143,7 +157,7 @@ crucible research start --budget-hours 10 --tier proxy --dry-run
 ### MCP + REST
 
 ```bash
-crucible mcp serve     # stdio MCP server for Claude (130+ tools)
+crucible mcp serve     # stdio MCP server for Claude (200+ tools)
 crucible serve         # REST API server (FastAPI)
 ```
 

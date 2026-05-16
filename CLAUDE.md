@@ -2,7 +2,13 @@
 
 ## What is this?
 
-Crucible is an ML research platform for autonomous experimentation on rental GPUs. It combines LLM-driven hypothesis generation with fleet orchestration (RunPod, SSH). Currently alpha — born from the OpenAI Parameter Golf competition.
+**Crucible is the open research operating system for autonomous ML discovery on commodity GPUs** — where hypothesis synthesis, fleet orchestration, and judge-separated loops compose into one closed loop.
+
+Short form: *for labs that can't afford DeepMind's compute but want Sakana's autonomy.*
+
+Crucible combines LLM-driven hypothesis generation (via an orchestrator contract — no LLM keys baked in) with fleet orchestration on rental GPUs (RunPod today, SSH anywhere, SkyPilot coming), cross-project knowledge hub, GIANTS-style finding synthesis, and judge-separated LM-as-judge loops. Modality-agnostic, model-agnostic, vendor-agnostic. Currently alpha — born from the OpenAI Parameter Golf competition.
+
+See `docs/positioning.md` for the competitive landscape and what Crucible explicitly is NOT. See `ROADMAP.md` for the five-phase plan toward closed-loop autonomy.
 
 ## Architecture
 
@@ -21,7 +27,7 @@ src/crucible/
 ├── researcher/    # LLM-driven autonomous research loop, briefing (Claude-first)
 ├── analysis/      # Leaderboard, sensitivity analysis, Pareto frontier
 ├── data/          # Manifest-driven HuggingFace data pipeline
-├── mcp/           # MCP server exposing fleet ops as Claude tools (118 tools)
+├── mcp/           # MCP server exposing fleet ops as Claude tools (200+ tools)
 ├── api/           # Lightweight REST API server (FastAPI)
 ├── tui/           # Interactive experiment design browser (Textual)
 └── cli/           # CLI entry points (crucible command)

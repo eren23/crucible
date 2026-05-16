@@ -11,18 +11,24 @@ Storage layout under tree_dir (.crucible/search_trees/{name}/):
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import random
 import re
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
 from crucible.core.errors import SearchTreeError
-from crucible.core.io import append_jsonl, read_jsonl, read_yaml
+from crucible.core.file_lock import DEFAULT_TIMEOUT_SECONDS, file_lock
+from crucible.core.io import append_jsonl, atomic_write_yaml, read_jsonl, read_yaml
 from crucible.core.log import log_warn, utc_now_iso
+
+_TREE_LOCK_FILENAME = ".lock"
 
 
 class SearchTree:
@@ -834,6 +840,95 @@ class SearchTree:
             raise SearchTreeError(f"No candidate code at {path}")
         return path.read_text(encoding="utf-8")
 
+    def auto_prune(self, threshold: float | None = None) -> dict[str, Any]:
+        """Prune branches whose completed-result metric is worse than threshold.
+
+        Phase 1.10: previously lived on ``TreeSearchResearcher.auto_prune``
+        in ``tree_loop.py`` — moved to ``SearchTree`` itself so the MCP
+        ``tree_prune(mode='auto')`` surface doesn't need to instantiate a
+        researcher just for pruning. The legacy method delegates here.
+
+        If *threshold* is None, reads from ``meta['pruning_config']
+        ['metric_threshold']`` and returns ``{pruned_count: 0,
+        message: "No threshold configured"}`` if absent. Otherwise:
+        for each completed node, if its ``result_metric`` is worse than
+        the threshold (in the tree's metric_direction), prune the branch
+        rooted at that node.
+
+        Returns ``{pruned_count, pruned_node_ids}`` (plus ``message``
+        when no threshold is configured).
+        """
+        if threshold is None:
+            pc = self.meta.get("pruning_config") or {}
+            threshold = pc.get("metric_threshold")
+            if threshold is None:
+                return {"pruned_count": 0, "message": "No threshold configured"}
+            threshold = float(threshold)
+
+        minimize = self.meta.get("metric_direction", "minimize") == "minimize"
+        pruned: list[str] = []
+        for node in list(self.nodes.values()):
+            if node.get("status") != "completed":
+                continue
+            metric = node.get("result_metric")
+            if metric is None:
+                continue
+            should_prune = (
+                (minimize and metric > threshold)
+                or (not minimize and metric < threshold)
+            )
+            if should_prune:
+                self.prune_branch(
+                    node["node_id"],
+                    reason=f"metric {metric} {'>' if minimize else '<'} threshold {threshold}",
+                )
+                pruned.append(node["node_id"])
+        return {
+            "pruned_count": len(pruned),
+            "pruned_node_ids": pruned,
+        }
+
+    def snapshot(self, node_id: str | None = None) -> dict[str, Any]:
+        """Return an opaque snapshot for stale-submit detection.
+
+        Mirrors :meth:`crucible.researcher.state.ResearchState.snapshot` —
+        used by tools that build a prompt from tree state and accept an
+        orchestrator-supplied response later. If the tree changed between
+        prompt and submit (peer expansion, status flip, new result), the
+        snapshot mismatches and the submitting tool raises
+        :class:`crucible.core.errors.StaleSubmitError`.
+
+        Tracks: per-node identity + parent + status + child shape, plus
+        the current best-node metric (results land via record_result and
+        update best). Includes optional ``node_id`` so submit-side can
+        also verify the target node still exists.
+        """
+        nodes_repr = [
+            (
+                nid,
+                n.get("parent_node_id"),
+                n.get("status"),
+                tuple(n.get("children") or []),
+            )
+            for nid, n in sorted(self.nodes.items())
+        ]
+        digest_input = json.dumps(
+            {
+                "nodes": nodes_repr,
+                "best_node_id": self.meta.get("best_node_id"),
+                "best_metric": self.meta.get("best_metric"),
+            },
+            sort_keys=True,
+            default=str,
+        )
+        content_hash = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+        return {
+            "tree_name": self.meta.get("name"),
+            "node_id": node_id,
+            "total_nodes": self.meta.get("total_nodes", 0),
+            "content_hash": content_hash,
+        }
+
     def get_tree_summary(self) -> dict[str, Any]:
         """Get a summary of the tree state."""
         status_counts: dict[str, int] = {}
@@ -931,23 +1026,83 @@ class SearchTree:
     # ------------------------------------------------------------------
 
     def _save_meta(self) -> None:
-        """Write tree metadata to tree.yaml."""
+        """Write tree metadata to tree.yaml atomically."""
         self.tree_dir.mkdir(parents=True, exist_ok=True)
-        text = yaml.dump(
-            self.meta, default_flow_style=False, sort_keys=False, allow_unicode=True
-        )
-        self._meta_path.write_text(text, encoding="utf-8")
+        atomic_write_yaml(self._meta_path, self.meta, sort_keys=False)
 
     def _save_snapshot(self) -> None:
-        """Write a full snapshot of all nodes to current_tree.yaml."""
+        """Write a full snapshot of all nodes to current_tree.yaml atomically."""
         snapshot = {
             "meta": self.meta,
             "nodes": {nid: dict(n) for nid, n in self.nodes.items()},
         }
-        text = yaml.dump(
-            snapshot, default_flow_style=False, sort_keys=False, allow_unicode=True
-        )
-        self._snapshot_path.write_text(text, encoding="utf-8")
+        atomic_write_yaml(self._snapshot_path, snapshot, sort_keys=False)
+
+    # ------------------------------------------------------------------
+    # Concurrency safety
+    # ------------------------------------------------------------------
+
+    @property
+    def lock_path(self) -> Path:
+        return self.tree_dir / _TREE_LOCK_FILENAME
+
+    @contextmanager
+    def write_lock(
+        self,
+        *,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        poll_interval: float = 0.1,
+    ) -> Iterator["SearchTree"]:
+        """Acquire an exclusive advisory lock + reload from disk.
+
+        Use for any read-modify-write sequence on the tree (snapshot check
+        then mutate, multi-step expansion, sync results loop, etc.):
+
+        .. code-block:: python
+
+            with tree.write_lock():
+                if tree.snapshot() != submitted_snap:
+                    raise StaleSubmitError(...)
+                tree.expand_node(...)
+
+        On entry, the lock is acquired (via
+        :func:`crucible.core.file_lock.file_lock`) and the tree is
+        reloaded from disk so the caller sees the latest peer writes
+        before mutating. Mutating methods (``expand_node``, ``record_result``,
+        ``prune_node``, etc.) write through ``_save_meta`` / ``_save_snapshot``
+        which use atomic-replace via :func:`atomic_write_yaml` — so partial
+        writes from a crash cannot poison the on-disk state.
+
+        POSIX-only. On Windows the underlying lock degrades to a no-op
+        with a one-time warning; concurrency safety is lost.
+
+        Do not nest — ``fcntl.flock`` on a fresh fd from the same process
+        is platform-dependent and may deadlock until ``timeout``.
+        """
+        self.tree_dir.mkdir(parents=True, exist_ok=True)
+        with file_lock(
+            self.lock_path,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            on_timeout=lambda msg: SearchTreeError(
+                msg.replace("file lock", "SearchTree lock")
+            ),
+        ):
+            self._reload_from_disk()
+            yield self
+
+    def _reload_from_disk(self) -> None:
+        """Drop in-memory state and reload from disk under the lock.
+
+        Mirrors ``ResearchState._reload_in_place``. Public mutating methods
+        already persist on every call (via ``_save_meta`` + ``_save_snapshot``),
+        so reloading here just picks up writes from any peer that held the
+        lock before us.
+        """
+        self.meta = {}
+        self.nodes = {}
+        self._load_meta()
+        self._load_nodes()
 
     def _append_node_event(self, event_type: str, node: dict[str, Any]) -> None:
         """Append an event to the JSONL ledger."""

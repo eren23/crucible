@@ -936,9 +936,13 @@ TOOLS: list[Tool] = [
         name="context_push_finding",
         description=(
             "Record a research finding or observation. Persists across sessions and informs hypothesis generation.\n\n"
+            "Phase 1.6 auto-promote: set ``auto_promote=true`` and the finding will also be pushed to the hub "
+            "(track-scope by default; pass ``auto_promote_scope='global'`` for global) provided the confidence "
+            "meets the promotion-rule minimum. Pass ``auto_promote_track`` to target a specific track. "
+            "Auto-promote is per-call opt-in; default behavior records only to ResearchState.\n\n"
             "REQUIRES: Nothing. Categories: belief, observation, constraint, rejected_hypothesis.\n"
-            "RETURNS: {status, finding_index}\n"
-            "NEXT: finding_promote to elevate to hub scope, annotate_run to link to specific experiments."
+            "RETURNS: {status: 'recorded' | 'recorded_and_promoted', entry, ...}\n"
+            "NEXT: finding_promote to elevate to hub scope manually, annotate_run to link to specific experiments."
         ),
         inputSchema={
             "type": "object",
@@ -947,6 +951,10 @@ TOOLS: list[Tool] = [
                 "category": {"type": "string", "description": "Category: belief, observation, constraint, rejected_hypothesis.", "default": "observation"},
                 "source_experiments": {"type": "array", "items": {"type": "string"}, "description": "Experiment names supporting this finding.", "default": []},
                 "confidence": {"type": "number", "description": "Confidence in this finding (0-1).", "default": 0.7},
+                "created_by": {"type": "string", "description": "Optional author identifier.", "default": "mcp-agent"},
+                "auto_promote": {"type": "boolean", "description": "Phase 1.6: push to hub if confidence meets promotion threshold.", "default": False},
+                "auto_promote_scope": {"type": "string", "enum": ["track", "global"], "description": "Hub scope to promote into.", "default": "track"},
+                "auto_promote_track": {"type": "string", "description": "Track name when auto_promote_scope='track'."},
             },
             "required": ["finding"],
             "additionalProperties": False,
@@ -1947,14 +1955,44 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="tree_auto_expand",
-        description="LLM-generate child experiments for a node using Claude. REQUIRES: name, node_id, ANTHROPIC_API_KEY. RETURNS: new_node_ids with hypotheses. NEXT: tree_enqueue_pending.",
+        description=(
+            "LLM-generated child expansion for a tree node — two-call contract, "
+            "no API keys inside Crucible.\n\n"
+            "Step 1: action='request_prompt' — returns {system, user, schema, tree_snapshot}.\n"
+            "Step 2: orchestrator calls its own LLM with system+user; parses response per schema.\n"
+            "Step 3: action='submit' with the response and the tree_snapshot from step 1 — "
+            "Crucible parses, validates, and attaches children to the tree.\n\n"
+            "Tree-snapshot guard: if the tree advanced between request and submit (peer "
+            "expansion, new result, status flip), submit raises StaleSubmitError so the "
+            "orchestrator re-requests the prompt with fresh tree context.\n\n"
+            "Legacy single-call (deprecated, removed in a future release): calling without "
+            "'action' runs the original in-Crucible Anthropic call. Disabled by default — "
+            "set CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND=1 to opt in. Emits DeprecationWarning.\n\n"
+            "REQUIRES: name, node_id; for action='submit' also response (and optionally tree_snapshot).\n"
+            "RETURNS: request_prompt → {system, user, schema, tree_snapshot, ...}. submit → {new_node_ids, children, total_nodes}.\n"
+            "ERRORS: StaleSubmitError when tree_snapshot is provided and tree has advanced.\n"
+            "NEXT: tree_enqueue_pending after submit."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["request_prompt", "submit"],
+                    "description": "Two-call contract verb. Omit for deprecated single-call mode.",
+                },
                 "name": {"type": "string", "description": "Tree name."},
                 "node_id": {"type": "string", "description": "Node ID to auto-expand."},
                 "n_children": {"type": "integer", "description": "Number of children to generate.", "default": 3},
-                "extra_context": {"type": "string", "description": "Additional context for LLM generation.", "default": ""},
+                "extra_context": {"type": "string", "description": "Additional context for prompt generation.", "default": ""},
+                "response": {
+                    "description": "Required for action='submit'. Orchestrator-supplied response — JSON array of child specs, a dict with 'children'/'items'/'specs' key, or a raw JSON string.",
+                },
+                "tree_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot dict from the matching action='request_prompt' call. When present in 'submit', enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
             },
             "required": ["name", "node_id"],
             "additionalProperties": False,
@@ -1962,16 +2000,41 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="tree_prune",
-        description="Prune a node or entire branch in the search tree. REQUIRES: name, node_id. RETURNS: pruned count. NEXT: tree_get.",
+        description=(
+            "Prune a node, branch, or run deterministic auto-prune over the tree.\n\n"
+            "Modes:\n"
+            "- 'manual' (default): prune the named node_id (or its branch if "
+            "  prune_branch=true). Requires node_id.\n"
+            "- 'auto': walk all completed nodes and prune branches whose "
+            "  result_metric is worse than the configured pruning threshold "
+            "  (or the passed 'threshold'). node_id is optional in this mode.\n\n"
+            "REQUIRES: name; for mode='manual' also node_id.\n"
+            "RETURNS: manual → {status, pruned_count, total_pruned}. "
+            "auto → {status, mode, pruned_count, pruned_node_ids, total_pruned}.\n"
+            "NEXT: tree_get."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Tree name."},
-                "node_id": {"type": "string", "description": "Node ID to prune."},
+                "mode": {
+                    "type": "string",
+                    "enum": ["manual", "auto"],
+                    "default": "manual",
+                    "description": "Pruning mode. 'auto' uses the tree's metric threshold.",
+                },
+                "node_id": {
+                    "type": "string",
+                    "description": "Node ID to prune (manual mode only).",
+                },
                 "reason": {"type": "string", "description": "Why this node/branch is being pruned.", "default": ""},
-                "prune_branch": {"type": "boolean", "description": "If true, recursively prune all descendants.", "default": False},
+                "prune_branch": {"type": "boolean", "description": "If true, recursively prune all descendants (manual mode only).", "default": False},
+                "threshold": {
+                    "type": "number",
+                    "description": "Override the tree's pruning_config metric_threshold (auto mode only).",
+                },
             },
-            "required": ["name", "node_id"],
+            "required": ["name"],
             "additionalProperties": False,
         },
     ),
@@ -3322,8 +3385,14 @@ TOOLS: list[Tool] = [
             "Hypothesis: adds items to state.hypotheses (ready for design_batch_from_hypotheses).\n"
             "Reflection: updates state.beliefs + returns promote/kill lists the orchestrator "
             "can then apply via existing fleet tools.\n\n"
+            "Pass state_snapshot — the dict returned by the matching research_request_prompt — "
+            "to enable stale-submit detection. If state has advanced between request and submit "
+            "(another loop iteration ran, or a concurrent process mutated state), the call fails "
+            "with StaleSubmitError so the orchestrator re-requests the prompt with fresh context "
+            "rather than applying stale reasoning. Omit state_snapshot to skip the check.\n\n"
             "REQUIRES: stage + response matching the schema from research_request_prompt.\n"
             "RETURNS: {applied, summary, counts...}\n"
+            "ERRORS: StaleSubmitError when state_snapshot is provided and state has advanced.\n"
             "NEXT: (hypothesis) design_batch_from_hypotheses → design_enqueue_batch → dispatch_experiments.\n"
             "      (reflection) examine promote_names/kill_names; add promoted hypotheses if desired."
         ),
@@ -3339,8 +3408,252 @@ TOOLS: list[Tool] = [
                     "description": "Parsed response object OR raw JSON string. Shape matches the schema from research_request_prompt.",
                 },
                 "iteration": {"type": "integer", "default": 0},
+                "state_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot dict from the matching research_request_prompt call. When present, enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
             },
             "required": ["stage", "response"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="autonomous_research_loop",
+        description=(
+            "Persisted-session driver for the autonomous research loop. Crucible "
+            "never calls an LLM — the orchestrator handles LLM round-trips between "
+            "submits. State persists under .crucible/autonomous_sessions/{id}.yaml "
+            "so sessions survive process restarts.\n\n"
+            "State machine per iteration: hypothesis → (submit) → reflection → "
+            "(submit) → next iteration | done.\n\n"
+            "Actions:\n"
+            "- 'start': begin a session, return the first hypothesis prompt. If a "
+            "  non-terminal session already exists for this project, returns it "
+            "  (idempotent — only one autonomous session at a time per project).\n"
+            "- 'submit': apply the orchestrator-supplied response under "
+            "  ResearchState.write_lock + state_snapshot guard, advance stage, "
+            "  return next prompt or {next_prompt: null, session_status: 'done'}.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled, persist checkpoint.\n\n"
+            "Between submits, the orchestrator drives experiment dispatch + result "
+            "collection via existing fleet tools — submit only advances the LLM "
+            "stage. After hypothesis submit, run design_batch_from_hypotheses → "
+            "design_enqueue_batch → dispatch_experiments → collect_results; then "
+            "submit reflection.\n\n"
+            "Doom-loop detection: same prompt fingerprint for 5 iterations in a "
+            "row trips the guard and the session enters 'error' state.\n\n"
+            "REQUIRES: action; for submit/status/cancel also session_id; for "
+            "submit also response.\n"
+            "RETURNS: start → first prompt + session_id. submit → "
+            "{stage_applied, next_stage, next_prompt}. status → session state. "
+            "cancel → {checkpoint_path}.\n"
+            "ERRORS: StaleSubmitError when state_snapshot mismatched. "
+            "DoomLoopDetected when prompts repeat. AutonomousSessionError when "
+            "session terminal."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "status", "cancel"],
+                    "description": "Session lifecycle verb.",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel; ignored by start.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "tier": {
+                    "type": "string",
+                    "default": "proxy",
+                    "description": "Experiment tier for hypothesis prompts (start only).",
+                },
+                "focus_family": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Optional — bias hypothesis generation toward a family (start only).",
+                },
+                "budget_usd": {
+                    "type": "number",
+                    "description": (
+                        "Optional total spend cap in USD (start only). Enforced via "
+                        "cost_tracker — wall-clock × declared pod rate from nodes.json. "
+                        "Session auto-cancels and raises BudgetExceeded when "
+                        "spend_usd >= budget_usd; check happens at every build_prompt "
+                        "and after every successful submit. Omit for no cap."
+                    ),
+                },
+                "with_literature": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Inject HuggingFace Papers context into hypothesis prompts (start only, best-effort).",
+                },
+                "literature_k": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Number of papers to inject when with_literature=True (start only).",
+                },
+                "response": {
+                    "description": "Orchestrator-supplied response for the current stage (submit only).",
+                },
+                "state_snapshot": {
+                    "type": "object",
+                    "description": "Opaque snapshot from the previous prompt (submit only). Enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="tree_autonomous_loop",
+        description=(
+            "Persisted-session driver for tree-search autonomous expansion. "
+            "Mirrors autonomous_research_loop but for tree expansion: each "
+            "iteration picks one expandable node, hands the orchestrator a "
+            "tree_auto_expand-style prompt, applies the response under "
+            "SearchTree.write_lock, and advances. Crucible never calls an LLM.\n\n"
+            "Between submits, drive the fleet: tree_enqueue_pending → "
+            "dispatch_experiments → collect_results → tree_sync_results. "
+            "When no expandable nodes remain but pending nodes exist, build "
+            "returns next_action='external_dispatch' as a hint.\n\n"
+            "Actions:\n"
+            "- 'start': begin a session against an existing tree, return first prompt.\n"
+            "- 'submit': apply response, advance, return next prompt or done.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled, persist checkpoint.\n\n"
+            "Doom-loop detection: 5 identical expansion prompts in a row trip "
+            "the guard and the session enters 'error' state.\n\n"
+            "REQUIRES: action; for start also tree_name; for submit/status/cancel also session_id.\n"
+            "RETURNS: start → first prompt + session_id + tree_snapshot. submit → "
+            "{node_id, new_node_ids, next_prompt}. status → session state. cancel → checkpoint.\n"
+            "ERRORS: StaleSubmitError when tree_snapshot mismatched. TreeDoomLoopDetected when "
+            "prompts repeat. TreeAutonomousSessionError when session terminal."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "continue", "status", "cancel"],
+                    "description": "Session lifecycle verb. 'continue' re-checks "
+                    "for expandable nodes after external dispatch + collect.",
+                },
+                "tree_name": {
+                    "type": "string",
+                    "description": "Name of an existing SearchTree (start only).",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel; ignored by start.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "n_children": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Children to generate per expansion (start only).",
+                },
+                "response": {
+                    "description": "Orchestrator-supplied response for the current node (submit only).",
+                },
+                "tree_snapshot": {
+                    "type": "object",
+                    "description": "Opaque tree snapshot from the previous prompt (submit only). "
+                    "Enables stale-submit detection.",
+                    "additionalProperties": True,
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="harness_autonomous_loop",
+        description=(
+            "Persisted-session driver for the harness-optimization autonomous "
+            "loop. Wraps HarnessOptimizer in the orchestrator-contract pattern: "
+            "each iteration the orchestrator proposes Python harness candidates "
+            "matching a domain spec, the session validates + benchmarks them "
+            "(fire-and-forget enqueue), then waits for fleet ops before "
+            "continuing. Crucible never calls an LLM.\n\n"
+            "Judge-separation: panel.assert_separated() runs at action='start' "
+            "before any pod time is consumed, mirroring HarnessOptimizer.run_iteration.\n\n"
+            "Actions:\n"
+            "- 'start': assert judge-sep, return first proposal prompt.\n"
+            "- 'submit': parse Python+JSON response, validate, benchmark, return "
+            "  external_dispatch hint.\n"
+            "- 'continue': after dispatch + collect + tree_sync_results, return "
+            "  next proposal prompt or done.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled.\n\n"
+            "REQUIRES: action; for start also domain_spec + tree_name; for "
+            "submit/status/cancel/continue also session_id; for submit also response.\n"
+            "RETURNS: start → first prompt + session_id. submit → "
+            "{proposed, validated, benchmarked_node_ids, next_action}. status → "
+            "session state. cancel → checkpoint.\n"
+            "ERRORS: HarnessAutonomousSessionError when session terminal. "
+            "HarnessDoomLoopDetected when prompts repeat. ConfigError if "
+            "judges panel is mis-separated."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "continue", "status", "cancel"],
+                    "description": "Session lifecycle verb.",
+                },
+                "domain_spec": {
+                    "type": "string",
+                    "description": "Path to a domain_spec.yaml (start only).",
+                },
+                "tree_name": {
+                    "type": "string",
+                    "description": "SearchTree name to build / extend (start only).",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel/continue.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "n_candidates": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Candidates to propose per iteration (start only).",
+                },
+                "response": {
+                    "type": "string",
+                    "description": "Raw orchestrator response — Python code blocks + JSON metadata (submit only).",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
             "additionalProperties": False,
         },
     ),

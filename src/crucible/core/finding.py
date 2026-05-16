@@ -30,8 +30,13 @@ FINDING_CATEGORIES = {
 SCOPE_ORDER = ["project", "track", "global"]
 
 # Minimum confidence for promotion
+# (Phase 1.6 review fix: ("project", "global") was missing — direct skip-the-
+# ladder promotion bypassed the gate entirely via PROMOTION_RULES.get(default={}).
+# Now requires a higher bar than ("project", "track") to discourage skipping
+# the track-mediated review step but not prohibit it.)
 PROMOTION_RULES: dict[tuple[str, str], dict[str, Any]] = {
     ("project", "track"): {"min_confidence": 0.6},
+    ("project", "global"): {"min_confidence": 0.9},
     ("track", "global"): {"min_confidence": 0.8},
 }
 

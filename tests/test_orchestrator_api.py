@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 
 from crucible.core.config import load_config
-from crucible.core.errors import ResearcherError
+from crucible.core.errors import ResearcherError, StaleSubmitError
 from crucible.researcher import orchestrator_api as oa
 from crucible.researcher.state import ResearchState
 
@@ -293,3 +293,145 @@ def test_request_then_submit_roundtrip(state_in_project):
     result = oa.submit_response("hypothesis", canned, config, state)
     assert result["applied"] is True
     assert result["hypotheses_added"] == 1
+
+
+# ---------------------------------------------------------------------------
+# state_snapshot enforcement (stale-submit protection)
+# ---------------------------------------------------------------------------
+
+
+def _canned_hypothesis_response() -> dict:
+    return {
+        "hypotheses": [
+            {
+                "hypothesis": "Test",
+                "name": "test_hyp",
+                "expected_impact": 0.01,
+                "confidence": 0.5,
+                "config": {"MODEL_FAMILY": "baseline"},
+                "rationale": "test",
+                "family": "baseline",
+            }
+        ]
+    }
+
+
+def test_submit_response_accepts_matching_snapshot(state_in_project):
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=0)
+    snapshot = prompt["state_snapshot"]
+
+    # No mutation between request and submit — snapshot still matches.
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=0, state_snapshot=snapshot,
+    )
+    assert result["applied"] is True
+
+
+def test_submit_response_rejects_stale_snapshot(state_in_project):
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=0)
+    stale_snapshot = prompt["state_snapshot"]
+
+    # Simulate a real concurrent process advancing state: mutate AND save
+    # so the change is on disk. submit_response acquires write_lock which
+    # reloads from disk; the peer's hypothesis is now visible and the
+    # snapshot mismatch is detected.
+    state.add_hypothesis({"name": "interloper", "config": {}})
+    state.save()
+
+    with pytest.raises(StaleSubmitError, match="State has advanced"):
+        oa.submit_response(
+            "hypothesis", _canned_hypothesis_response(), config, state,
+            iteration=0, state_snapshot=stale_snapshot,
+        )
+
+
+def test_submit_response_without_snapshot_skips_check(state_in_project):
+    """state_snapshot is opt-in — callers that don't pass it bypass the check."""
+    state, _ = state_in_project
+    config = load_config()
+    oa.request_prompt("hypothesis", config, state, iteration=0)
+
+    # State advances on disk; without a snapshot, submit_response trusts the
+    # caller (opt-in semantics preserve backward compat for older callers).
+    state.add_hypothesis({"name": "interloper", "config": {}})
+    state.save()
+
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=0,
+    )
+    assert result["applied"] is True
+
+
+def test_stale_submit_detects_findings_mismatch(state_in_project):
+    """Findings count is tracked in snapshot — peer-added findings trip stale.
+
+    The peer mutation must be persisted (save) so write_lock's reload sees it.
+    """
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state)
+    stale_snapshot = prompt["state_snapshot"]
+
+    state.add_finding("interloper finding", confidence=0.7)
+    state.save()
+
+    with pytest.raises(StaleSubmitError):
+        oa.submit_response(
+            "hypothesis", _canned_hypothesis_response(), config, state,
+            state_snapshot=stale_snapshot,
+        )
+
+
+def test_snapshot_iteration_drift_does_not_trip_check(state_in_project):
+    """Iteration is loop-turn identity, NOT state — different iteration
+    values for the same state must not spuriously raise StaleSubmitError."""
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state, iteration=3)
+    snapshot = prompt["state_snapshot"]
+
+    # Caller increments their loop counter between request and submit — fine.
+    result = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        iteration=4, state_snapshot=snapshot,
+    )
+    assert result["applied"] is True
+
+
+def test_submit_response_serializes_concurrent_submits(state_in_project):
+    """TOCTOU proof: two submits with the same captured snapshot — exactly
+    one succeeds. The first submit acquires write_lock, applies, saves. The
+    second submit acquires write_lock, reloads from disk (sees the first's
+    mutations), and the snapshot it was given is now stale → StaleSubmitError.
+
+    Without the write_lock wrapping the check-then-mutate sequence, both
+    submits could pass the snapshot check (both reading the same in-memory
+    state pre-mutation) and apply, with the second save() clobbering the
+    first via atomic-replace.
+    """
+    state, _ = state_in_project
+    config = load_config()
+    prompt = oa.request_prompt("hypothesis", config, state)
+    shared_snapshot = prompt["state_snapshot"]
+
+    # First submit succeeds: writes hypothesis, persists.
+    result1 = oa.submit_response(
+        "hypothesis", _canned_hypothesis_response(), config, state,
+        state_snapshot=shared_snapshot,
+    )
+    assert result1["applied"] is True
+    assert result1["hypotheses_added"] == 1
+
+    # Second submit with the SAME captured snapshot — state has advanced
+    # (first submit wrote and saved a hypothesis), so the snapshot is stale.
+    with pytest.raises(StaleSubmitError):
+        oa.submit_response(
+            "hypothesis", _canned_hypothesis_response(), config, state,
+            state_snapshot=shared_snapshot,
+        )

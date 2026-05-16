@@ -59,6 +59,24 @@ class RunnerError(CrucibleError):
 class ResearcherError(CrucibleError):
     """LLM, hypothesis generation, research loop failures."""
 
+class StaleSubmitError(ResearcherError):
+    """Orchestrator submitted a response against an outdated ``state_snapshot``.
+
+    The autonomous-loop protocol returns ``state_snapshot`` with each
+    ``request_prompt`` call. If the orchestrator submits a response after
+    another loop iteration (or a concurrent process) has advanced state,
+    the submission would apply old reasoning to new state. Caller should
+    re-request the prompt with the latest snapshot and retry.
+    """
+
+class StateLockTimeout(ResearcherError):
+    """Could not acquire ``ResearchState`` file lock within the timeout.
+
+    Another Crucible process is holding the lock on the same project's
+    ``research_state.jsonl``. Either wait, identify the holder, or pick a
+    different project.
+    """
+
 class DataError(CrucibleError):
     """Data download, manifest, sync failures."""
 

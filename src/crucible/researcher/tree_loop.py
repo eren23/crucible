@@ -172,43 +172,13 @@ class TreeSearchResearcher:
     def auto_prune(self, threshold: float | None = None) -> dict[str, Any]:
         """Prune branches whose metrics are significantly worse than best.
 
-        If *threshold* is ``None``, uses the tree's pruning_config threshold
-        or skips pruning.
-
-        Returns summary of what was pruned.
+        Phase 1.10 cleanup: the actual logic now lives on ``SearchTree``
+        (search_tree.py) so the MCP ``tree_prune(mode='auto')`` surface
+        doesn't depend on TreeSearchResearcher. This method is a
+        thin backward-compat delegator for callers using the legacy
+        ``TreeSearchResearcher`` Python API.
         """
-        if threshold is None:
-            pc = self.tree.meta.get("pruning_config", {})
-            threshold = pc.get("metric_threshold")
-            if threshold is None:
-                return {"pruned_count": 0, "message": "No threshold configured"}
-            threshold = float(threshold)
-
-        minimize = self.tree.meta["metric_direction"] == "minimize"
-        pruned: list[str] = []
-
-        for node in list(self.tree.nodes.values()):
-            if node["status"] != "completed":
-                continue
-            metric = node.get("result_metric")
-            if metric is None:
-                continue
-
-            should_prune = (
-                (minimize and metric > threshold)
-                or (not minimize and metric < threshold)
-            )
-            if should_prune:
-                self.tree.prune_branch(
-                    node["node_id"],
-                    reason=f"metric {metric} {'>' if minimize else '<'} threshold {threshold}",
-                )
-                pruned.append(node["node_id"])
-
-        return {
-            "pruned_count": len(pruned),
-            "pruned_node_ids": pruned,
-        }
+        return self.tree.auto_prune(threshold=threshold)
 
     # ------------------------------------------------------------------
     # Status

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from crucible.core.config import ProjectConfig, load_config
-from crucible.core.errors import CrucibleError
+from crucible.core.errors import CrucibleError, StaleSubmitError
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectSpec
@@ -1148,7 +1148,14 @@ def context_get_analysis(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
-    """Record a research finding in the context store."""
+    """Record a research finding in the context store.
+
+    Phase 1.6 auto-promote: pass ``auto_promote=True`` and the finding will
+    additionally be pushed to the hub (track-scope by default, global if
+    ``auto_promote_scope='global'``) provided the confidence meets the
+    promotion-rule threshold. Auto-promote is opt-in per call — the
+    default behavior records to ResearchState only.
+    """
     config = _get_config()
     from crucible.researcher.state import ResearchState
 
@@ -1164,7 +1171,50 @@ def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
     )
     state.save()
 
-    return {"status": "recorded", "entry": entry}
+    auto_promote = bool(args.get("auto_promote", False))
+    if not auto_promote:
+        return {"status": "recorded", "entry": entry}
+
+    # Auto-promote: confidence-gated push to the hub.
+    try:
+        from crucible.core.finding import PROMOTION_RULES
+        target_scope = str(args.get("auto_promote_scope", "track"))
+        target_track = args.get("auto_promote_track")
+        rule = PROMOTION_RULES.get(("project", target_scope), {})
+        min_conf = rule.get("min_confidence", 0.0)
+        if entry.get("confidence", 0) < min_conf:
+            return {
+                "status": "recorded",
+                "entry": entry,
+                "auto_promote_skipped": True,
+                "reason": (
+                    f"confidence {entry.get('confidence', 0):.2f} below threshold "
+                    f"{min_conf:.2f} for project→{target_scope}"
+                ),
+            }
+        hub = _get_hub()
+        if hub is None:
+            return {
+                "status": "recorded",
+                "entry": entry,
+                "auto_promote_skipped": True,
+                "reason": "hub not initialized",
+            }
+        hub_finding = _research_finding_to_hub_finding(entry, config)
+        promoted = hub.store_finding(hub_finding, target_scope, track=target_track)
+        return {
+            "status": "recorded_and_promoted",
+            "entry": entry,
+            "promoted": promoted,
+            "auto_promote_scope": target_scope,
+        }
+    except CrucibleError as exc:
+        return {
+            "status": "recorded",
+            "entry": entry,
+            "auto_promote_skipped": True,
+            "reason": f"[{type(exc).__name__}] {exc}",
+        }
 
 
 def context_get_findings(args: dict[str, Any]) -> dict[str, Any]:
@@ -1627,7 +1677,8 @@ def research_submit(args: dict[str, Any]) -> dict[str, Any]:
 
     Accepts either a parsed response dict (matching the schema returned
     by research_request_prompt) or a raw JSON string. Mutations persist
-    to ResearchState.
+    to ResearchState. Pass the ``state_snapshot`` from the matching
+    research_request_prompt call to enable stale-submit detection.
     """
     from crucible.researcher import orchestrator_api as oa
     from crucible.researcher.state import ResearchState
@@ -1649,7 +1700,248 @@ def research_submit(args: dict[str, Any]) -> dict[str, Any]:
         config=config,
         state=state,
         iteration=int(args.get("iteration", 0)),
+        state_snapshot=args.get("state_snapshot"),
     )
+
+
+def autonomous_research_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for the autonomous research loop.
+
+    Verb dispatch (action arg):
+      - start: begin a session, return first hypothesis prompt
+      - submit: apply response, advance stage, return next prompt or done
+      - status: read-only session state
+      - cancel: terminate session
+
+    Crucible never calls an LLM; the orchestrator handles LLM round-trips
+    between submits. State persistence under .crucible/autonomous_sessions
+    survives process restarts.
+    """
+    from crucible.researcher import autonomous_session as autos
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            return autos.action_start(
+                config,
+                iterations=int(args.get("iterations", 5)),
+                tier=str(args.get("tier", "proxy")),
+                focus_family=str(args.get("focus_family", "") or ""),
+                budget_usd=args.get("budget_usd"),
+                with_literature=bool(args.get("with_literature", False)),
+                literature_k=int(args.get("literature_k", 5)),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop submit: 'session_id' is required")
+            return autos.action_submit(
+                config,
+                session_id=str(session_id),
+                response=args.get("response"),
+                state_snapshot=args.get("state_snapshot"),
+            )
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop status: 'session_id' is required")
+            return autos.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError("autonomous_research_loop cancel: 'session_id' is required")
+            return autos.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"autonomous_research_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'status', 'cancel'."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for tree-search autonomous expansion.
+
+    Verb dispatch (action arg):
+      - start: begin a session against an existing tree, return first
+        expandable node's prompt
+      - submit: apply orchestrator response, advance, return next prompt
+        or done
+      - continue: re-check for expandable nodes (after orchestrator drove
+        fleet ops in response to next_action='external_dispatch')
+      - status: read-only session state
+      - cancel: terminate session
+
+    Crucible never calls an LLM. Between submits the orchestrator drives
+    fleet ops (tree_enqueue_pending → dispatch_experiments →
+    collect_results → tree_sync_results). Session state persists under
+    .crucible/tree_autonomous_sessions/{uuid}.yaml so sessions survive
+    process restarts.
+    """
+    from crucible.researcher import tree_autonomous_session as tas
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            tree_name = args.get("tree_name")
+            if not tree_name:
+                raise CrucibleError(
+                    "tree_autonomous_loop start: 'tree_name' is required"
+                )
+            return tas.action_start(
+                config,
+                tree_name=str(tree_name),
+                iterations=int(args.get("iterations", 5)),
+                n_children=int(args.get("n_children", 3)),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop submit: 'session_id' is required"
+                )
+            return tas.action_submit(
+                config,
+                session_id=str(session_id),
+                response=args.get("response"),
+                tree_snapshot=args.get("tree_snapshot"),
+            )
+        if action == "continue":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop continue: 'session_id' is required"
+                )
+            return tas.action_continue(config, session_id=str(session_id))
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop status: 'session_id' is required"
+                )
+            return tas.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "tree_autonomous_loop cancel: 'session_id' is required"
+                )
+            return tas.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"tree_autonomous_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'continue', 'status', 'cancel'."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def harness_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for the harness-optimization autonomous loop.
+
+    Wraps the existing HarnessOptimizer in the orchestrator-contract
+    pattern: each iteration the orchestrator proposes candidates, the
+    session validates + benchmarks them (fire-and-forget enqueue), then
+    waits for the orchestrator to drive fleet ops before continuing.
+
+    Verb dispatch (action arg):
+      - start: assert judge-separation, return first proposal prompt
+      - submit: parse/validate/benchmark candidates, advance, return external_dispatch hint
+      - continue: after fleet ops complete, return next proposal prompt or done
+      - status: read-only session state
+      - cancel: terminate session
+
+    Session state persists under .crucible/harness_autonomous_sessions/{uuid}.yaml.
+    """
+    from crucible.researcher import harness_autonomous_session as has
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            domain_spec = args.get("domain_spec")
+            tree_name = args.get("tree_name")
+            if not domain_spec:
+                raise CrucibleError(
+                    "harness_autonomous_loop start: 'domain_spec' is required"
+                )
+            if not tree_name:
+                raise CrucibleError(
+                    "harness_autonomous_loop start: 'tree_name' is required"
+                )
+            return has.action_start(
+                config,
+                domain_spec=str(domain_spec),
+                tree_name=str(tree_name),
+                iterations=int(args.get("iterations", 5)),
+                n_candidates=int(args.get("n_candidates", 3)),
+                dry_run=bool(args.get("dry_run", False)),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            response = args.get("response")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop submit: 'session_id' is required"
+                )
+            if response is None:
+                raise CrucibleError(
+                    "harness_autonomous_loop submit: 'response' is required"
+                )
+            return has.action_submit(
+                config, session_id=str(session_id), response=str(response)
+            )
+        if action == "continue":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop continue: 'session_id' is required"
+                )
+            return has.action_continue(config, session_id=str(session_id))
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop status: 'session_id' is required"
+                )
+            return has.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop cancel: 'session_id' is required"
+                )
+            return has.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"harness_autonomous_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'continue', 'status', 'cancel'."
+        )
+    except StaleSubmitError:
+        # Mirror autonomous_research_loop / tree_autonomous_loop: stale
+        # submits propagate as a typed error so orchestrators can distinguish
+        # "retry with fresh prompt" from generic CrucibleError. Future-proof
+        # — harness doesn't currently raise StaleSubmitError but a snapshot
+        # guard could be added later.
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -3420,93 +3712,189 @@ def tree_expand_grpo(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
-    """LLM-generate children for a node. Requires ANTHROPIC_API_KEY."""
+TREE_AUTO_EXPAND_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "description": "Array of child experiment specs to attach as children of the target node.",
+    "items": {
+        "type": "object",
+        "required": ["name", "config"],
+        "properties": {
+            "name": {"type": "string", "description": "Lowercase + underscores, no spaces."},
+            "config": {
+                "type": "object",
+                "description": "Env var overrides as a dict of string values.",
+                "additionalProperties": {"type": "string"},
+            },
+            "hypothesis": {"type": "string"},
+            "rationale": {"type": "string"},
+        },
+    },
+}
+
+
+TREE_AUTO_EXPAND_SYSTEM_PROMPT = (
+    "You are expanding a search tree of ML experiment configurations. "
+    "Given the tree state, the current node's ancestry, and its siblings, "
+    "you propose exactly N child experiment configurations as a JSON array. "
+    "Each child modifies the parent config to test a specific hypothesis. "
+    "Return only the JSON array — no prose, no code fences."
+)
+
+
+_LEGACY_TREE_AUTO_EXPAND_ENV_VAR = "CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND"
+
+
+def _tree_auto_expand_build_user_prompt(
+    tree: Any, node_id: str, n_children: int, extra_context: str
+) -> str:
+    """Build the user-facing prompt for tree expansion from current tree state."""
+    node = tree.get_node(node_id)
+    ancestry = tree.get_ancestry(node_id)
+    siblings = tree.get_siblings(node_id)
+    summary = tree.get_tree_summary()
+
+    ancestry_str = "\n".join(
+        f"  depth={a['depth']} name={a['experiment_name']} "
+        f"config={json.dumps(a['config'])} metric={a.get('result_metric')}"
+        for a in ancestry
+    )
+    sibling_str = "\n".join(
+        f"  name={s['experiment_name']} config={json.dumps(s['config'])} "
+        f"metric={s.get('result_metric')} status={s['status']}"
+        for s in siblings
+    ) or "  (none)"
+
+    parts = [
+        f"Tree: {summary.get('name')} - {summary.get('description', '')}",
+        f"Primary metric: {summary.get('primary_metric')} ({summary.get('metric_direction')})",
+        f"Best so far: {summary.get('best_metric')}",
+        "",
+        "Current node path (root to current):",
+        ancestry_str,
+        "",
+        "Siblings of current node:",
+        sibling_str,
+        "",
+        f"Current node config: {json.dumps(node['config'])}",
+        f"Current node result: metric={node.get('result_metric')}",
+        f"Current node hypothesis: {node.get('hypothesis', '')}",
+    ]
+    if extra_context:
+        parts.append("")
+        parts.append(f"Additional context: {extra_context}")
+    parts.append("")
+    parts.append(
+        f"Generate exactly {n_children} child experiment configurations as a JSON array. "
+        f"Each child should modify the parent config to test a specific hypothesis."
+    )
+    return "\n".join(parts)
+
+
+def _tree_auto_expand_request_prompt(args: dict[str, Any]) -> dict[str, Any]:
+    """Build the orchestrator-facing prompt + schema for tree expansion. No LLM call."""
+    from crucible.researcher.search_tree import SearchTree
+
     config = _get_config()
-    try:
-        import os
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
 
-        from crucible.researcher.search_tree import SearchTree
+    node_id = args["node_id"]
+    node = tree.get_node(node_id)
+    if node is None:
+        return {"error": f"Node '{node_id}' not found"}
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            return {"error": "ANTHROPIC_API_KEY not set. Required for auto-expansion."}
+    n_children = int(args.get("n_children", 3))
+    extra_context = args.get("extra_context", "")
+    user_prompt = _tree_auto_expand_build_user_prompt(tree, node_id, n_children, extra_context)
+    return {
+        "action": "request_prompt",
+        "stage": "tree_auto_expand",
+        "system": TREE_AUTO_EXPAND_SYSTEM_PROMPT,
+        "user": user_prompt,
+        "schema": TREE_AUTO_EXPAND_SCHEMA,
+        "tree_snapshot": tree.snapshot(node_id=node_id),
+        "node_id": node_id,
+        "n_children": n_children,
+    }
 
-        name = args["name"]
-        tree_dir = _get_tree_dir(config, name)
-        tree = SearchTree.load(tree_dir)
 
-        node_id = args["node_id"]
+def _tree_auto_expand_parse_response(response: Any) -> list[dict[str, Any]]:
+    """Accept a list, dict, or raw JSON string; return the list of child specs."""
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict):
+        for key in ("children", "items", "specs"):
+            value = response.get(key)
+            if isinstance(value, list):
+                return value
+        raise CrucibleError(
+            "tree_auto_expand submit: response dict has no 'children'/'items'/'specs' list — "
+            "send a JSON array of child specs or a dict with one of those keys."
+        )
+    if isinstance(response, str):
+        text = response.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:-1])
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            raise CrucibleError(
+                "tree_auto_expand submit: JSON-string response did not parse to an array."
+            )
+        return parsed
+    raise CrucibleError(
+        f"tree_auto_expand submit: response must be list, dict, or JSON string — got {type(response).__name__}"
+    )
+
+
+def _tree_auto_expand_submit(args: dict[str, Any]) -> dict[str, Any]:
+    """Parse + apply an orchestrator-supplied response to the tree.
+
+    Honors ``tree_snapshot`` for stale-submit detection: if the tree advanced
+    between request_prompt and submit (peer expansion, new result, status
+    flip), raises :class:`StaleSubmitError` rather than applying the
+    response against an out-of-date tree.
+
+    The snapshot check + expand sequence is held under ``tree.write_lock``
+    so concurrent submits cannot both pass the guard and then clobber each
+    other via the unlocked load-mutate-save in the legacy path.
+    """
+    from crucible.researcher.search_tree import SearchTree
+
+    config = _get_config()
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
+
+    node_id = args["node_id"]
+    response = args.get("response")
+    if response is None:
+        raise CrucibleError("tree_auto_expand submit: 'response' is required")
+    submitted_snapshot = args.get("tree_snapshot")
+
+    with tree.write_lock():
+        # write_lock reloaded from disk; re-check existence under the lock.
         node = tree.get_node(node_id)
         if node is None:
             return {"error": f"Node '{node_id}' not found"}
 
-        n_children = args.get("n_children", 3)
-        extra_context = args.get("extra_context", "")
+        if submitted_snapshot is not None:
+            current = tree.snapshot(node_id=node_id)
+            if current != submitted_snapshot:
+                raise StaleSubmitError(
+                    f"Tree has advanced since tree_auto_expand request_prompt was issued. "
+                    f"submitted_snapshot={submitted_snapshot} current_snapshot={current}. "
+                    f"Re-request the prompt with the latest tree and retry."
+                )
 
-        ancestry = tree.get_ancestry(node_id)
-        siblings = tree.get_siblings(node_id)
-        summary = tree.get_tree_summary()
-
-        ancestry_str = "\n".join(
-            f"  depth={a['depth']} name={a['experiment_name']} "
-            f"config={json.dumps(a['config'])} metric={a.get('result_metric')}"
-            for a in ancestry
-        )
-        sibling_str = "\n".join(
-            f"  name={s['experiment_name']} config={json.dumps(s['config'])} "
-            f"metric={s.get('result_metric')} status={s['status']}"
-            for s in siblings
-        ) or "  (none)"
-
-        prompt = (
-            f"You are expanding a search tree of ML experiment configurations.\n\n"
-            f"Tree: {summary.get('name')} - {summary.get('description', '')}\n"
-            f"Primary metric: {summary.get('primary_metric')} ({summary.get('metric_direction')})\n"
-            f"Best so far: {summary.get('best_metric')}\n\n"
-            f"Current node path (root to current):\n{ancestry_str}\n\n"
-            f"Siblings of current node:\n{sibling_str}\n\n"
-            f"Current node config: {json.dumps(node['config'])}\n"
-            f"Current node result: metric={node.get('result_metric')}\n"
-            f"Current node hypothesis: {node.get('hypothesis', '')}\n\n"
-        )
-        if extra_context:
-            prompt += f"Additional context: {extra_context}\n\n"
-
-        prompt += (
-            f"Generate exactly {n_children} child experiment configurations as JSON.\n"
-            f"Each child should modify the parent config to test a specific hypothesis.\n"
-            f"Return a JSON array of objects with: name, config (dict of overrides), "
-            f"hypothesis, rationale.\n"
-            f"Only return the JSON array, no other text."
-        )
-
-        try:
-            import anthropic
-        except ImportError:
-            return {"error": "anthropic package not installed. Run: pip install anthropic"}
-
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        response_text = response.content[0].text.strip()
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
-
-        children_specs = json.loads(response_text)
-        if not isinstance(children_specs, list):
-            return {"error": "LLM response was not a JSON array"}
-
+        children_specs = _tree_auto_expand_parse_response(response)
         for spec in children_specs:
             spec["generation_method"] = "llm_auto_expand"
 
         new_ids = tree.expand_node(node_id, children_specs)
         return {
+            "action": "submit",
             "status": "auto_expanded",
             "node_id": node_id,
             "new_node_ids": new_ids,
@@ -3520,14 +3908,139 @@ def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
             ],
             "total_nodes": tree.meta["total_nodes"],
         }
-    except CrucibleError as exc:
-        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _tree_auto_expand_legacy(args: dict[str, Any]) -> dict[str, Any]:
+    """Deprecated in-Crucible Anthropic call. Gated by env var; emits warning."""
+    import warnings
+
+    if os.environ.get(_LEGACY_TREE_AUTO_EXPAND_ENV_VAR) != "1":
+        raise CrucibleError(
+            "tree_auto_expand: the legacy in-Crucible Anthropic call is deprecated. "
+            "Use the orchestrator-contract pattern instead: call with "
+            "action='request_prompt' to get the prompt + schema + tree_snapshot, "
+            "feed them to your LLM, then call again with action='submit', the "
+            "response, and the tree_snapshot. To temporarily restore the legacy "
+            f"behavior (one release only), set {_LEGACY_TREE_AUTO_EXPAND_ENV_VAR}=1."
+        )
+
+    warnings.warn(
+        "tree_auto_expand legacy mode (in-Crucible Anthropic call) is deprecated "
+        "and will be removed in a future release. Migrate to "
+        "action='request_prompt' + action='submit' which carries no LLM keys.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    from crucible.researcher.search_tree import SearchTree
+
+    config = _get_config()
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"error": "ANTHROPIC_API_KEY not set. Required for legacy auto-expansion."}
+
+    name = args["name"]
+    tree_dir = _get_tree_dir(config, name)
+    tree = SearchTree.load(tree_dir)
+
+    node_id = args["node_id"]
+    node = tree.get_node(node_id)
+    if node is None:
+        return {"error": f"Node '{node_id}' not found"}
+
+    n_children = int(args.get("n_children", 3))
+    extra_context = args.get("extra_context", "")
+    user_prompt = _tree_auto_expand_build_user_prompt(tree, node_id, n_children, extra_context)
+
+    try:
+        import anthropic
+    except ImportError:
+        return {"error": "anthropic package not installed. Run: pip install anthropic"}
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            system=TREE_AUTO_EXPAND_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        response_text = response.content[0].text.strip()
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1])
+        children_specs = json.loads(response_text)
+        if not isinstance(children_specs, list):
+            return {"error": "LLM response was not a JSON array"}
     except json.JSONDecodeError as exc:
         return {"error": f"Failed to parse LLM response as JSON: {exc}"}
 
+    for spec in children_specs:
+        spec["generation_method"] = "llm_auto_expand_legacy"
+
+    new_ids = tree.expand_node(node_id, children_specs)
+    return {
+        "action": "legacy",
+        "status": "auto_expanded",
+        "node_id": node_id,
+        "new_node_ids": new_ids,
+        "children": [
+            {
+                "node_id": nid,
+                "name": tree.get_node(nid)["experiment_name"],
+                "hypothesis": tree.get_node(nid).get("hypothesis", ""),
+            }
+            for nid in new_ids
+        ],
+        "total_nodes": tree.meta["total_nodes"],
+    }
+
+
+def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
+    """LLM-generated child expansion for a tree node.
+
+    Two-call contract (preferred — no API keys inside Crucible):
+      1. ``action="request_prompt"`` returns ``{system, user, schema, tree_snapshot}``.
+         The orchestrator calls its own LLM with the prompts and parses
+         per schema.
+      2. ``action="submit"`` accepts the orchestrator's response plus the
+         ``tree_snapshot`` from step 1. Applies the children to the tree
+         or raises :class:`StaleSubmitError` if the tree advanced.
+
+    Legacy single-call (deprecated): calling without ``action`` runs the
+    original in-Crucible ``anthropic.Anthropic`` flow. Disabled by
+    default — set ``CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND=1`` to
+    temporarily enable. Emits :class:`DeprecationWarning` when used.
+    """
+    action = args.get("action")
+    try:
+        if action == "request_prompt":
+            return _tree_auto_expand_request_prompt(args)
+        if action == "submit":
+            return _tree_auto_expand_submit(args)
+        if action is None:
+            return _tree_auto_expand_legacy(args)
+        raise CrucibleError(
+            f"tree_auto_expand: unknown action {action!r}. "
+            f"Valid: 'request_prompt', 'submit', or omit for deprecated legacy mode."
+        )
+    except StaleSubmitError:
+        raise
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
 
 def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
-    """Prune a node or entire branch in the search tree."""
+    """Prune a node, branch, or run deterministic auto-prune over the tree.
+
+    Modes:
+    - ``"manual"`` (default): prune the named node_id (or its branch if
+      ``prune_branch=True``).
+    - ``"auto"``: walk all completed nodes and prune branches whose
+      ``result_metric`` is worse than the tree's configured
+      ``pruning_config.metric_threshold`` (or the passed ``threshold``).
+      ``node_id`` becomes optional in this mode.
+    """
     config = _get_config()
     from crucible.researcher.search_tree import SearchTree
 
@@ -3535,7 +4048,32 @@ def tree_prune(args: dict[str, Any]) -> dict[str, Any]:
     tree_dir = _get_tree_dir(config, name)
     tree = SearchTree.load(tree_dir)
 
-    node_id = args["node_id"]
+    mode = args.get("mode", "manual")
+
+    if mode == "auto":
+        threshold = args.get("threshold")
+        if threshold is not None:
+            threshold = float(threshold)
+        # Hold tree.write_lock around the auto-prune mutation. Mirrors
+        # tree_auto_expand submit's pattern (Phase 1.4a).
+        with tree.write_lock():
+            result = tree.auto_prune(threshold=threshold)
+        return {
+            "status": "auto_pruned",
+            "mode": "auto",
+            **result,
+            "total_pruned": tree.meta.get("pruned_nodes", 0),
+        }
+
+    if mode != "manual":
+        raise CrucibleError(
+            f"tree_prune: unknown mode {mode!r}. Valid: 'manual' (default) or 'auto'."
+        )
+
+    # Manual mode: explicit node_id required.
+    node_id = args.get("node_id")
+    if not node_id:
+        raise CrucibleError("tree_prune manual mode: 'node_id' is required")
     reason = args.get("reason", "")
     prune_branch = args.get("prune_branch", False)
 
@@ -6247,6 +6785,9 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Orchestrator-driven research loop (default path — no LLM keys in Crucible)
     "research_request_prompt": research_request_prompt,
     "research_submit": research_submit,
+    "autonomous_research_loop": autonomous_research_loop,
+    "tree_autonomous_loop": tree_autonomous_loop,
+    "harness_autonomous_loop": harness_autonomous_loop,
     # W&B tools
     "wandb_log_image": wandb_log_image,
     "wandb_get_url": wandb_get_url,
