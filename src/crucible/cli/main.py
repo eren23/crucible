@@ -137,6 +137,36 @@ def _main() -> None:
     rk.add_argument("--session-id", required=True)
     rk.add_argument("--reason", default="", help="Free-text reason.")
 
+    # ── research import {autoresearch} ──
+    imp = research_sub.add_parser(
+        "import",
+        help="Import a third-party research source as a Crucible project spec.",
+    )
+    imp_sub = imp.add_subparsers(dest="import_kind")
+    imp_ar = imp_sub.add_parser(
+        "autoresearch",
+        help="Import a Karpathy autoresearch source directory (train.py + program.md).",
+    )
+    imp_ar.add_argument("source", help="Path to the autoresearch source directory.")
+    imp_ar.add_argument(
+        "--name",
+        default="",
+        help="Project spec name. Default: sanitized basename of source dir.",
+    )
+    imp_ar.add_argument(
+        "--force", action="store_true", help="Overwrite an existing project spec."
+    )
+    imp_ar.add_argument(
+        "--primary-metric",
+        default="val_loss",
+        help="Primary metric for the leaderboard (default: val_loss).",
+    )
+    imp_ar.add_argument(
+        "--direction",
+        default="minimize",
+        help="Metric direction: minimize|maximize (default: minimize).",
+    )
+
     # ── data ──
     data_parser = subparsers.add_parser("data", help="Data management")
     data_sub = data_parser.add_subparsers(dest="data_command")

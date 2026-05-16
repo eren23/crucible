@@ -108,5 +108,39 @@ def _handle_research(args: argparse.Namespace) -> None:
             for b in state.beliefs:
                 print(f"  - {b}")
 
+    elif cmd == "import":
+        importer_kind = getattr(args, "import_kind", None)
+        if importer_kind != "autoresearch":
+            print(
+                "Usage: crucible research import autoresearch <source-dir> [--name NAME] [--force]",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        from crucible.runner.autoresearch_adapter import import_autoresearch
+
+        source = getattr(args, "source", None)
+        if not source:
+            print(
+                "Error: 'source' positional argument is required for import autoresearch",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        result = import_autoresearch(
+            source,
+            project_root=config.project_root,
+            name=getattr(args, "name", "") or "",
+            force=getattr(args, "force", False),
+            primary_metric=getattr(args, "primary_metric", "") or "val_loss",
+            direction=getattr(args, "direction", "") or "minimize",
+        )
+        print(json.dumps(result, indent=2, default=str))
+        print(
+            f"\n# Next: launch a session against the imported project\n"
+            f"#   crucible research run start --iterations 3 --tier proxy\n"
+            f"# Or run a single smoke experiment first:\n"
+            f"#   crucible run experiment --project {result['name']} --preset smoke",
+            file=sys.stderr,
+        )
+
     else:
-        print("Usage: crucible research {start|run|status}", file=sys.stderr)
+        print("Usage: crucible research {start|run|status|import}", file=sys.stderr)
