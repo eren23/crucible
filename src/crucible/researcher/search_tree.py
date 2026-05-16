@@ -11,14 +11,11 @@ Storage layout under tree_dir (.crucible/search_trees/{name}/):
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import math
-import os
 import random
 import re
-import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,23 +24,11 @@ from typing import Any, Iterator
 import yaml
 
 from crucible.core.errors import SearchTreeError
+from crucible.core.file_lock import DEFAULT_TIMEOUT_SECONDS, file_lock
 from crucible.core.io import append_jsonl, atomic_write_yaml, read_jsonl, read_yaml
 from crucible.core.log import log_warn, utc_now_iso
 
-_DEFAULT_TREE_LOCK_TIMEOUT = 30.0
 _TREE_LOCK_FILENAME = ".lock"
-_WINDOWS_FALLBACK_WARNED = False
-
-
-def _warn_tree_windows_fallback_once() -> None:
-    global _WINDOWS_FALLBACK_WARNED
-    if _WINDOWS_FALLBACK_WARNED:
-        return
-    _WINDOWS_FALLBACK_WARNED = True
-    log_warn(
-        "SearchTree.write_lock: fcntl unavailable on this platform; "
-        "concurrent tree mutations may lose updates in current_tree.yaml."
-    )
 
 
 class SearchTree:
@@ -1017,7 +1002,7 @@ class SearchTree:
     def write_lock(
         self,
         *,
-        timeout: float = _DEFAULT_TREE_LOCK_TIMEOUT,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
         poll_interval: float = 0.1,
     ) -> Iterator["SearchTree"]:
         """Acquire an exclusive advisory lock + reload from disk.
@@ -1032,55 +1017,31 @@ class SearchTree:
                     raise StaleSubmitError(...)
                 tree.expand_node(...)
 
-        On entry, the lock is acquired and the tree is reloaded from disk
-        so the caller sees the latest peer writes before mutating. Mutating
-        methods (``expand_node``, ``record_result``, ``prune_node``, etc.)
-        write through ``_save_meta`` / ``_save_snapshot`` which now use
-        atomic-replace via :func:`atomic_write_yaml` — so partial writes
-        from a crash cannot poison the on-disk state.
+        On entry, the lock is acquired (via
+        :func:`crucible.core.file_lock.file_lock`) and the tree is
+        reloaded from disk so the caller sees the latest peer writes
+        before mutating. Mutating methods (``expand_node``, ``record_result``,
+        ``prune_node``, etc.) write through ``_save_meta`` / ``_save_snapshot``
+        which use atomic-replace via :func:`atomic_write_yaml` — so partial
+        writes from a crash cannot poison the on-disk state.
 
-        POSIX-only. On Windows, falls back to a no-op with a one-time
-        warning; concurrency safety is lost.
+        POSIX-only. On Windows the underlying lock degrades to a no-op
+        with a one-time warning; concurrency safety is lost.
 
         Do not nest — ``fcntl.flock`` on a fresh fd from the same process
         is platform-dependent and may deadlock until ``timeout``.
         """
-        try:
-            import fcntl
-        except ImportError:
-            _warn_tree_windows_fallback_once()
+        self.tree_dir.mkdir(parents=True, exist_ok=True)
+        with file_lock(
+            self.lock_path,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            on_timeout=lambda msg: SearchTreeError(
+                msg.replace("file lock", "SearchTree lock")
+            ),
+        ):
             self._reload_from_disk()
             yield self
-            return
-
-        self.tree_dir.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + timeout
-        fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError as exc:
-                    if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
-                        raise
-                    if time.monotonic() >= deadline:
-                        raise SearchTreeError(
-                            f"Could not acquire SearchTree lock at {self.lock_path} "
-                            f"within {timeout:.1f}s — another Crucible process may be "
-                            f"holding it."
-                        ) from exc
-                    time.sleep(poll_interval)
-            self._reload_from_disk()
-            try:
-                yield self
-            finally:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                except OSError:
-                    pass
-        finally:
-            os.close(fd)
 
     def _reload_from_disk(self) -> None:
         """Drop in-memory state and reload from disk under the lock.

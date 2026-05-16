@@ -10,38 +10,22 @@ fresh read from disk so callers see peer writes before mutating.
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
 import tempfile
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
 from crucible.core.errors import StateLockTimeout
+from crucible.core.file_lock import (
+    DEFAULT_TIMEOUT_SECONDS as DEFAULT_LOCK_TIMEOUT_SECONDS,
+    file_lock,
+)
 from crucible.core.log import utc_now_iso
 
-DEFAULT_LOCK_TIMEOUT_SECONDS = 30.0
 _LOCK_SUFFIX = ".lock"
-
-_WINDOWS_FALLBACK_WARNED = False
-
-
-def _warn_windows_fallback_once() -> None:
-    global _WINDOWS_FALLBACK_WARNED
-    if _WINDOWS_FALLBACK_WARNED:
-        return
-    _WINDOWS_FALLBACK_WARNED = True
-    try:
-        from crucible.core.log import log_warn
-        log_warn(
-            "ResearchState.write_lock: fcntl unavailable on this platform; "
-            "concurrent autonomous-loop sessions may corrupt research_state.jsonl."
-        )
-    except ImportError:
-        pass
 
 
 class ResearchState:
@@ -81,59 +65,33 @@ class ResearchState:
                 state.add_hypothesis(...)
                 state.save()  # MUST be called inside the block
 
-        On entry, the lock is acquired and ``_reload_in_place()`` is called
-        so the caller sees the latest peer writes. The caller is responsible
-        for calling :meth:`save` before exiting the block — otherwise the
-        next :meth:`_reload_in_place` silently discards their writes. If an
-        exception is raised inside the block, in-memory mutations are
-        intentionally NOT auto-saved (the state may be inconsistent).
+        On entry, the lock is acquired (via :func:`crucible.core.file_lock.file_lock`)
+        and ``_reload_in_place()`` runs so the caller sees the latest peer
+        writes. The caller is responsible for calling :meth:`save` before
+        exiting the block — otherwise the next :meth:`_reload_in_place`
+        silently discards their writes. If an exception is raised inside
+        the block, in-memory mutations are intentionally NOT auto-saved
+        (the state may be inconsistent).
 
         Raises :class:`StateLockTimeout` if the lock cannot be acquired
-        within ``timeout`` seconds. POSIX-only — on Windows, falls back to
-        a no-op (with a one-time warning) and concurrency safety is lost.
+        within ``timeout`` seconds. POSIX-only — on Windows the underlying
+        lock degrades to a no-op (with a one-time warning) and concurrency
+        safety is lost.
 
         Do not nest. ``fcntl.flock`` semantics for same-process re-entry
-        on a fresh fd are platform-dependent (BSD-derived macOS will block
-        on itself until ``timeout``). NFS / network volumes also have
+        on a fresh fd are platform-dependent. NFS / network volumes have
         undefined locking semantics — keep ``state_file`` on local disk.
         """
-        try:
-            import fcntl
-        except ImportError:
-            _warn_windows_fallback_once()
+        with file_lock(
+            self._lock_path(),
+            timeout=timeout,
+            poll_interval=poll_interval,
+            on_timeout=lambda msg: StateLockTimeout(
+                msg.replace("file lock", "research-state lock")
+            ),
+        ):
             self._reload_in_place()
             yield self
-            return
-
-        lock_path = self._lock_path()
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + timeout
-        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError as exc:
-                    if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
-                        raise
-                    if time.monotonic() >= deadline:
-                        raise StateLockTimeout(
-                            f"Could not acquire research-state lock at {lock_path} "
-                            f"within {timeout:.1f}s — another Crucible process may "
-                            f"be holding it."
-                        ) from exc
-                    time.sleep(poll_interval)
-            self._reload_in_place()
-            try:
-                yield self
-            finally:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                except OSError:
-                    pass
-        finally:
-            os.close(fd)
 
     def _reload_in_place(self) -> None:
         """Drop in-memory state and reload from disk.

@@ -28,11 +28,9 @@ iterations trip :func:`detect_doom_loop` and the session aborts.
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
-import time
 import uuid
 from collections import deque
 from contextlib import contextmanager
@@ -43,6 +41,7 @@ import yaml
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitError
+from crucible.core.file_lock import file_lock as _core_file_lock
 from crucible.core.log import utc_now_iso
 from crucible.researcher import orchestrator_api as oa
 from crucible.researcher.state import ResearchState
@@ -54,51 +53,23 @@ _DEFAULT_SESSION_LOCK_TIMEOUT = 30.0
 _CREATE_LOCK_FILENAME = ".create.lock"
 
 
-@contextmanager
 def _file_lock(
     lock_path: Path,
     *,
     timeout: float = _DEFAULT_SESSION_LOCK_TIMEOUT,
     poll_interval: float = 0.1,
-) -> Iterator[None]:
-    """Acquire an exclusive advisory fcntl lock on ``lock_path``.
-
-    POSIX-only; on platforms without ``fcntl`` (Windows), degrades to a
-    no-op so callers still work but lose cross-process exclusivity.
-    Raises :class:`AutonomousSessionError` on timeout.
-    """
-    try:
-        import fcntl
-    except ImportError:
-        yield
-        return
-
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + timeout
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
-                    raise
-                if time.monotonic() >= deadline:
-                    raise AutonomousSessionError(
-                        f"Could not acquire session lock at {lock_path} within "
-                        f"{timeout:.1f}s — another Crucible process may be holding it."
-                    ) from exc
-                time.sleep(poll_interval)
-        try:
-            yield
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except OSError:
-                pass
-    finally:
-        os.close(fd)
+):
+    """Thin wrapper around :func:`crucible.core.file_lock.file_lock` that
+    raises :class:`AutonomousSessionError` on timeout (rather than the
+    generic ``FileLockTimeout``)."""
+    return _core_file_lock(
+        lock_path,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        on_timeout=lambda msg: AutonomousSessionError(
+            msg.replace("file lock", "session lock")
+        ),
+    )
 
 
 class AutonomousSessionError(ResearcherError):

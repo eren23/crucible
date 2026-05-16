@@ -22,11 +22,9 @@ marks the session errored, mirroring the autonomous_research_loop guard.
 """
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
-import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,6 +34,7 @@ import yaml
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitError
+from crucible.core.file_lock import file_lock as _core_file_lock
 from crucible.core.log import utc_now_iso
 from crucible.researcher.search_tree import SearchTree
 
@@ -53,48 +52,22 @@ class TreeDoomLoopDetected(ResearcherError):
     """The tree loop produced N identical expansion prompts in a row."""
 
 
-@contextmanager
 def _file_lock(
     lock_path: Path,
     *,
     timeout: float = _DEFAULT_LOCK_TIMEOUT,
     poll_interval: float = 0.1,
-) -> Iterator[None]:
-    """Acquire fcntl exclusive lock on ``lock_path``. Same shape as
-    :func:`crucible.researcher.autonomous_session._file_lock`."""
-    try:
-        import fcntl
-    except ImportError:
-        yield
-        return
-
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + timeout
-    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
-                    raise
-                if time.monotonic() >= deadline:
-                    raise TreeAutonomousSessionError(
-                        f"Could not acquire tree session lock at {lock_path} "
-                        f"within {timeout:.1f}s — another Crucible process may "
-                        f"be holding it."
-                    ) from exc
-                time.sleep(poll_interval)
-        try:
-            yield
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except OSError:
-                pass
-    finally:
-        os.close(fd)
+):
+    """Thin wrapper around :func:`crucible.core.file_lock.file_lock` that
+    raises :class:`TreeAutonomousSessionError` on timeout."""
+    return _core_file_lock(
+        lock_path,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        on_timeout=lambda msg: TreeAutonomousSessionError(
+            msg.replace("file lock", "tree session lock")
+        ),
+    )
 
 
 def _sessions_dir(project_root: Path) -> Path:
