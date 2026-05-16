@@ -446,6 +446,57 @@ class TestOrphanProbe:
 
 
 class TestFindActiveSessionUnpack:
+    def test_autonomous_session_stage_uses_current_stage_field(
+        self, monkeypatch, fake_config, tmp_path
+    ):
+        """Regression: live MCP test of autonomous_research_loop showed
+        active_session.stage == null because the router read
+        ``data.get('stage')`` but AutonomousSession persists the field
+        as ``current_stage``. Three sibling drivers diverge on this:
+        autonomous uses ``current_stage``, harness uses ``stage``, tree
+        has no stage field. Router must read both keys."""
+        sessions_dir = tmp_path / ".crucible" / "autonomous_sessions"
+        sessions_dir.mkdir(parents=True)
+        import yaml as _yaml
+        sid = "session-uuid-abc123"
+        (sessions_dir / f"{sid}.yaml").write_text(
+            _yaml.safe_dump({
+                "session_id": sid,
+                "schema_version": 1,
+                "status": "running",
+                "current_stage": "hypothesis",  # autonomous-session key
+                "tree_name": None,
+                "iterations_planned": 3,
+                "iterations_completed": 0,
+                "current_iteration": 0,
+                "started_at": "2026-05-16T00:00:00Z",
+                "updated_at": "2026-05-16T01:00:00Z",
+                "tier": "smoke",
+                "focus_family": None,
+                "project_name": "demo",
+                "budget_usd": None,
+                "budget_spent_usd": 0.0,
+                "with_literature": False,
+                "literature_k": 5,
+                "last_state_snapshot": None,
+                "recent_fingerprints": [],
+            }),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(router, "_load_nodes", lambda *a, **k: [])
+        monkeypatch.setattr(router, "_load_queue", lambda *a, **k: [])
+        monkeypatch.setattr(router, "_load_completed_count", lambda *a, **k: 0)
+        monkeypatch.setattr(
+            router, "_load_research_state",
+            lambda *a, **k: {"available": True, "hypotheses": [],
+                             "pending_count": 0, "history_count": 0,
+                             "budget_remaining": 1.0},
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["state"]["active_session"]["stage"] == "hypothesis", (
+            f"stage should be 'hypothesis', got {out['state']['active_session']['stage']!r}"
+        )
+
     def test_session_id_in_response_is_actual_id_not_timestamp(
         self, monkeypatch, fake_config, tmp_path
     ):

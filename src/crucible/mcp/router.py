@@ -166,10 +166,17 @@ def _find_active_session(config: ProjectConfig) -> dict[str, Any] | None:
     # Sort by updated_at descending across all session types.
     candidates.sort(key=lambda c: c[1][0], reverse=True)
     kind, (_updated_at, sid, data) = candidates[0]
+    # Session yaml schemas diverge by type:
+    #   autonomous → "current_stage"
+    #   harness    → "stage"
+    #   tree       → no stage field (single-stage protocol)
+    # Read both keys with explicit fallback so live MCP callers don't
+    # see "stage: null" for active autonomous sessions.
+    stage = data.get("current_stage") or data.get("stage")
     return {
         "kind": kind,
         "session_id": sid,
-        "stage": data.get("stage"),
+        "stage": stage,
         "status": data.get("status"),
     }
 
