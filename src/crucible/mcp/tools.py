@@ -2318,6 +2318,16 @@ def get_research_briefing(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def tool_router(args: dict[str, Any]) -> dict[str, Any]:
+    """Recommend the next MCP tool to call given current project state."""
+    config = _get_config()
+    try:
+        from crucible.mcp.router import recommend_next_action
+        return recommend_next_action(config)
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
     """Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments."""
     config = _get_config()
@@ -6802,6 +6812,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "finding_promote": finding_promote,
     # Briefing tools
     "get_research_briefing": get_research_briefing,
+    "tool_router": tool_router,
     "annotate_run": annotate_run,
     # Literature search tools
     "research_literature_search": research_literature_search,

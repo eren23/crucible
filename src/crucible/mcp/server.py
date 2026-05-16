@@ -1363,6 +1363,24 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="tool_router",
+        description=(
+            "Recommend the next MCP tool to call given the project's current state. "
+            "Inspects fleet, queue, leaderboard, research state, and active autonomous sessions. "
+            "Pure heuristic — no LLM. Returns a primary recommendation + alternatives, each with a rationale. "
+            "Use this when you're an orchestrator and don't know which of the 200+ tools to call next.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {recommended_tool, rationale, alternatives: [{tool, rationale}], "
+            "state: {nodes, queue, completed_experiments, hypotheses_pending, active_session, orphans_present}}\n"
+            "NEXT: Call the recommended_tool (or one of the alternatives if context says otherwise)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="annotate_run",
         description=(
             "Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments.\n\n"
