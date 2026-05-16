@@ -32,7 +32,7 @@ import yaml
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import ResearcherError
 from crucible.core.file_lock import file_lock as _core_file_lock
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 
 _CREATE_LOCK_FILENAME = ".create.lock"
 _DEFAULT_LOCK_TIMEOUT = 30.0
@@ -46,6 +46,48 @@ class BudgetExceeded(ResearcherError):
     is automatically marked canceled with the reason captured in
     state_data.last_error.
     """
+
+
+class BudgetCheckError(ResearcherError):
+    """cost_tracker.compute_session_spend returned an unexpected shape.
+
+    Required keys: ``spend_usd``, ``hours_elapsed``, ``hourly_rate``,
+    ``active_pods``. If any are missing or non-numeric, this error is
+    raised instead of letting a KeyError or TypeError leak out of a
+    timer-context budget check. Raised before the session is canceled
+    so the operator sees the cost-tracker bug, not a "budget exceeded"
+    that's actually a bad spend dict.
+    """
+
+
+_REQUIRED_SPEND_KEYS = ("spend_usd", "hours_elapsed", "hourly_rate", "active_pods")
+
+
+def _validate_spend_dict(spend: Any) -> None:
+    """Raise BudgetCheckError if ``spend`` is not the expected shape.
+
+    Expected: ``{spend_usd: number, hours_elapsed: number,
+    hourly_rate: number, active_pods: int}``. Numeric values may be
+    int or float; ``active_pods`` may be int or non-negative int.
+    """
+    if not isinstance(spend, dict):
+        raise BudgetCheckError(
+            f"compute_session_spend returned {type(spend).__name__}; "
+            "expected dict."
+        )
+    missing = [k for k in _REQUIRED_SPEND_KEYS if k not in spend]
+    if missing:
+        raise BudgetCheckError(
+            f"compute_session_spend missing keys: {missing}. "
+            f"Got: {sorted(spend.keys())}."
+        )
+    for k in ("spend_usd", "hours_elapsed", "hourly_rate"):
+        v = spend.get(k)
+        if not isinstance(v, (int, float)):
+            raise BudgetCheckError(
+                f"compute_session_spend['{k}'] is {type(v).__name__}, "
+                f"expected number. Value: {v!r}."
+            )
 
 
 def fingerprint_prompt(system: str | None, user: str | None) -> str:
@@ -254,6 +296,12 @@ class SessionBase:
         spend = compute_session_spend(
             self.config, self.state_data.get("created_at", "")
         )
+        # Validate the spend dict shape before we read it. A malformed
+        # response from compute_session_spend (missing keys, non-numeric
+        # values, error sentinel dict) should raise a typed
+        # BudgetCheckError so the operator sees a cost-tracker bug
+        # instead of a confusing KeyError from inside a timer callback.
+        _validate_spend_dict(spend)
         self.state_data["budget_spent_usd"] = spend["spend_usd"]
         self.state_data["last_budget_check"] = spend
         if spend["spend_usd"] >= float(budget):
@@ -292,7 +340,15 @@ class SessionBase:
         for p in sessions_dir.glob("*.yaml"):
             try:
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            except (yaml.YAMLError, OSError):
+            except (yaml.YAMLError, OSError) as exc:
+                # A corrupted session yaml used to vanish silently from
+                # the active-session list, which masked partial writes
+                # and made debugging "router doesn't see my session"
+                # bugs hard. Log it so the failure is visible.
+                log_warn(
+                    f"{cls.__name__}._find_active_yamls: skipping {p.name} — "
+                    f"{type(exc).__name__}: {exc}"
+                )
                 continue
             status = data.get("status")
             if status in cls.TERMINAL_STATUSES:

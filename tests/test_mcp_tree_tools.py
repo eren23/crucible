@@ -717,6 +717,32 @@ class TestTreeAutoExpandSubmit:
         })
         assert out["status"] == "auto_expanded"
 
+    def test_submit_rejects_dict_with_unrecognized_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """G.4 seam 3: a dict response with no recognized key (e.g.,
+        orchestrator typed ``results`` instead of ``children``) must
+        surface an error, not silently expand zero children. The
+        dispatcher wraps CrucibleError as {"error": ...} for
+        MCP-friendliness, so we assert on that shape."""
+        from crucible.mcp.tools import tree_auto_expand
+
+        _patch_config(monkeypatch, tmp_path)
+        name, root_id = _make_expandable_tree(tmp_path)
+
+        out = tree_auto_expand({
+            "action": "submit",
+            "name": name,
+            "node_id": root_id,
+            "response": {"results": [
+                {"name": "x", "config": {}, "hypothesis": ""},
+            ]},
+        })
+        assert "error" in out
+        assert "children" in out["error"].lower() or "no 'children'" in out["error"]
+        # And no children were actually created.
+        assert "status" not in out
+
 
 class TestTreeAutoExpandLegacy:
     def test_legacy_raises_without_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

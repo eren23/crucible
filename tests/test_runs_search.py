@@ -265,3 +265,71 @@ class TestSearchRuns:
         handler = TOOL_DISPATCH["runs_search"]
         out = handler({"where": "status == 'completed'", "limit": 10})
         assert out["matched"] == 3
+
+
+# ---------------------------------------------------------------------------
+# strict_fields (G.4 seam 4)
+# ---------------------------------------------------------------------------
+
+
+class TestStrictFields:
+    """When strict_fields=True, a predicate identifier that doesn't appear
+    in any row raises SearchError with a nearest-match suggestion
+    instead of silently matching zero rows."""
+
+    def test_unknown_field_raises_with_suggestion(self, project_with_runs):
+        # Typo: val_los instead of val_loss (under result.).
+        with pytest.raises(SearchError, match="unknown field"):
+            search_runs(
+                project_with_runs,
+                where="val_los < 2.0",
+                strict_fields=True,
+            )
+
+    def test_unknown_field_suggests_nearest(self, project_with_runs):
+        try:
+            search_runs(
+                project_with_runs,
+                where="moddel_dim > 256",
+                strict_fields=True,
+            )
+        except SearchError as exc:
+            assert "moddel_dim" in str(exc)
+            assert "model_dim" in str(exc), (
+                "should suggest the real field name as a typo fix"
+            )
+
+    def test_known_field_passes_strict_mode(self, project_with_runs):
+        # status, model_dim, result.val_loss all exist in fixture rows.
+        out = search_runs(
+            project_with_runs,
+            where="status == 'completed' and model_dim > 100 and result.val_loss < 2.0",
+            strict_fields=True,
+        )
+        assert out["matched"] >= 1
+
+    def test_strict_fields_default_off_preserves_silent_typo(self, project_with_runs):
+        """Backward compat: default behavior unchanged."""
+        out = search_runs(
+            project_with_runs,
+            where="nonexistent_field == 'x'",
+        )
+        assert out["matched"] == 0
+        assert "error" not in out
+
+    def test_top_level_dotted_paths_validate(self, project_with_runs):
+        """result.val_loss is a real nested key; strict mode accepts it."""
+        out = search_runs(
+            project_with_runs,
+            where="result.val_loss < 5.0",
+            strict_fields=True,
+        )
+        assert out["matched"] >= 1
+
+    def test_dotted_path_into_nonexistent_field_raises(self, project_with_runs):
+        with pytest.raises(SearchError, match="unknown field"):
+            search_runs(
+                project_with_runs,
+                where="nope.something == 'x'",
+                strict_fields=True,
+            )

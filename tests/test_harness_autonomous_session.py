@@ -285,3 +285,63 @@ class TestStatusAndCancel:
         config, _ = project_config
         with pytest.raises(HarnessAutonomousSessionError, match="not found"):
             has.action_status(config, session_id="not-a-real-uuid")
+
+
+# ---------------------------------------------------------------------------
+# Concurrent action_start (G.4 seam 5 — symmetry with research + tree)
+# ---------------------------------------------------------------------------
+
+
+def _concurrent_harness_start_worker(
+    project_dir_str: str, spec_path_str: str, tree_name: str, queue
+) -> None:
+    """Subprocess target: cd into project, start a harness session, put session_id."""
+    import os as _os
+    from pathlib import Path as _Path
+    _os.chdir(_Path(project_dir_str))
+    from crucible.core.config import load_config as _lc
+    from crucible.researcher import harness_autonomous_session as _has
+    config = _lc()
+    out = _has.action_start(
+        config, domain_spec=spec_path_str, tree_name=tree_name,
+        iterations=2, dry_run=True,
+    )
+    queue.put(out["session_id"])
+
+
+class TestStartConcurrency:
+    """G.4 seam 5: harness mirror of the autonomous/tree tests. Three
+    processes call action_start against the same tree simultaneously;
+    exactly one session is created and all three callers see it."""
+
+    @pytest.mark.skipif(
+        __import__("sys").platform == "win32",
+        reason="fcntl create-lock is POSIX-only.",
+    )
+    def test_concurrent_harness_starts_produce_single_session(self, project_config):
+        import multiprocessing
+
+        config, spec = project_config
+        project_dir = config.project_root
+
+        ctx = multiprocessing.get_context("spawn")
+        queue: multiprocessing.Queue = ctx.Queue()
+        procs = [
+            ctx.Process(
+                target=_concurrent_harness_start_worker,
+                args=(str(project_dir), spec, "race-tree", queue),
+            )
+            for _ in range(3)
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(timeout=30.0)
+            assert p.exitcode == 0, f"worker exitcode={p.exitcode}"
+
+        ids: set[str] = set()
+        while not queue.empty():
+            ids.add(queue.get())
+        assert len(ids) == 1, (
+            f"expected exactly one harness session_id under concurrent start; got {ids}"
+        )

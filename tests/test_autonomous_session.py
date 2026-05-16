@@ -407,6 +407,47 @@ class TestSubmitErrors:
         with pytest.raises(AutonomousSessionError, match="not found"):
             autos.action_status(project_config, session_id="not-a-real-uuid")
 
+    def test_explicit_stale_snapshot_rejected_via_mcp_dispatch(
+        self, project_config, monkeypatch
+    ):
+        """G.4 seam 7: full MCP-style flow — action_start returns a
+        snapshot, peer mutates state, MCP dispatcher passes the stale
+        snapshot through autonomous_research_loop(action="submit").
+        Must raise StaleSubmitError so the orchestrator can retry.
+
+        Earlier coverage tested the snapshot fallback path (no explicit
+        snapshot) and the Python-API path. This test exercises the
+        explicit MCP arg + dispatcher path that production callers
+        actually use."""
+        from crucible.mcp.tools import TOOL_DISPATCH
+        from crucible.researcher.state import ResearchState
+
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config", lambda: project_config
+        )
+        loop = TOOL_DISPATCH["autonomous_research_loop"]
+        started = loop({"action": "start", "iterations": 2, "tier": "proxy"})
+        sid = started["session_id"]
+        stale = started["state_snapshot"]
+
+        # Peer mutation between start and submit.
+        state = ResearchState(
+            project_config.project_root / project_config.research_state_file,
+            budget_hours=project_config.researcher.budget_hours,
+        )
+        state.add_finding("peer-finding", confidence=0.7)
+        state.save()
+
+        # Submit with the stale snapshot — must surface StaleSubmitError
+        # through the dispatcher.
+        with pytest.raises(StaleSubmitError):
+            loop({
+                "action": "submit",
+                "session_id": sid,
+                "response": _canned_hypothesis_response(),
+                "state_snapshot": stale,
+            })
+
     def test_action_submit_falls_back_to_session_snapshot(self, project_config):
         """Phase 1.1 review fix: if caller (e.g., CLI) omits state_snapshot,
         action_submit auto-loads the session's last_state_snapshot so stale-
@@ -502,6 +543,86 @@ class TestEventLog:
 # ---------------------------------------------------------------------------
 # Doom-loop detection
 # ---------------------------------------------------------------------------
+
+
+class TestBudgetSpendDictValidation:
+    """G.4 seam 2: cost_tracker.compute_session_spend returning a
+    malformed dict used to raise a confusing KeyError inside the budget
+    check. Now raises typed BudgetCheckError so the operator sees the
+    cost-tracker bug not a fake budget-exceeded."""
+
+    def test_missing_key_raises_typed_error(self, project_config, monkeypatch):
+        from crucible.researcher.session_base import BudgetCheckError
+        from crucible.runner import cost_tracker
+
+        monkeypatch.setattr(
+            cost_tracker, "compute_session_spend",
+            lambda *a, **kw: {"spend_usd": 1.0},  # missing hours/rate/pods
+        )
+        with pytest.raises(BudgetCheckError, match="missing keys"):
+            autos.action_start(project_config, iterations=3, tier="proxy",
+                               budget_usd=5.0)
+
+    def test_non_numeric_spend_raises_typed_error(
+        self, project_config, monkeypatch
+    ):
+        from crucible.researcher.session_base import BudgetCheckError
+        from crucible.runner import cost_tracker
+
+        monkeypatch.setattr(
+            cost_tracker, "compute_session_spend",
+            lambda *a, **kw: {
+                "spend_usd": "not a number",
+                "hours_elapsed": 0.1, "hourly_rate": 10.0, "active_pods": 1,
+            },
+        )
+        with pytest.raises(BudgetCheckError, match="expected number"):
+            autos.action_start(project_config, iterations=3, tier="proxy",
+                               budget_usd=5.0)
+
+    def test_non_dict_return_raises_typed_error(
+        self, project_config, monkeypatch
+    ):
+        from crucible.researcher.session_base import BudgetCheckError
+        from crucible.runner import cost_tracker
+
+        monkeypatch.setattr(
+            cost_tracker, "compute_session_spend",
+            lambda *a, **kw: None,
+        )
+        with pytest.raises(BudgetCheckError, match="expected dict"):
+            autos.action_start(project_config, iterations=3, tier="proxy",
+                               budget_usd=5.0)
+
+
+class TestCorruptSessionYaml:
+    """G.4 seam 1: corrupt session yaml used to vanish silently."""
+
+    def test_corrupt_yaml_logs_warning_and_skips(
+        self, project_config, capsys
+    ):
+        from crucible.researcher.autonomous_session import AutonomousSession
+
+        sessions_dir = (
+            project_config.project_root / ".crucible" / "autonomous_sessions"
+        )
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        # Syntactically broken yaml (unclosed bracket + key collision).
+        (sessions_dir / "broken-session.yaml").write_text(
+            "status: running\n  current_stage: : :\nunclosed:[\n",
+            encoding="utf-8",
+        )
+
+        results = AutonomousSession._find_active_yamls(project_config)
+
+        # Corrupted yaml is dropped from results.
+        names = [sid for _updated_at, sid, _data in results]
+        assert "broken-session" not in names
+
+        # log_warn prints to stderr; capsys captures it.
+        captured = capsys.readouterr()
+        assert "broken-session.yaml" in captured.err
+        assert "_find_active_yamls" in captured.err
 
 
 class TestDoomLoop:
