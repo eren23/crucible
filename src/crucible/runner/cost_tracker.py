@@ -7,10 +7,15 @@ by ``fleet/providers/runpod.py`` from RunPod's ``adjustedCostPerHr`` /
 
     spend = (now - session_started_at) × sum(active_nodes.cost_per_hr)
 
-If the project has no active fleet nodes (or no cost_per_hr field on
-them), we fall back to a flat-rate default so the budget cap is still
-enforceable in dry-run + ssh-provider setups; the default rate is
-``DEFAULT_FALLBACK_HOURLY_USD`` per declared pod count.
+Two fallback paths:
+- **No nodes.json (or no active pods):** rate is 0, spend is 0. The
+  budget cap is effectively unenforceable because no pods are running
+  and therefore no money is being spent. This is correct for dry-run
+  development and for sessions that exit before provisioning.
+- **Active nodes that lack a positive cost_per_hr** (e.g., SSH provider
+  nodes which never populate the field): the per-pod rate falls back
+  to ``DEFAULT_FALLBACK_HOURLY_USD`` so the cap is still enforceable
+  for self-hosted setups. A one-time log_warn surfaces the fallback.
 
 The model is intentionally coarse — autonomous sessions in the same
 project share the same fleet, so per-session attribution can't be

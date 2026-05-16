@@ -157,6 +157,49 @@ class TestStart:
                 project_config, iterations=5, tier="proxy", budget_usd=5.0,
             )
 
+    def test_budget_check_after_submit_under_session_lock(
+        self, project_config, monkeypatch
+    ):
+        """Phase 1.8 fix: budget check also fires after a successful submit
+        (matches the docstring claim 'each prompt build AND each successful
+        submit'). The check runs while the session lock is still held so
+        cancel-on-overrun is atomic vs concurrent reads.
+
+        Simulate: start with a high budget (passes initial check), then
+        flip the cost spend to over-budget before submit runs. Submit
+        must mark the session canceled."""
+        from crucible.researcher.autonomous_session import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        # First spend call (during start's build_prompt) returns under-budget.
+        # Subsequent calls return over-budget so the post-submit refresh
+        # cancels the session.
+        call_count = {"n": 0}
+        def spend_grows(config, session_started_at, *, now=None):
+            call_count["n"] += 1
+            if call_count["n"] <= 1:
+                return {"spend_usd": 1.0, "hours_elapsed": 0.1,
+                        "hourly_rate": 10.0, "active_pods": 1}
+            return {"spend_usd": 100.0, "hours_elapsed": 1.0,
+                    "hourly_rate": 100.0, "active_pods": 1}
+        monkeypatch.setattr(cost_tracker, "compute_session_spend", spend_grows)
+
+        started = autos.action_start(
+            project_config, iterations=5, tier="proxy", budget_usd=5.0,
+        )
+        sid = started["session_id"]
+
+        # Now submit — the post-apply budget check should trip BudgetExceeded.
+        resp = {"hypotheses": [{"hypothesis": "h", "name": "h",
+                                "expected_impact": 0.01, "confidence": 0.5,
+                                "config": {"MODEL_FAMILY": "baseline"},
+                                "rationale": "x", "family": "baseline"}]}
+        with pytest.raises(BudgetExceeded):
+            autos.action_submit(
+                project_config, session_id=sid, response=resp,
+                state_snapshot=started["state_snapshot"],
+            )
+
     def test_budget_none_skips_check(self, project_config, monkeypatch):
         """budget_usd=None opts out of budget enforcement entirely."""
         from crucible.runner import cost_tracker

@@ -294,10 +294,12 @@ class AutonomousSession:
         """Recompute spend; if over budget, mark session canceled + raise.
 
         Phase 1.8: per-session cost guard. ``budget_usd`` was already
-        accepted by ``create()`` but never enforced. Now each prompt
-        build and each successful submit refreshes the spend estimate
-        (wall-clock × declared pod rate from cost_tracker) and
-        auto-cancels the session when the cap is reached.
+        accepted by ``create()`` but never enforced. Now called at the
+        top of ``build_prompt`` (before any new prompt is constructed)
+        AND at the bottom of ``_apply_response_locked`` (after a
+        successful submit, while still holding the session lock). The
+        spend estimate (wall-clock × declared pod rate from
+        cost_tracker) auto-cancels the session when the cap is reached.
 
         Skipped when ``budget_usd`` is None (no cap configured).
         """
@@ -484,6 +486,15 @@ class AutonomousSession:
             raise AutonomousSessionError(f"Unknown stage {stage!r} on submit")
 
         self.save()
+
+        # Phase 1.8: post-submit budget check (matches the docstring claim
+        # "build AND submit"). Runs while we still hold the session lock so
+        # the cancel-on-overrun mutation is atomic vs. concurrent reads.
+        # If the session was already advanced to STATUS_DONE above, skip —
+        # _refresh would no-op on the is_terminal check next time anyway.
+        if self.state_data.get("status") == self.STATUS_RUNNING:
+            self._refresh_budget_and_maybe_cancel()
+
         return {
             "session_id": self.session_id,
             "stage_applied": stage,

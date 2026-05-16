@@ -3481,7 +3481,13 @@ TOOLS: list[Tool] = [
                 },
                 "budget_usd": {
                     "type": "number",
-                    "description": "Optional total spend cap in USD (start only). Not yet enforced — Phase 1.8.",
+                    "description": (
+                        "Optional total spend cap in USD (start only). Enforced via "
+                        "cost_tracker — wall-clock × declared pod rate from nodes.json. "
+                        "Session auto-cancels and raises BudgetExceeded when "
+                        "spend_usd >= budget_usd; check happens at every build_prompt "
+                        "and after every successful submit. Omit for no cap."
+                    ),
                 },
                 "with_literature": {
                     "type": "boolean",
