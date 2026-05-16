@@ -807,10 +807,15 @@ TOOLS: list[Tool] = [
                 },
                 "policy": {
                     "type": "string",
-                    "enum": ["random", "same_track", "cross_track"],
+                    "enum": ["random", "same_track", "cross_track", "memory_filter"],
                     "description": (
-                        "Pair-mining policy. 'random' samples any pair; 'same_track' "
-                        "draws within one research track; 'cross_track' draws across tracks."
+                        "Pair-mining policy. 'random' samples any pair uniformly; "
+                        "'same_track' draws within one research track; 'cross_track' "
+                        "draws across tracks. 'memory_filter' (Phase 4.2) ranks all "
+                        "eligible pairs by (confidence × recency_decay) + "
+                        "cross_project_diversity + tag_overlap and returns the top-k "
+                        "— useful when the hub has many findings and uniform random "
+                        "sampling washes out the high-confidence synthesis opportunities."
                     ),
                     "default": "random",
                 },
