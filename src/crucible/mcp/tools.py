@@ -2329,6 +2329,24 @@ def tool_router(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def runs_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Filter the run ledger with a SQL-ish predicate expression."""
+    config = _get_config()
+    try:
+        from crucible.runner.search import search_runs
+        return search_runs(
+            config,
+            where=args.get("where", ""),
+            order_by=args.get("order_by", ""),
+            direction=args.get("direction", "asc"),
+            limit=args.get("limit", 50),
+            source=args.get("source", "merged"),
+            select=args.get("select"),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 def annotate_run(args: dict[str, Any]) -> dict[str, Any]:
     """Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments."""
     config = _get_config()
@@ -6814,6 +6832,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # Briefing tools
     "get_research_briefing": get_research_briefing,
     "tool_router": tool_router,
+    "runs_search": runs_search,
     "annotate_run": annotate_run,
     # Literature search tools
     "research_literature_search": research_literature_search,

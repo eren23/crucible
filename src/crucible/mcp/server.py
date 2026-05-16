@@ -1391,6 +1391,61 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="runs_search",
+        description=(
+            "Filter the experiment-results ledger with a SQL-ish predicate. "
+            "Identifiers resolve against each row (dotted access supported); top-level "
+            "config keys are folded into the namespace so you can write `model_dim > 256` "
+            "instead of `config.MODEL_DIM > 256`. Example expressions:\n"
+            "  - `result.val_loss < 2.0 and status == 'completed'`\n"
+            "  - `name == 'smoke_test' or backend == 'torch'`\n"
+            "  - `model_bytes < 16000000 and result.val_loss < 1.0`\n\n"
+            "Supports BOOL ops (and/or/not), comparators (==, !=, <, <=, >, >=, in, not in), "
+            "and literal numbers/strings/lists. No function calls, no attribute access on "
+            "non-dict values — the parser whitelist is strict.\n\n"
+            "REQUIRES: Nothing (returns empty rows when no results exist).\n"
+            "RETURNS: {matched: int, returned: int, rows: [run-dict, ...]}\n"
+            "NEXT: get_experiment_result(run_id) for a specific row, or design_browse_experiments for richer filtering across sources."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "where": {
+                    "type": "string",
+                    "description": "Predicate expression (empty = match all).",
+                    "default": "",
+                },
+                "order_by": {
+                    "type": "string",
+                    "description": "Field path to sort on, e.g., 'result.val_loss' (empty = ledger order).",
+                    "default": "",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "default": "asc",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows to return (default 50; pass 0 or null for no limit).",
+                    "default": 50,
+                },
+                "source": {
+                    "type": "string",
+                    "enum": ["merged", "local", "project", "fleet"],
+                    "default": "merged",
+                    "description": "Which results ledger to read.",
+                },
+                "select": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of columns to keep (dotted paths flatten to the leaf key).",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="annotate_run",
         description=(
             "Bidirectional link: attach a finding to a run and record the run in the finding's source_experiments.\n\n"
