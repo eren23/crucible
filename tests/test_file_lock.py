@@ -140,12 +140,55 @@ class TestFileLockDefensiveFactory:
                 time.sleep(0.05)
             assert ready.exists()
 
-            # Factory returns a string instead of an exception — defensive.
-            with pytest.raises(TypeError, match="expected an exception"):
+            # Factory returns a string instead of an exception. After
+            # G.4 seam 6 this raises typed FileLockFactoryError, not a
+            # bare TypeError, so debugging includes the lock path.
+            from crucible.core.file_lock import FileLockFactoryError
+            with pytest.raises(FileLockFactoryError, match="expected an exception"):
                 with file_lock(
                     lock,
                     timeout=0.5,
                     on_timeout=lambda msg: "not-an-exception",  # type: ignore[return-value]
+                ):
+                    pass
+        finally:
+            holder.join(timeout=10.0)
+            if holder.is_alive():
+                holder.terminate()
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="fcntl locks are POSIX-only"
+    )
+    def test_factory_that_raises_surfaces_typed_error(self, tmp_path: Path):
+        """G.4 seam 6: if the on_timeout factory itself raises (wrong
+        arity, missing arg, etc.), file_lock wraps it as
+        FileLockFactoryError with the lock path attached, so an
+        operator gets ``"on_timeout factory misconfigured for ..."``
+        instead of an opaque TypeError thrown from inside fcntl."""
+        from crucible.core.file_lock import FileLockFactoryError
+
+        lock = tmp_path / "factory-crash.lock"
+        ready = tmp_path / "ready"
+        ctx = multiprocessing.get_context("spawn")
+        holder = ctx.Process(
+            target=_hold_lock_worker, args=(str(lock), 3.0, str(ready)), daemon=True
+        )
+        holder.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert ready.exists()
+
+            # Factory raises a runtime exception.
+            def explosive(msg):
+                raise RuntimeError("factory boom")
+
+            with pytest.raises(FileLockFactoryError, match="RuntimeError.*factory boom"):
+                with file_lock(
+                    lock,
+                    timeout=0.5,
+                    on_timeout=explosive,
                 ):
                     pass
         finally:

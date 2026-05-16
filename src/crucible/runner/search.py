@@ -177,6 +177,78 @@ def _safe_lt(a: Any, b: Any) -> bool:
         return False
 
 
+def _collect_identifiers(node: ast.AST, out: set[tuple[str, ...]]) -> None:
+    """Walk the AST collecting every Name/Attribute identifier as a path tuple."""
+    if isinstance(node, ast.Name):
+        out.add((node.id,))
+        return
+    if isinstance(node, ast.Attribute):
+        out.add(tuple(_flatten_attribute(node)))
+        return
+    for child in ast.iter_child_nodes(node):
+        _collect_identifiers(child, out)
+
+
+def _row_paths(rows: list[dict[str, Any]]) -> set[tuple[str, ...]]:
+    """Collect every dotted path that appears as a key in any row.
+
+    Includes top-level keys, dotted-path keys via ``config`` namespace
+    folding (config.K becomes both 'K' and 'config.K' to match the
+    resolver's behavior), and nested dict keys one level deep
+    (e.g., 'result.val_loss').
+    """
+    paths: set[tuple[str, ...]] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for k, v in row.items():
+            paths.add((k,))
+            if isinstance(v, dict):
+                for ck in v.keys():
+                    paths.add((k, ck))
+                    if k == "config":
+                        # Resolver folds config keys into the top-level
+                        # namespace (uppercase env-var fallback too).
+                        paths.add((ck,))
+                        paths.add((ck.lower(),))
+    return paths
+
+
+def _suggest_closest(unknown: str, known: list[str]) -> str | None:
+    """Best-effort typo suggestion via difflib. Returns None if no match."""
+    import difflib
+    matches = difflib.get_close_matches(unknown, known, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _validate_predicate_fields(expr: str, rows: list[dict[str, Any]]) -> None:
+    """Raise SearchError if any identifier in ``expr`` is unknown to ``rows``.
+
+    Uses the same AST whitelist as ``compile_predicate``. Suggests the
+    closest field name from the actual rows when a typo is detected.
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise SearchError(f"Predicate syntax error: {exc.msg}") from exc
+    _validate(tree)
+    referenced: set[tuple[str, ...]] = set()
+    _collect_identifiers(tree, referenced)
+    known = _row_paths(rows)
+    known_flat = sorted({".".join(p) for p in known})
+    for path in referenced:
+        # An identifier is "known" if it's a prefix of any known path
+        # (so `result` matches `result.val_loss`) or appears as-is.
+        if any(p[: len(path)] == path for p in known):
+            continue
+        dotted = ".".join(path)
+        suggestion = _suggest_closest(dotted, known_flat)
+        msg = f"unknown field {dotted!r}"
+        if suggestion:
+            msg += f" — did you mean {suggestion!r}?"
+        raise SearchError(msg)
+
+
 def compile_predicate(expr: str) -> Callable[[dict[str, Any]], bool]:
     """Return a callable that evaluates the predicate against a row dict.
 
@@ -202,6 +274,7 @@ def search_runs(
     limit: int | None = 50,
     source: str = "merged",
     select: list[str] | None = None,
+    strict_fields: bool = False,
 ) -> dict[str, Any]:
     """Filter + sort the run ledger.
 
@@ -221,6 +294,12 @@ def search_runs(
     select:
         Optional list of columns to keep. Each entry can be a dotted
         path. ``None`` returns the full row.
+    strict_fields:
+        When True, validate that every identifier in the predicate
+        appears in at least one row before filtering. A typo like
+        ``val_los < 2.0`` then raises :class:`SearchError` with a
+        nearest-match suggestion instead of silently matching zero
+        rows. Default ``False`` for backward compatibility.
 
     Returns
     -------
@@ -236,6 +315,9 @@ def search_runs(
         raise SearchError(
             f"Unknown source {source!r}; expected one of merged/local/project/fleet."
         )
+
+    if strict_fields and where.strip():
+        _validate_predicate_fields(where, rows)
 
     predicate = compile_predicate(where)
     matched_rows = [r for r in rows if predicate(r)]

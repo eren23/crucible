@@ -1441,6 +1441,16 @@ TOOLS: list[Tool] = [
                     "items": {"type": "string"},
                     "description": "Optional list of columns to keep (dotted paths flatten to the leaf key).",
                 },
+                "strict_fields": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "When true, raise SearchError on a predicate identifier "
+                        "that doesn't appear in any row (with a nearest-match "
+                        "suggestion). Default false for backward compat — typos "
+                        "silently match zero rows."
+                    ),
+                },
             },
             "additionalProperties": False,
         },

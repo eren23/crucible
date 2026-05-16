@@ -2342,6 +2342,7 @@ def runs_search(args: dict[str, Any]) -> dict[str, Any]:
             limit=args.get("limit", 50),
             source=args.get("source", "merged"),
             select=args.get("select"),
+            strict_fields=bool(args.get("strict_fields", False)),
         )
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}

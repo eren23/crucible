@@ -51,6 +51,18 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.1
 _WINDOWS_FALLBACK_WARNED = False
 
 
+class FileLockFactoryError(CrucibleError):
+    """``on_timeout`` factory crashed when called with the timeout message.
+
+    Raised when a caller passes a malformed factory (e.g., wrong arity,
+    missing required positional arg). The wrapper around
+    ``on_timeout(msg)`` catches the inner exception and re-raises this
+    with the lock path + cause attached, so an operator gets ``"on_timeout
+    factory misconfigured for /path/.lock"`` instead of an opaque
+    TypeError thrown from inside fcntl-acquisition.
+    """
+
+
 class FileLockTimeout(CrucibleError):
     """Generic file-lock timeout.
 
@@ -129,15 +141,24 @@ def file_lock(
                         f"{timeout:.1f}s — another Crucible process may be holding it."
                     )
                     if on_timeout is not None:
-                        produced = on_timeout(msg)
+                        try:
+                            produced = on_timeout(msg)
+                        except BaseException as factory_exc:
+                            # Factory itself crashed (e.g., misconfigured
+                            # signature). Surface a typed
+                            # FileLockFactoryError with the lock path so
+                            # debugging doesn't require tracing into
+                            # fcntl internals.
+                            raise FileLockFactoryError(
+                                f"on_timeout factory raised "
+                                f"{type(factory_exc).__name__}: {factory_exc}. "
+                                f"Lock path: {lock_path}."
+                            ) from factory_exc
                         if not isinstance(produced, BaseException):
-                            # Defensive: caller's factory returned a
-                            # non-Exception (e.g., a string or None). Raise a
-                            # clear TypeError instead of letting `raise X` do
-                            # it with no context about where the broken
-                            # factory came from.
-                            raise TypeError(
-                                f"file_lock on_timeout factory returned "
+                            # Factory returned a non-Exception (string,
+                            # None, etc.). Same diagnostic shape.
+                            raise FileLockFactoryError(
+                                f"on_timeout factory returned "
                                 f"{type(produced).__name__!r}, expected an "
                                 f"exception instance. Lock path: {lock_path}."
                             ) from exc
