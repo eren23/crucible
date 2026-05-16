@@ -147,12 +147,17 @@ class TestSubmit:
 
     def test_session_done_after_planned_iterations(self, project_config):
         config, spec = project_config
-        started = _start(config, spec, tree_name="done", iterations=1
-        )
+        started = _start(config, spec, tree_name="done", iterations=1)
         sid = started["session_id"]
         result = has.action_submit(config, session_id=sid, response=_CANNED_RESPONSE)
         assert result["session_status"] == HarnessAutonomousSession.STATUS_DONE
         assert result["next_prompt"] is None
+        # Codex review fix: terminal submit must surface pending_node_ids
+        # so the orchestrator knows whether to run collect_results +
+        # tree_sync_results to finalize metrics.
+        assert "pending_node_ids" in result
+        assert isinstance(result["pending_node_ids"], list)
+        assert "message" in result
 
     def test_cannot_submit_in_benchmark_wait_stage(self, project_config):
         config, spec = project_config

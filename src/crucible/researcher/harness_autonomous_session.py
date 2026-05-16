@@ -348,7 +348,21 @@ class HarnessAutonomousSession:
         }
 
     def apply_response(self, raw_response: str) -> dict[str, Any]:
-        """Parse + validate + benchmark orchestrator-supplied candidates."""
+        """Parse + validate + benchmark orchestrator-supplied candidates.
+
+        Holds the per-session lock AND ``optimizer.tree.write_lock`` around
+        the benchmark step so concurrent processes mutating the same tree
+        (e.g., a peer harness session or a tree_auto_expand call) cannot
+        lose updates via current_tree.yaml's last-writer-wins rewrite.
+
+        Note on benchmark semantics: ``HarnessOptimizer.benchmark`` does NOT
+        just enqueue — it calls ``fleet.enqueue`` then ``fleet.dispatch``
+        and falls back to local synchronous execution on fleet error
+        (harness_optimizer.py:312, 343). So submit can do real work
+        synchronously when running locally. The orchestrator's role
+        between submit and continue is to drive collect_results and
+        tree_sync_results so pending nodes get their metrics.
+        """
         with _file_lock(self.lock_path):
             self.load()
             if self.is_terminal():
@@ -370,10 +384,13 @@ class HarnessAutonomousSession:
                     f"response as harness candidates: {exc}"
                 ) from exc
 
-            # validate_candidates can raise CandidateValidationError for the
-            # batch; we propagate to the caller.
-            valid = optimizer.validate_candidates(list(proposed))
-            node_ids = optimizer.benchmark(valid) if valid else []
+            # validate_candidates is read-only on the tree, but the subsequent
+            # benchmark mutates: add_root, store_candidate, eventual record_result.
+            # Hold tree.write_lock so the full check-then-mutate sequence is
+            # atomic w.r.t. peer mutations on the same tree.
+            with optimizer.tree.write_lock():
+                valid = optimizer.validate_candidates(list(proposed))
+                node_ids = optimizer.benchmark(valid) if valid else []
 
             self.state_data["iterations_completed"] += 1
             next_iter = self.state_data["current_iteration"] + 1
@@ -389,6 +406,11 @@ class HarnessAutonomousSession:
             )
 
             if next_iter >= self.state_data["iterations_planned"]:
+                # Done with iterations — but the last batch's benchmark may
+                # still have pending nodes whose results haven't been
+                # collected yet. Surface the pending list in the response so
+                # the orchestrator knows to run collect_results +
+                # tree_sync_results to finalize results.
                 self.state_data["status"] = self.STATUS_DONE
                 self.state_data["stage"] = "done"
                 self.save()
@@ -396,6 +418,7 @@ class HarnessAutonomousSession:
                     "done",
                     iterations_completed=self.state_data["iterations_completed"],
                 )
+                pending = [n["node_id"] for n in optimizer.tree.get_pending_nodes()]
                 return {
                     "session_id": self.session_id,
                     "session_status": self.STATUS_DONE,
@@ -403,6 +426,11 @@ class HarnessAutonomousSession:
                     "proposed": [c.get("name") for c in proposed],
                     "validated": [c.get("name") for c in valid],
                     "benchmarked_node_ids": node_ids,
+                    "pending_node_ids": pending,
+                    "message": (
+                        f"Session done. {len(pending)} node(s) still pending — "
+                        "run collect_results + tree_sync_results to finalize metrics."
+                    ) if pending else "Session done. No pending nodes.",
                     "next_prompt": None,
                 }
 
@@ -419,10 +447,9 @@ class HarnessAutonomousSession:
                 "benchmarked_node_ids": node_ids,
                 "next_action": "external_dispatch",
                 "message": (
-                    f"{len(node_ids)} candidate(s) enqueued. Run "
-                    "dispatch_experiments → collect_results → "
-                    "tree_sync_results, then call action='continue' to "
-                    "advance to the next proposal."
+                    f"{len(node_ids)} candidate(s) enqueued/dispatched. Run "
+                    "collect_results + tree_sync_results, then call "
+                    "action='continue' to advance to the next proposal."
                 ),
             }
 

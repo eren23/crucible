@@ -116,3 +116,39 @@ class TestFileLockMkdir:
         with file_lock(lock, timeout=1.0):
             assert lock.exists()
             assert lock.parent.is_dir()
+
+
+class TestFileLockDefensiveFactory:
+    """Review fix: if on_timeout factory returns a non-Exception, raise a
+    clear TypeError rather than letting Python's `raise X` blow up with
+    no context about where the broken factory lives."""
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="fcntl locks are POSIX-only"
+    )
+    def test_factory_returning_string_raises_typeerror(self, tmp_path: Path):
+        lock = tmp_path / "bad.lock"
+        ready = tmp_path / "ready"
+        ctx = multiprocessing.get_context("spawn")
+        holder = ctx.Process(
+            target=_hold_lock_worker, args=(str(lock), 3.0, str(ready)), daemon=True
+        )
+        holder.start()
+        try:
+            deadline = time.monotonic() + 5.0
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert ready.exists()
+
+            # Factory returns a string instead of an exception — defensive.
+            with pytest.raises(TypeError, match="expected an exception"):
+                with file_lock(
+                    lock,
+                    timeout=0.5,
+                    on_timeout=lambda msg: "not-an-exception",  # type: ignore[return-value]
+                ):
+                    pass
+        finally:
+            holder.join(timeout=10.0)
+            if holder.is_alive():
+                holder.terminate()

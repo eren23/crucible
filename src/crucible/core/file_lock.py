@@ -129,7 +129,19 @@ def file_lock(
                         f"{timeout:.1f}s — another Crucible process may be holding it."
                     )
                     if on_timeout is not None:
-                        raise on_timeout(msg) from exc
+                        produced = on_timeout(msg)
+                        if not isinstance(produced, BaseException):
+                            # Defensive: caller's factory returned a
+                            # non-Exception (e.g., a string or None). Raise a
+                            # clear TypeError instead of letting `raise X` do
+                            # it with no context about where the broken
+                            # factory came from.
+                            raise TypeError(
+                                f"file_lock on_timeout factory returned "
+                                f"{type(produced).__name__!r}, expected an "
+                                f"exception instance. Lock path: {lock_path}."
+                            ) from exc
+                        raise produced from exc
                     raise FileLockTimeout(msg) from exc
                 time.sleep(poll_interval)
         try:

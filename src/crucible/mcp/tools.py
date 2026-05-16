@@ -1881,6 +1881,13 @@ def harness_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
             f"harness_autonomous_loop: unknown action {action!r}. "
             f"Valid: 'start', 'submit', 'continue', 'status', 'cancel'."
         )
+    except StaleSubmitError:
+        # Mirror autonomous_research_loop / tree_autonomous_loop: stale
+        # submits propagate as a typed error so orchestrators can distinguish
+        # "retry with fresh prompt" from generic CrucibleError. Future-proof
+        # — harness doesn't currently raise StaleSubmitError but a snapshot
+        # guard could be added later.
+        raise
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
