@@ -40,8 +40,10 @@ for step in range(1, iterations + 1):
     train_loss = 3.0 * math.exp(-step / (iterations / 3)) + 0.5 + random.gauss(0, 0.02)
     print(f"step:{step}/{iterations} train_loss:{train_loss:.4f}")
 
-    # Periodic validation
-    if step % val_every == 0 or step == iterations:
+    # Periodic validation. VAL_LOSS_EVERY=0 (smoke preset default) means
+    # "only validate at the end" — guard against the modulo-by-zero.
+    do_val = step == iterations or (val_every > 0 and step % val_every == 0)
+    if do_val:
         val_loss = train_loss + random.gauss(0.1, 0.02)
         val_bpb = val_loss * 0.8 + random.gauss(0, 0.01)
         if val_loss < best_val_loss:

@@ -340,6 +340,15 @@ def _main() -> None:
     mcp_serve = mcp_sub.add_parser("serve", help="Start MCP server (stdio)")
     mcp_serve.add_argument("--trace", action="store_true", help="Enable session tracing to .crucible/traces/")
     mcp_serve.add_argument("--trace-id", type=str, default=None, help="Custom session ID for the trace")
+    mcp_call = mcp_sub.add_parser(
+        "call",
+        help="Invoke a single MCP tool from the CLI (no server, no stdio).",
+    )
+    mcp_call.add_argument("tool_name", help="Name of the MCP tool to call (e.g., tool_router).")
+    mcp_call.add_argument(
+        "--args", type=str, default="{}",
+        help="JSON-encoded args dict (default: '{}').",
+    )
 
     # ── trace ──
     trace_parser = subparsers.add_parser("trace", help="Session trace viewing and export")

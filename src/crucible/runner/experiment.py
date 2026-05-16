@@ -463,7 +463,11 @@ def run_experiment(
 
             # -- Streaming read loop --
             while True:
-                if timeout_seconds > 0 and time.monotonic() - start > timeout_seconds:
+                if (
+                    timeout_seconds is not None
+                    and timeout_seconds > 0
+                    and time.monotonic() - start > timeout_seconds
+                ):
                     timed_out = True
                     proc.kill()
                     break

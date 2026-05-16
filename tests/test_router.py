@@ -215,6 +215,26 @@ class TestResearchChain:
         assert any(a["tool"] == "design_batch_from_hypotheses"
                    for a in out["alternatives"])
 
+    def test_local_completion_without_pods_recommends_leaderboard(
+        self, monkeypatch, fake_config
+    ):
+        """5-minute quickstart path: ran a local smoke experiment with
+        no pods provisioned. Router must NOT regress to provision_nodes
+        — completed results are the actionable state."""
+        _patch(
+            monkeypatch,
+            _load_nodes=[],
+            _load_queue=[],
+            _load_completed_count=2,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 1.0},
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["recommended_tool"] == "get_leaderboard"
+        assert out["state"]["nodes"]["total"] == 0
+        assert out["state"]["completed_experiments"] == 2
+
     def test_completed_with_no_pending_recommends_leaderboard(
         self, monkeypatch, fake_config
     ):

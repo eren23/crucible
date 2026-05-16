@@ -78,8 +78,9 @@ src/crucible/
 
 ## Pages
 
+- [5-Minute Quickstart](quickstart-5-minutes) — Cold start to first leaderboard + tool-router recommendation, five commands, no GPU
 - [Positioning](positioning) — Where Crucible sits vs Sakana / FutureHouse / DeepMind, and what it explicitly is NOT
-- [Getting Started](getting-started) — Installation, project setup, first experiment
+- [Getting Started](getting-started) — Full installation walkthrough, project setup, fleet flow
 - [YOLO MCP Demo](yolo-mcp-demo) — Empty-dir external-project fine-tuning via MCP
 - [TUI Guide](tui) — Interactive design browser walkthrough
 - [MCP Tools Reference](mcp-tools) — All 200+ tools with schemas

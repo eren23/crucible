@@ -333,8 +333,16 @@ def recommend_next_action(
         ))
         return _build_response(primary, alternatives, state)
 
-    # 3 - 5. Fleet bootstrap chain.
-    if nodes_sum["total"] == 0:
+    # 3 - 5. Fleet bootstrap chain — only recommend provision when there is
+    # work waiting on compute. A local-only run that just completed should
+    # fall through to the leaderboard/reflect branches below, not be told
+    # to provision pods it doesn't need.
+    needs_compute = (
+        queue_sum["queued"] > 0
+        or rs["pending_count"] > 0
+        or completed_count == 0
+    )
+    if nodes_sum["total"] == 0 and needs_compute:
         primary = _R_NO_PODS
         alternatives.append((
             "list_projects",

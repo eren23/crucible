@@ -26,6 +26,10 @@ See [`docs/positioning.md`](docs/positioning.md) for the full landscape map and 
 
 ## Quick Start
 
+**New here?** The [5-minute quickstart](docs/quickstart-5-minutes.md) takes you from `git clone` to a leaderboard + tool-router next-action recommendation in five commands, no GPU required.
+
+For the production lifecycle (fleet provisioning, presets beyond smoke, autonomous loops, W&B), the full path:
+
 ```bash
 # Install from source
 pip install -e ".[all]"
