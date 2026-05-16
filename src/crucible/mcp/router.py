@@ -138,35 +138,34 @@ def _find_active_session(config: ProjectConfig) -> dict[str, Any] | None:
     Checks autonomous (research), tree, and harness session dirs for a
     non-terminal yaml. Returns the most-recently-updated active one.
     """
-    candidates: list[tuple[str, Any]] = []
+    candidates: list[tuple[str, tuple[str, str, dict[str, Any]]]] = []
+    # _find_active_yamls returns 3-tuples (updated_at, session_id, data),
+    # not (session_id, updated_at, data). Unpacking inversion was caught
+    # by Phase 2.1 review.
     try:
         from crucible.researcher.autonomous_session import AutonomousSession
-        active = AutonomousSession._find_active_yamls(config)
-        for sid, _, data in active:
-            candidates.append(("autonomous", (sid, data)))
+        for updated_at, sid, data in AutonomousSession._find_active_yamls(config):
+            candidates.append(("autonomous", (updated_at, sid, data)))
     except Exception as exc:
         log_warn(f"tool_router: autonomous session scan failed: {exc}")
     try:
         from crucible.researcher.tree_autonomous_session import TreeAutonomousSession
-        active = TreeAutonomousSession._find_active_yamls(config)
-        for sid, _, data in active:
-            candidates.append(("tree", (sid, data)))
+        for updated_at, sid, data in TreeAutonomousSession._find_active_yamls(config):
+            candidates.append(("tree", (updated_at, sid, data)))
     except Exception as exc:
         log_warn(f"tool_router: tree session scan failed: {exc}")
     try:
         from crucible.researcher.harness_autonomous_session import HarnessAutonomousSession
-        active = HarnessAutonomousSession._find_active_yamls(config)
-        for sid, _, data in active:
-            candidates.append(("harness", (sid, data)))
+        for updated_at, sid, data in HarnessAutonomousSession._find_active_yamls(config):
+            candidates.append(("harness", (updated_at, sid, data)))
     except Exception as exc:
         log_warn(f"tool_router: harness session scan failed: {exc}")
 
     if not candidates:
         return None
-    # _find_active_yamls returns descending by updated_at; first across all
-    # is the most recent.
-    candidates.sort(key=lambda c: c[1][1].get("updated_at", ""), reverse=True)
-    kind, (sid, data) = candidates[0]
+    # Sort by updated_at descending across all session types.
+    candidates.sort(key=lambda c: c[1][0], reverse=True)
+    kind, (_updated_at, sid, data) = candidates[0]
     return {
         "kind": kind,
         "session_id": sid,
@@ -195,22 +194,32 @@ def _node_state_summary(nodes: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _queue_state_summary(queue: list[dict[str, Any]]) -> dict[str, int]:
+    """Count queue rows by lease_state.
+
+    fleet/queue.py writes ``lease_state`` (not ``status``) on each row;
+    canonical values are ``queued``, ``running``, ``completed``,
+    ``finished``, ``retryable``, ``failed`` (see queue.py:141-149).
+    """
     summary = {"total": len(queue), "queued": 0, "running": 0,
                "finished": 0, "failed": 0}
     for row in queue:
-        status = (row.get("status") or "queued").lower()
-        if status == "queued":
+        lease = (row.get("lease_state") or "queued").lower()
+        if lease == "queued":
             summary["queued"] += 1
-        elif status == "running":
+        elif lease == "running":
             summary["running"] += 1
-        elif status in {"completed", "finished", "success"}:
+        elif lease in {"completed", "finished"}:
             summary["finished"] += 1
-        elif status in {"failed", "error", "canceled"}:
+        elif lease in {"failed", "error", "canceled", "retryable"}:
             summary["failed"] += 1
     return summary
 
 
-def recommend_next_action(config: ProjectConfig) -> dict[str, Any]:
+def recommend_next_action(
+    config: ProjectConfig,
+    *,
+    check_orphans: bool = False,
+) -> dict[str, Any]:
     """Inspect project state and return a recommended next MCP tool.
 
     Return shape:
@@ -247,17 +256,20 @@ def recommend_next_action(config: ProjectConfig) -> dict[str, Any]:
     rs = _load_research_state(config)
     active = _find_active_session(config)
 
-    # Cheap orphan probe — best-effort; many setups don't have a provider
-    # client wired up. Only flag if we can ask without exploding.
+    # Orphan probe is opt-in: cleanup_orphans(destroy=False) issues a live
+    # RunPod GraphQL request, so calling it on every router invocation is
+    # expensive. Callers that care about orphans pass check_orphans=True
+    # or run cleanup_orphans directly.
     orphans_present = False
-    try:
-        from crucible.fleet.manager import FleetManager
-        fm = FleetManager(config)
-        info = fm.cleanup_orphans(destroy=False, include_legacy=False)
-        orphans_present = bool(info.get("tagged_orphans"))
-    except Exception:
-        # Provider not configured / not implemented — silent.
-        pass
+    if check_orphans:
+        try:
+            from crucible.fleet.manager import FleetManager
+            fm = FleetManager(config)
+            info = fm.cleanup_orphans(destroy=False, include_legacy=False)
+            orphans_present = bool(info.get("tagged_orphans"))
+        except Exception:
+            # Provider not configured / not implemented — silent.
+            pass
 
     nodes_sum = _node_state_summary(nodes)
     queue_sum = _queue_state_summary(queue)

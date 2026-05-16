@@ -2321,9 +2321,10 @@ def get_research_briefing(args: dict[str, Any]) -> dict[str, Any]:
 def tool_router(args: dict[str, Any]) -> dict[str, Any]:
     """Recommend the next MCP tool to call given current project state."""
     config = _get_config()
+    check_orphans = bool(args.get("check_orphans", False))
     try:
         from crucible.mcp.router import recommend_next_action
-        return recommend_next_action(config)
+        return recommend_next_action(config, check_orphans=check_orphans)
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 

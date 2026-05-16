@@ -110,7 +110,10 @@ class TestWorkChain:
         _patch(
             monkeypatch,
             _load_nodes=[self._ready_node()],
-            _load_queue=[{"status": "queued"}, {"status": "queued"}],
+            _load_queue=[
+                {"lease_state": "queued"},
+                {"lease_state": "queued"},
+            ],
             _load_completed_count=0,
             _load_research_state={"available": True, "hypotheses": [],
                                   "pending_count": 0, "history_count": 0,
@@ -125,7 +128,7 @@ class TestWorkChain:
         _patch(
             monkeypatch,
             _load_nodes=[self._ready_node()],
-            _load_queue=[{"status": "running"}],
+            _load_queue=[{"lease_state": "running"}],
             _load_completed_count=0,
             _load_research_state={"available": True, "hypotheses": [],
                                   "pending_count": 0, "history_count": 0,
@@ -136,13 +139,17 @@ class TestWorkChain:
         assert "running" in out["rationale"].lower()
 
     def test_finished_uncollected_recommends_collect(self, monkeypatch, fake_config):
-        # Queue says 3 finished, leaderboard says 1 completed → diff means
-        # 2 finished runs haven't been pulled to local results yet.
+        # Queue rows use ``lease_state`` (not ``status``) — Phase 2.1
+        # review fix. 3 finished in queue, 1 in local results → collect
+        # the other 2.
         _patch(
             monkeypatch,
             _load_nodes=[self._ready_node()],
-            _load_queue=[{"status": "finished"}, {"status": "finished"},
-                         {"status": "completed"}],
+            _load_queue=[
+                {"lease_state": "finished"},
+                {"lease_state": "finished"},
+                {"lease_state": "completed"},
+            ],
             _load_completed_count=1,
             _load_research_state={"available": True, "hypotheses": [],
                                   "pending_count": 0, "history_count": 0,
@@ -150,6 +157,31 @@ class TestWorkChain:
         )
         out = router.recommend_next_action(fake_config)
         assert out["recommended_tool"] == "collect_results"
+        assert out["state"]["queue"]["finished"] == 3
+
+    def test_partial_fleet_with_ready_pods_dispatches(self, monkeypatch, fake_config):
+        """Phase 2.1 review fix: mixed-state fleet (some ready, some
+        unbootstrapped) should still dispatch to the ready pods, not
+        regress to the bootstrap recommendation."""
+        _patch(
+            monkeypatch,
+            _load_nodes=[
+                self._ready_node(),
+                self._ready_node(),
+                {"name": "n3", "state": "running",
+                 "ssh_host": "5.6.7.8", "env_ready": False,
+                 "dataset_ready": False},
+            ],
+            _load_queue=[{"lease_state": "queued"}],
+            _load_completed_count=0,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 1.0},
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["recommended_tool"] == "dispatch_experiments"
+        assert out["state"]["nodes"]["ready"] == 2
+        assert out["state"]["nodes"]["unbootstrapped"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -333,3 +365,116 @@ class TestResponseShape:
         handler = TOOL_DISPATCH["tool_router"]
         out = handler({})
         assert out["recommended_tool"] == "provision_nodes"
+
+
+# ---------------------------------------------------------------------------
+# Orphan-probe opt-in (Phase 2.1 review fix)
+# ---------------------------------------------------------------------------
+
+
+class TestOrphanProbe:
+    def test_orphan_probe_skipped_by_default(self, monkeypatch, fake_config):
+        """check_orphans defaults to False so the live RunPod GraphQL
+        round-trip in cleanup_orphans never fires unless caller asks."""
+        called = {"n": 0}
+
+        def boom(*args, **kwargs):
+            called["n"] += 1
+            raise AssertionError("FleetManager should not be touched by default")
+
+        monkeypatch.setattr("crucible.fleet.manager.FleetManager", boom)
+        _patch(
+            monkeypatch,
+            _load_nodes=[],
+            _load_queue=[],
+            _load_completed_count=0,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 0.0},
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["state"]["orphans_present"] is False
+        assert called["n"] == 0
+
+    def test_orphan_probe_runs_when_opted_in(self, monkeypatch, fake_config):
+        class _StubFM:
+            def __init__(self, _config):
+                pass
+            def cleanup_orphans(self, *, destroy, include_legacy):
+                return {"tagged_orphans": [{"pod_id": "abc"}]}
+
+        monkeypatch.setattr("crucible.fleet.manager.FleetManager", _StubFM)
+        _patch(
+            monkeypatch,
+            _load_nodes=[{"name": "n1", "state": "running",
+                          "ssh_host": "1.2.3.4", "env_ready": True,
+                          "dataset_ready": True}],
+            _load_queue=[],
+            _load_completed_count=0,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 1.0},
+        )
+        out = router.recommend_next_action(fake_config, check_orphans=True)
+        assert out["state"]["orphans_present"] is True
+        assert out["recommended_tool"] == "cleanup_orphans"
+
+
+# ---------------------------------------------------------------------------
+# Session-id unpacking correctness (Phase 2.1 review fix)
+# ---------------------------------------------------------------------------
+
+
+class TestFindActiveSessionUnpack:
+    def test_session_id_in_response_is_actual_id_not_timestamp(
+        self, monkeypatch, fake_config, tmp_path
+    ):
+        """Regression: _find_active_yamls returns (updated_at, session_id,
+        data); the previous unpack swapped the first two so the
+        response surfaced the timestamp as session_id."""
+        # Build a real session yaml on disk so _find_active_session
+        # exercises the actual 3-tuple unpacking path.
+        sessions_dir = tmp_path / ".crucible" / "autonomous_sessions"
+        sessions_dir.mkdir(parents=True)
+        import yaml as _yaml
+        sid = "abcd1234-real-session-id"
+        (sessions_dir / f"{sid}.yaml").write_text(
+            _yaml.safe_dump({
+                "session_id": sid,
+                "schema_version": 1,
+                "stage": "hypothesis",
+                "status": "running",
+                "tree_name": None,
+                "iterations_planned": 3,
+                "iterations_completed": 0,
+                "current_iteration": 0,
+                "started_at": "2026-05-15T00:00:00Z",
+                "updated_at": "2026-05-15T01:00:00Z",
+                "tier": "proxy",
+                "focus_family": None,
+                "project_name": "demo",
+                "budget_usd": None,
+                "budget_spent_usd": 0.0,
+                "with_literature": False,
+                "literature_k": 5,
+                "last_state_snapshot": None,
+                "recent_fingerprints": [],
+            }),
+            encoding="utf-8",
+        )
+        # Patch only the data loaders, NOT _find_active_session, so the
+        # real session-scan path runs against the yaml we just wrote.
+        monkeypatch.setattr(router, "_load_nodes", lambda *a, **k: [])
+        monkeypatch.setattr(router, "_load_queue", lambda *a, **k: [])
+        monkeypatch.setattr(router, "_load_completed_count", lambda *a, **k: 0)
+        monkeypatch.setattr(
+            router, "_load_research_state",
+            lambda *a, **k: {"available": True, "hypotheses": [],
+                             "pending_count": 0, "history_count": 0,
+                             "budget_remaining": 1.0},
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["recommended_tool"] == "autonomous_research_loop"
+        # The crucial assertion: session_id is the real one, not a timestamp.
+        assert out["state"]["active_session"]["session_id"] == sid
+        assert sid in out["rationale"]

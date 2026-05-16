@@ -1371,12 +1371,22 @@ TOOLS: list[Tool] = [
             "Use this when you're an orchestrator and don't know which of the 200+ tools to call next.\n\n"
             "REQUIRES: Nothing.\n"
             "RETURNS: {recommended_tool, rationale, alternatives: [{tool, rationale}], "
-            "state: {nodes, queue, completed_experiments, hypotheses_pending, active_session, orphans_present}}\n"
+            "state: {nodes, queue, completed_experiments, hypotheses_pending, hypotheses_total, "
+            "history_count, active_session, orphans_present}}\n"
             "NEXT: Call the recommended_tool (or one of the alternatives if context says otherwise)."
         ),
         inputSchema={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "check_orphans": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, probe the provider for orphan pods tagged to this project. "
+                        "Costs one provider API round-trip; default false."
+                    ),
+                    "default": False,
+                },
+            },
             "additionalProperties": False,
         },
     ),
