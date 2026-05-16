@@ -3625,6 +3625,10 @@ def _tree_auto_expand_submit(args: dict[str, Any]) -> dict[str, Any]:
     between request_prompt and submit (peer expansion, new result, status
     flip), raises :class:`StaleSubmitError` rather than applying the
     response against an out-of-date tree.
+
+    The snapshot check + expand sequence is held under ``tree.write_lock``
+    so concurrent submits cannot both pass the guard and then clobber each
+    other via the unlocked load-mutate-save in the legacy path.
     """
     from crucible.researcher.search_tree import SearchTree
 
@@ -3634,43 +3638,46 @@ def _tree_auto_expand_submit(args: dict[str, Any]) -> dict[str, Any]:
     tree = SearchTree.load(tree_dir)
 
     node_id = args["node_id"]
-    node = tree.get_node(node_id)
-    if node is None:
-        return {"error": f"Node '{node_id}' not found"}
-
-    submitted_snapshot = args.get("tree_snapshot")
-    if submitted_snapshot is not None:
-        current = tree.snapshot(node_id=node_id)
-        if current != submitted_snapshot:
-            raise StaleSubmitError(
-                f"Tree has advanced since tree_auto_expand request_prompt was issued. "
-                f"submitted_snapshot={submitted_snapshot} current_snapshot={current}. "
-                f"Re-request the prompt with the latest tree and retry."
-            )
-
     response = args.get("response")
     if response is None:
         raise CrucibleError("tree_auto_expand submit: 'response' is required")
-    children_specs = _tree_auto_expand_parse_response(response)
-    for spec in children_specs:
-        spec["generation_method"] = "llm_auto_expand"
+    submitted_snapshot = args.get("tree_snapshot")
 
-    new_ids = tree.expand_node(node_id, children_specs)
-    return {
-        "action": "submit",
-        "status": "auto_expanded",
-        "node_id": node_id,
-        "new_node_ids": new_ids,
-        "children": [
-            {
-                "node_id": nid,
-                "name": tree.get_node(nid)["experiment_name"],
-                "hypothesis": tree.get_node(nid).get("hypothesis", ""),
-            }
-            for nid in new_ids
-        ],
-        "total_nodes": tree.meta["total_nodes"],
-    }
+    with tree.write_lock():
+        # write_lock reloaded from disk; re-check existence under the lock.
+        node = tree.get_node(node_id)
+        if node is None:
+            return {"error": f"Node '{node_id}' not found"}
+
+        if submitted_snapshot is not None:
+            current = tree.snapshot(node_id=node_id)
+            if current != submitted_snapshot:
+                raise StaleSubmitError(
+                    f"Tree has advanced since tree_auto_expand request_prompt was issued. "
+                    f"submitted_snapshot={submitted_snapshot} current_snapshot={current}. "
+                    f"Re-request the prompt with the latest tree and retry."
+                )
+
+        children_specs = _tree_auto_expand_parse_response(response)
+        for spec in children_specs:
+            spec["generation_method"] = "llm_auto_expand"
+
+        new_ids = tree.expand_node(node_id, children_specs)
+        return {
+            "action": "submit",
+            "status": "auto_expanded",
+            "node_id": node_id,
+            "new_node_ids": new_ids,
+            "children": [
+                {
+                    "node_id": nid,
+                    "name": tree.get_node(nid)["experiment_name"],
+                    "hypothesis": tree.get_node(nid).get("hypothesis", ""),
+                }
+                for nid in new_ids
+            ],
+            "total_nodes": tree.meta["total_nodes"],
+        }
 
 
 def _tree_auto_expand_legacy(args: dict[str, Any]) -> dict[str, Any]:

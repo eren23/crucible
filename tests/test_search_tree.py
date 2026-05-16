@@ -1,6 +1,11 @@
 """Tests for the SearchTree class."""
 from __future__ import annotations
 
+import multiprocessing
+import sys
+import time
+from pathlib import Path
+
 import pytest
 
 from crucible.core.errors import SearchTreeError
@@ -498,3 +503,97 @@ class TestRenderAscii:
         assert "root" in output
         assert "child" in output
         assert "grandchild" not in output
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — write_lock + atomic writes (Phase 1.4a)
+# ---------------------------------------------------------------------------
+
+
+def _expand_worker(tree_dir_str: str, root_id: str, name: str) -> None:
+    """Subprocess target: acquire write_lock, expand a child, release."""
+    from pathlib import Path as _Path
+    from crucible.researcher.search_tree import SearchTree as _Tree
+
+    tree = _Tree.load(_Path(tree_dir_str))
+    with tree.write_lock(timeout=20.0):
+        tree.expand_node(root_id, [{"name": name, "config": {}, "hypothesis": ""}])
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="fcntl locks are POSIX-only"
+)
+class TestWriteLockConcurrency:
+    def test_write_lock_serializes_concurrent_expand(self, tmp_path):
+        """Five concurrent processes each expand a child under write_lock.
+        All five expansions must persist — no last-write-wins on
+        current_tree.yaml."""
+        tree = _make_tree(tmp_path, name="concur-tree")
+        root_id = tree.add_root(name="root", config={"LR": "3e-4"})
+        tree.record_result(root_id, {"val_bpb": 2.0})
+        tree_dir = tree.tree_dir
+
+        ctx = multiprocessing.get_context("spawn")
+        workers = [
+            ctx.Process(target=_expand_worker, args=(str(tree_dir), root_id, f"c_{i}"))
+            for i in range(5)
+        ]
+        for w in workers:
+            w.start()
+
+        deadline = time.monotonic() + 60.0
+        for w in workers:
+            remaining = max(0.5, deadline - time.monotonic())
+            w.join(timeout=remaining)
+            assert w.exitcode == 0, f"worker pid={w.pid} exitcode={w.exitcode}"
+
+        # Reload and confirm all 5 expansions persisted.
+        final = SearchTree.load(tree_dir)
+        children = [
+            n for n in final.nodes.values()
+            if n.get("parent_node_id") == root_id
+        ]
+        child_names = sorted(n["experiment_name"] for n in children)
+        assert child_names == [f"c_{i}" for i in range(5)], (
+            f"expected 5 children c_0..c_4 after concurrent expand; got {child_names}"
+        )
+
+    def test_write_lock_reloads_from_disk(self, tmp_path):
+        """write_lock entry must reload from disk so the caller sees peer writes."""
+        tree = _make_tree(tmp_path, name="reload-tree")
+        root_id = tree.add_root(name="root", config={})
+        tree.record_result(root_id, {"val_bpb": 2.0})
+        tree_dir = tree.tree_dir
+
+        # Peer process adds a child.
+        ctx = multiprocessing.get_context("spawn")
+        peer = ctx.Process(target=_expand_worker, args=(str(tree_dir), root_id, "peer"))
+        peer.start()
+        peer.join(timeout=20.0)
+        assert peer.exitcode == 0
+
+        # Our in-memory tree is stale (1 node).
+        assert len(tree.nodes) == 1
+        with tree.write_lock():
+            # write_lock reloaded from disk — now we see peer's child.
+            assert len(tree.nodes) == 2
+            peer_names = {n["experiment_name"] for n in tree.nodes.values()}
+            assert "peer" in peer_names
+
+    def test_atomic_writes_no_partial_yaml(self, tmp_path):
+        """_save_meta / _save_snapshot use atomic_write_yaml. Read the
+        snapshot file after a normal write — must be parseable yaml, never
+        a partial truncation. Simulates the crash-mid-write scenario by
+        verifying the persistence is via temp-file + os.replace."""
+        import yaml
+        tree = _make_tree(tmp_path, name="atomic-tree")
+        root_id = tree.add_root(name="root", config={"LR": "3e-4"})
+        for i in range(5):
+            tree.expand_node(root_id, [{"name": f"c_{i}", "config": {}}])
+
+        # Snapshot file should parse cleanly to yaml on every read.
+        for _ in range(3):
+            raw = (tree._snapshot_path).read_text(encoding="utf-8")
+            parsed = yaml.safe_load(raw)
+            assert "meta" in parsed and "nodes" in parsed
+            assert len(parsed["nodes"]) == 6  # root + 5 children

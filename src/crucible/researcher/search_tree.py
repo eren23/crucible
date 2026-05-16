@@ -11,20 +11,39 @@ Storage layout under tree_dir (.crucible/search_trees/{name}/):
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
+import os
 import random
 import re
+import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
 from crucible.core.errors import SearchTreeError
-from crucible.core.io import append_jsonl, read_jsonl, read_yaml
+from crucible.core.io import append_jsonl, atomic_write_yaml, read_jsonl, read_yaml
 from crucible.core.log import log_warn, utc_now_iso
+
+_DEFAULT_TREE_LOCK_TIMEOUT = 30.0
+_TREE_LOCK_FILENAME = ".lock"
+_WINDOWS_FALLBACK_WARNED = False
+
+
+def _warn_tree_windows_fallback_once() -> None:
+    global _WINDOWS_FALLBACK_WARNED
+    if _WINDOWS_FALLBACK_WARNED:
+        return
+    _WINDOWS_FALLBACK_WARNED = True
+    log_warn(
+        "SearchTree.write_lock: fcntl unavailable on this platform; "
+        "concurrent tree mutations may lose updates in current_tree.yaml."
+    )
 
 
 class SearchTree:
@@ -974,23 +993,107 @@ class SearchTree:
     # ------------------------------------------------------------------
 
     def _save_meta(self) -> None:
-        """Write tree metadata to tree.yaml."""
+        """Write tree metadata to tree.yaml atomically."""
         self.tree_dir.mkdir(parents=True, exist_ok=True)
-        text = yaml.dump(
-            self.meta, default_flow_style=False, sort_keys=False, allow_unicode=True
-        )
-        self._meta_path.write_text(text, encoding="utf-8")
+        atomic_write_yaml(self._meta_path, self.meta, sort_keys=False)
 
     def _save_snapshot(self) -> None:
-        """Write a full snapshot of all nodes to current_tree.yaml."""
+        """Write a full snapshot of all nodes to current_tree.yaml atomically."""
         snapshot = {
             "meta": self.meta,
             "nodes": {nid: dict(n) for nid, n in self.nodes.items()},
         }
-        text = yaml.dump(
-            snapshot, default_flow_style=False, sort_keys=False, allow_unicode=True
-        )
-        self._snapshot_path.write_text(text, encoding="utf-8")
+        atomic_write_yaml(self._snapshot_path, snapshot, sort_keys=False)
+
+    # ------------------------------------------------------------------
+    # Concurrency safety
+    # ------------------------------------------------------------------
+
+    @property
+    def lock_path(self) -> Path:
+        return self.tree_dir / _TREE_LOCK_FILENAME
+
+    @contextmanager
+    def write_lock(
+        self,
+        *,
+        timeout: float = _DEFAULT_TREE_LOCK_TIMEOUT,
+        poll_interval: float = 0.1,
+    ) -> Iterator["SearchTree"]:
+        """Acquire an exclusive advisory lock + reload from disk.
+
+        Use for any read-modify-write sequence on the tree (snapshot check
+        then mutate, multi-step expansion, sync results loop, etc.):
+
+        .. code-block:: python
+
+            with tree.write_lock():
+                if tree.snapshot() != submitted_snap:
+                    raise StaleSubmitError(...)
+                tree.expand_node(...)
+
+        On entry, the lock is acquired and the tree is reloaded from disk
+        so the caller sees the latest peer writes before mutating. Mutating
+        methods (``expand_node``, ``record_result``, ``prune_node``, etc.)
+        write through ``_save_meta`` / ``_save_snapshot`` which now use
+        atomic-replace via :func:`atomic_write_yaml` — so partial writes
+        from a crash cannot poison the on-disk state.
+
+        POSIX-only. On Windows, falls back to a no-op with a one-time
+        warning; concurrency safety is lost.
+
+        Do not nest — ``fcntl.flock`` on a fresh fd from the same process
+        is platform-dependent and may deadlock until ``timeout``.
+        """
+        try:
+            import fcntl
+        except ImportError:
+            _warn_tree_windows_fallback_once()
+            self._reload_from_disk()
+            yield self
+            return
+
+        self.tree_dir.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + timeout
+        fd = os.open(str(self.lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError as exc:
+                    if exc.errno not in (errno.EWOULDBLOCK, errno.EAGAIN):
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise SearchTreeError(
+                            f"Could not acquire SearchTree lock at {self.lock_path} "
+                            f"within {timeout:.1f}s — another Crucible process may be "
+                            f"holding it."
+                        ) from exc
+                    time.sleep(poll_interval)
+            self._reload_from_disk()
+            try:
+                yield self
+            finally:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+        finally:
+            os.close(fd)
+
+    def _reload_from_disk(self) -> None:
+        """Drop in-memory state and reload from disk under the lock.
+
+        Mirrors ``ResearchState._reload_in_place``. Public mutating methods
+        already persist on every call (via ``_save_meta`` + ``_save_snapshot``),
+        so reloading here just picks up writes from any peer that held the
+        lock before us.
+        """
+        self.meta = {}
+        self.nodes = {}
+        self._load_meta()
+        self._load_nodes()
 
     def _append_node_event(self, event_type: str, node: dict[str, Any]) -> None:
         """Append an event to the JSONL ledger."""
