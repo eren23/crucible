@@ -1603,6 +1603,305 @@ def research_hf_search(args: dict[str, Any]) -> dict[str, Any]:
     return {"kind": kind, "query": query, "count": len(results), "results": results}
 
 
+def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search arXiv via the public Atom-feed API (no auth)."""
+    from crucible.researcher.arxiv_search import search_arxiv
+
+    query = args.get("query", "")
+    limit = int(args.get("limit", 10))
+    sort_by = args.get("sort_by", "relevance")
+    sort_order = args.get("sort_order", "descending")
+    categories = args.get("categories")
+    multi_angle = bool(args.get("multi_angle", False))
+    results = search_arxiv(
+        query,
+        limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        categories=categories,
+        multi_angle=multi_angle,
+    )
+    return {"query": query, "count": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
+# HPO bridge (Phase 3.4) — persisted Optuna studies via MCP
+# ---------------------------------------------------------------------------
+
+
+def _hpo_studies_dir() -> Path:
+    config = _get_config()
+    return Path(config.project_root) / ".crucible" / "hpo_studies"
+
+
+# In-process cache so successive MCP calls share the same Optuna sampler
+# state. Keyed by (project_root, study_name). Lost on process restart;
+# operators wanting cross-process persistence should use Optuna's RDB
+# storage directly (out of MVP scope).
+_HPO_STUDY_CACHE: dict[tuple[str, str], Any] = {}
+
+
+def _hpo_cache_key(name: str) -> tuple[str, str]:
+    return (str(_hpo_studies_dir().parent.parent), name)
+
+
+def hpo_create_study(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new HPO study (Optuna-backed).
+
+    REQUIRES: name, params (dict of env_var → distribution spec).
+    RETURNS: {name, direction, sampler, persisted_path}
+    NEXT: hpo_ask_trial.
+
+    Idempotency: calling with a name that already has a persisted
+    study or in-process cache entry returns an error unless
+    ``force=True``. Without the guard, a careless second call would
+    silently discard the running study + overwrite the JSON.
+    """
+    try:
+        from crucible.training.hpo_bridge import HPOStudy
+
+        name = args["name"]
+        cache_key = _hpo_cache_key(name)
+        persisted = _hpo_studies_dir() / f"{name}.json"
+        if not args.get("force"):
+            if cache_key in _HPO_STUDY_CACHE or persisted.exists():
+                return {
+                    "error": (
+                        f"[CrucibleError] HPO study {name!r} already exists. "
+                        f"Pass force=true to overwrite + restart the sampler, "
+                        f"or use hpo_status to inspect / hpo_ask_trial to continue."
+                    ),
+                    "name": name,
+                    "already_exists": True,
+                }
+        study = HPOStudy(
+            name=name,
+            params=args["params"],
+            direction=args.get("direction", "minimize"),
+            sampler=args.get("sampler", "tpe"),
+            seed=args.get("seed"),
+            storage_dir=_hpo_studies_dir(),
+        )
+        # Force an initial persist so subsequent ask/tell can find the
+        # study on disk (HPOStudy._persist normally only fires after a
+        # trial is asked/told).
+        study._persist()
+        # Cache in-process so successive ask/tell share the same
+        # Optuna sampler state.
+        _HPO_STUDY_CACHE[cache_key] = study
+        return {
+            "name": study.name,
+            "direction": study.direction,
+            "sampler": args.get("sampler", "tpe"),
+            "persisted_path": str(persisted),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_ask_trial(args: dict[str, Any]) -> dict[str, Any]:
+    """Sample the next trial from a study.
+
+    REQUIRES: name (study previously created via hpo_create_study).
+    RETURNS: {trial_id, params: {ENV_VAR: stringified_value, ...}}
+    NEXT: enqueue the trial as a Crucible experiment, then hpo_tell_result.
+    """
+    try:
+        study = _hpo_load_or_create(args)
+        out = study.ask()
+        return out
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_tell_result(args: dict[str, Any]) -> dict[str, Any]:
+    """Report a trial outcome back to the study.
+
+    REQUIRES: name, trial_id, score.
+    RETURNS: {ok: True, best: {trial_id, score, params} | None}
+    NEXT: hpo_ask_trial for the next iteration.
+
+    Coerces trial_id/score to int/float and catches the resulting
+    TypeError/ValueError as a typed CrucibleError so a missing or
+    non-numeric arg surfaces as a clean tool error rather than a
+    KeyError / TypeError leaking out of the dispatcher.
+    """
+    try:
+        if "trial_id" not in args:
+            raise CrucibleError("hpo_tell_result: missing required arg 'trial_id'.")
+        if "score" not in args:
+            raise CrucibleError("hpo_tell_result: missing required arg 'score'.")
+        try:
+            trial_id = int(args["trial_id"])
+        except (TypeError, ValueError) as exc:
+            raise CrucibleError(
+                f"hpo_tell_result: 'trial_id' must be an int, got "
+                f"{args['trial_id']!r}: {exc}"
+            ) from exc
+        try:
+            score = float(args["score"])
+        except (TypeError, ValueError) as exc:
+            raise CrucibleError(
+                f"hpo_tell_result: 'score' must be a number, got "
+                f"{args['score']!r}: {exc}"
+            ) from exc
+
+        study = _hpo_load_or_create(args)
+        study.tell(trial_id, score, status=args.get("status", "complete"))
+        return {"ok": True, "best": study.best(), "name": study.name}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hpo_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Show a study's history + running best."""
+    try:
+        study = _hpo_load_or_create(args)
+        return {
+            "name": study.name,
+            "direction": study.direction,
+            "best": study.best(),
+            "trial_count": len(study.history()),
+            "history": study.history(),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _hpo_load_or_create(args: dict[str, Any]):
+    """Helper: build an HPOStudy from cache, persisted spec, or fresh args.
+
+    Resolution order:
+    1. In-process cache (same MCP server lifetime) — fast path, full
+       sampler state preserved.
+    2. Disk persistence (cross-process) — params + trial history
+       reload; sampler restarts.
+    3. Fresh from args['params'] — first-time creation.
+    """
+    from crucible.training.hpo_bridge import HPOStudy
+
+    name = args["name"]
+    cache_key = _hpo_cache_key(name)
+    cached = _HPO_STUDY_CACHE.get(cache_key)
+    if cached is not None and "params" not in args:
+        return cached
+
+    storage_dir = _hpo_studies_dir()
+    persisted = storage_dir / f"{name}.json"
+
+    if "params" in args:
+        # Caller supplied a fresh spec — use it.
+        study = HPOStudy(
+            name=name,
+            params=args["params"],
+            direction=args.get("direction", "minimize"),
+            sampler=args.get("sampler", "tpe"),
+            seed=args.get("seed"),
+            storage_dir=storage_dir,
+        )
+        _HPO_STUDY_CACHE[cache_key] = study
+        return study
+
+    if not persisted.exists():
+        raise CrucibleError(
+            f"No persisted HPO study {name!r}. Call hpo_create_study first "
+            f"or pass 'params' to recreate."
+        )
+
+    # Use HPOStudy.load which replays trials through Optuna's API so
+    # the sampler's internal trial counter + posterior are current.
+    # Previously this path only repopulated _trial_records, leaving
+    # Optuna's study at trial 0 — subsequent tell() rejected the
+    # legitimate persisted trial_ids as "unknown".
+    study = HPOStudy.load(
+        name=name,
+        storage_dir=storage_dir,
+        sampler=args.get("sampler", "tpe"),
+        seed=args.get("seed"),
+    )
+    _HPO_STUDY_CACHE[cache_key] = study
+    return study
+
+
+def external_mcp_list_servers(args: dict[str, Any]) -> dict[str, Any]:
+    """List external MCP servers configured under external_mcp.servers."""
+    try:
+        from crucible.researcher.external_mcp import list_servers
+        return list_servers(_get_config())
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def external_mcp_list_tools(args: dict[str, Any]) -> dict[str, Any]:
+    """Spawn an external server and enumerate its tools."""
+    try:
+        from crucible.researcher.external_mcp import list_remote_tools
+        return list_remote_tools(_get_config(), args["server"])
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def external_mcp_call(args: dict[str, Any]) -> dict[str, Any]:
+    """Invoke a tool on an external MCP server with JSON args."""
+    try:
+        from crucible.researcher.external_mcp import call_remote_tool
+        return call_remote_tool(
+            _get_config(),
+            args["server"],
+            args["tool"],
+            dict(args.get("args") or {}),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List registered evaluator plugins.
+
+    Triggers plugin discovery (local + global) before listing so user
+    plugins under ``.crucible/plugins/evaluators/`` are picked up
+    without explicit registration.
+    """
+    from crucible.core.evaluators import (
+        describe_evaluator,
+        discover_evaluator_plugins,
+        list_evaluators,
+    )
+    try:
+        config = _get_config()
+        discover_evaluator_plugins(project_root=config.project_root)
+    except CrucibleError:
+        # Project not loaded yet — fall back to builtins + already-registered.
+        pass
+    names = list_evaluators()
+    return {
+        "count": len(names),
+        "evaluators": [
+            (describe_evaluator(name) or {"name": name}) for name in names
+        ],
+    }
+
+
+def research_openreview_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search OpenReview via the public /notes/search API."""
+    from crucible.researcher.openreview_search import search_openreview
+
+    query = args.get("query", "")
+    limit = int(args.get("limit", 10))
+    venue = args.get("venue") or None
+    year = args.get("year")
+    if year is not None:
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            year = None
+    multi_angle = bool(args.get("multi_angle", False))
+    results = search_openreview(
+        query, limit=limit, venue=venue, year=year, multi_angle=multi_angle,
+    )
+    return {"query": query, "count": len(results), "results": results}
+
+
 # ---------------------------------------------------------------------------
 # GitHub search
 # ---------------------------------------------------------------------------
@@ -6808,6 +7107,16 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "plan_update_item": plan_update_item,
     # HF ecosystem search
     "research_hf_search": research_hf_search,
+    "research_arxiv_search": research_arxiv_search,
+    "research_openreview_search": research_openreview_search,
+    "evaluator_list": evaluator_list,
+    "hpo_create_study": hpo_create_study,
+    "hpo_ask_trial": hpo_ask_trial,
+    "hpo_tell_result": hpo_tell_result,
+    "hpo_status": hpo_status,
+    "external_mcp_list_servers": external_mcp_list_servers,
+    "external_mcp_list_tools": external_mcp_list_tools,
+    "external_mcp_call": external_mcp_call,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,

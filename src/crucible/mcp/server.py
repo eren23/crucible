@@ -3367,6 +3367,306 @@ TOOLS: list[Tool] = [
         },
     ),
     # ------------------------------------------------------------------
+    # HPO bridge (Phase 3.4 — Optuna)
+    # ------------------------------------------------------------------
+    Tool(
+        name="hpo_create_study",
+        description=(
+            "Create an Optuna-backed HPO study (Phase 3.4). Defines the "
+            "search space + sampler; doesn't sample yet. Optuna is an "
+            "optional dependency — if absent the call raises a clear "
+            "install hint.\n\n"
+            "REQUIRES: name, params (dict of env_var → {type, low?, high?, choices?}).\n"
+            "RETURNS: {name, direction, sampler, persisted_path}\n"
+            "NEXT: hpo_ask_trial."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Study identifier."},
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "Map env_var → spec. Each spec: {type: float|log_float|"
+                        "int|categorical, low/high for numeric, choices for categorical}."
+                    ),
+                    "additionalProperties": {"type": "object"},
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["minimize", "maximize"],
+                    "default": "minimize",
+                },
+                "sampler": {
+                    "type": "string",
+                    "enum": ["tpe", "random", "cmaes", "botorch"],
+                    "default": "tpe",
+                },
+                "seed": {"type": "integer"},
+            },
+            "required": ["name", "params"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_ask_trial",
+        description=(
+            "Sample the next trial from an HPO study. Returns env_var "
+            "overrides ready to enqueue as a Crucible experiment.\n\n"
+            "REQUIRES: name (study previously created).\n"
+            "RETURNS: {trial_id, params: {ENV_VAR: stringified_value, ...}}\n"
+            "NEXT: enqueue_experiment or design_enqueue_batch, then "
+            "hpo_tell_result once the score is known."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "Optional — re-spec the study on the fly. Usually omitted; "
+                        "the persisted spec is reused."
+                    ),
+                    "additionalProperties": {"type": "object"},
+                },
+                "sampler": {
+                    "type": "string",
+                    "enum": ["tpe", "random", "cmaes", "botorch"],
+                },
+                "seed": {"type": "integer"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_tell_result",
+        description=(
+            "Report a trial outcome to an HPO study.\n\n"
+            "REQUIRES: name, trial_id, score.\n"
+            "RETURNS: {ok, best: {trial_id, score, params}, name}\n"
+            "NEXT: hpo_ask_trial for the next iteration."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "trial_id": {"type": "integer"},
+                "score": {"type": "number"},
+                "status": {
+                    "type": "string",
+                    "enum": ["complete", "failed", "pruned"],
+                    "default": "complete",
+                },
+            },
+            "required": ["name", "trial_id", "score"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="hpo_status",
+        description=(
+            "Inspect an HPO study's running best + full history.\n\n"
+            "REQUIRES: name.\n"
+            "RETURNS: {name, direction, best, trial_count, history: [...]}\n"
+            "NEXT: hpo_ask_trial or hpo_tell_result."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
+    # External MCP consumption (Phase 3.5)
+    # ------------------------------------------------------------------
+    Tool(
+        name="external_mcp_list_servers",
+        description=(
+            "List external MCP servers configured under external_mcp.servers "
+            "in crucible.yaml. Use cases: Spider Chat (taste curation), "
+            "Codex (code mutations), any community MCP exposing domain tools.\n\n"
+            "REQUIRES: Nothing (returns count=0 when no external_mcp config).\n"
+            "RETURNS: {count, servers: [{name, command, args, has_env}]}\n"
+            "NEXT: external_mcp_list_tools(server=...) to enumerate one "
+            "server's tools, then external_mcp_call to invoke one."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="external_mcp_list_tools",
+        description=(
+            "Spawn the named external MCP server, enumerate its tools, "
+            "shut down. ~100-500ms latency.\n\n"
+            "REQUIRES: server (name from external_mcp.servers config).\n"
+            "RETURNS: {server, count, tools: [{name, description}]}\n"
+            "NEXT: external_mcp_call with one of the listed tool names."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"server": {"type": "string"}},
+            "required": ["server"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="external_mcp_call",
+        description=(
+            "Invoke a tool on the named external MCP server with JSON args. "
+            "Fresh subprocess per call (no connection pooling); use for "
+            "infrequent reflection-loop hooks, not hot-path inference.\n\n"
+            "REQUIRES: server, tool, args.\n"
+            "RETURNS: {server, tool, is_error, content: [{type, text}]}\n"
+            "NEXT: depends on the external tool; check its description."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server": {"type": "string"},
+                "tool": {"type": "string"},
+                "args": {
+                    "type": "object",
+                    "description": "JSON args forwarded to the external tool.",
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["server", "tool"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="evaluator_list",
+        description=(
+            "List registered evaluator plugins (Phase 3.3 plugin family). "
+            "Evaluators are the output side of the data pipeline — where "
+            "data_sources/ describes training inputs, evaluators/ describes "
+            "benchmarks scored against a trained checkpoint. Builtin: "
+            "lm_eval_harness. User plugins land under "
+            ".crucible/plugins/evaluators/*.py (project-local) or "
+            "~/.crucible-hub/plugins/evaluators/*.py (global) and are "
+            "auto-discovered on each list call.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {count, evaluators: [{name, type, source}, ...]}\n"
+            "NEXT: configure an evaluator in crucible.yaml under eval_suite "
+            "and wire it via eval_watch_start."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_openreview_search",
+        description=(
+            "Search OpenReview via the public /notes/search API. Complements "
+            "research_arxiv_search (preprints) with the peer-review record from "
+            "ICLR / NeurIPS / TMLR / etc. — useful when the loop wants to weight "
+            "papers by review signal or filter by venue/year.\n\n"
+            "Output normalizes to the same paper-dict shape as research_arxiv_search "
+            "(title, summary, authors, url, published_at) for cross-source interleaving.\n\n"
+            "REQUIRES: query. No auth for public venues; private venues need "
+            "OPENREVIEW_TOKEN env var.\n"
+            "RETURNS: {query, count, results: [{openreview_id, title, summary, "
+            "authors, venue, venueid, published_at, url, pdf_url}, ...]}\n"
+            "NEXT: research_arxiv_search to cross-reference preprint versions, or "
+            "research_request_prompt(stage='hypothesis') with the results as "
+            "literature context."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Free-text query against title/abstract.",
+                },
+                "limit": {"type": "integer", "default": 10},
+                "venue": {
+                    "type": "string",
+                    "description": (
+                        "Optional OpenReview venue id, e.g., 'ICLR.cc/2024/Conference'."
+                    ),
+                },
+                "year": {
+                    "type": "integer",
+                    "description": (
+                        "Optional year filter (best-effort regex match against the "
+                        "venue field; for exact venue, use 'venue' instead)."
+                    ),
+                },
+                "multi_angle": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Expand the query via LLM and dedup across angles.",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_arxiv_search",
+        description=(
+            "Search arXiv via the public Atom-feed API (no auth, no API key). "
+            "Returns paper records normalized to the same shape as research_hf_search "
+            "(title, summary, authors, url, published_at), so callers can interleave "
+            "results without per-source branching.\n\n"
+            "Use this when the autonomous loop needs literature context for "
+            "hypothesis generation beyond HuggingFace Papers — e.g., for theoretical "
+            "ML, statistics, or older work not indexed by HF.\n\n"
+            "REQUIRES: query.\n"
+            "RETURNS: {query, count, results: [{arxiv_id, title, summary, authors, "
+            "categories, published_at, url}, ...]}\n"
+            "NEXT: research_request_prompt(stage='hypothesis') with the results as "
+            "literature context, or research_hf_search to cross-reference."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Free-text query (e.g., 'predictor collapse JEPA').",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Max papers to return.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["relevance", "lastUpdatedDate", "submittedDate"],
+                    "default": "relevance",
+                },
+                "sort_order": {
+                    "type": "string",
+                    "enum": ["ascending", "descending"],
+                    "default": "descending",
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional arXiv subject filter, e.g., ['cs.LG', 'cs.AI']. "
+                        "Omit for all categories."
+                    ),
+                },
+                "multi_angle": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Expand the query via LLM and dedup across angles (3-5x slower).",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    # ------------------------------------------------------------------
     # GitHub search
     # ------------------------------------------------------------------
     Tool(
