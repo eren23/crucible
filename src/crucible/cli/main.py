@@ -329,6 +329,15 @@ def _main() -> None:
     ns = note_sub.add_parser("search", help="Search notes across runs")
     ns.add_argument("--query", required=True)
 
+    # ── recipe ──
+    recipe_parser = subparsers.add_parser("recipe", help="Session recipes (playbooks)")
+    recipe_sub = recipe_parser.add_subparsers(dest="recipe_command")
+    rl = recipe_sub.add_parser("list", help="List saved recipes")
+    rl.add_argument("--tag", default=None, help="Filter by tag (repeatable via --tags)")
+    rl.add_argument("--tags", nargs="*", default=[], help="Filter by multiple tags (all required)")
+    rg = recipe_sub.add_parser("get", help="Show a recipe by name")
+    rg.add_argument("name")
+
     # ── serve ──
     serve = subparsers.add_parser("serve", help="Start API server")
     serve.add_argument("--port", type=int, default=8741)
@@ -427,6 +436,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         from crucible.cli.note_commands import handle_note
 
         handle_note(args)
+    elif args.command == "recipe":
+        from crucible.cli.recipe_commands import handle_recipe
+
+        handle_recipe(args)
     elif args.command == "project":
         from crucible.cli.project_commands import handle_project
 

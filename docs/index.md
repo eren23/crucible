@@ -76,17 +76,33 @@ src/crucible/
 
 ---
 
-## Pages
+## Learning path
 
-- [5-Minute Quickstart](quickstart-5-minutes) — Cold start to first leaderboard + tool-router recommendation, five commands, no GPU
-- [Positioning](positioning) — Where Crucible sits vs Sakana / FutureHouse / DeepMind, and what it explicitly is NOT
-- [Getting Started](getting-started) — Full installation walkthrough, project setup, fleet flow
-- [YOLO MCP Demo](yolo-mcp-demo) — Empty-dir external-project fine-tuning via MCP
-- [TUI Guide](tui) — Interactive design browser walkthrough
-- [MCP Tools Reference](mcp-tools) — All 200+ tools with schemas
-- [Architecture](architecture) — System design and module overview
-- [Plugins](plugins) — How to write architecture plugins
-- [Modality Guide](modality-guide) — Training diffusion models, world models, and beyond
-- [Harness Optimization](harness-optimization) — Evolve memory systems / agent scaffolds via Pareto frontiers
-- [Judge Separation](judge-separation) — Why reward and eval judges must come from different families
-- [Roadmap](roadmap) — What's done, what's next
+If you're new, read these in order. Each builds on the previous.
+
+### 1. Orient
+- [5-Minute Quickstart](quickstart-5-minutes) — Cold start to leaderboard + tool-router recommendation in five commands, no GPU. **Start here.**
+- [Positioning](positioning) — Where Crucible sits vs Sakana / FutureHouse / DeepMind, and what it explicitly is NOT.
+
+### 2. Run experiments
+- [Getting Started](getting-started) — Full lifecycle: install → init → smoke → fleet provision → bootstrap → dispatch → collect.
+- [TUI Guide](tui) — Interactive design browser + leaderboard cockpit.
+- [SSH Provider](ssh-provider) — Skip RunPod entirely and run on your own boxes.
+
+### 3. Close the loop autonomously
+- [Modality Guide](modality-guide) — Diffusion, world models, vision, and bring-your-own-trainer.
+- [Judge Separation](judge-separation) — Why reward and eval judges must come from different families before any LM-as-judge loop runs.
+- [Eval Watcher](eval-watcher) — Auto-eval daemon for continuous checkpoint scoring.
+- [Harness Optimization](harness-optimization) — Evolve memory systems / agent scaffolds via Pareto frontiers.
+
+### 4. Share + scale
+- [HF Collab Recipe](hf-collab-recipe) — Cross-agent collaboration via HuggingFace Hub (leaderboard, findings, recipes).
+- [Plugins](plugins) — Author architectures, optimizers, schedulers, callbacks as `.py` files.
+- [Data Source Plugins](data-source-plugin-format) — Plug custom data backends into the manifest pipeline.
+
+### 5. Reference
+- [MCP Tools Reference](mcp-tools) — All 200+ tools with schemas (use `crucible mcp call <tool>` for one-shot CLI invocation).
+- [Architecture](architecture) — System design and module overview.
+- [Config Hierarchy](crucible-config-hierarchy) — Definitive precedence table for `provision_project` / `bootstrap_project` / `run_project`.
+- [YOLO MCP Demo](yolo-mcp-demo) — Empty-dir external-project fine-tuning walkthrough.
+- [Roadmap](roadmap) — What's done, what's next.
