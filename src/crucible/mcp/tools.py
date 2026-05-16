@@ -1624,6 +1624,26 @@ def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
     return {"query": query, "count": len(results), "results": results}
 
 
+def research_openreview_search(args: dict[str, Any]) -> dict[str, Any]:
+    """Search OpenReview via the public /notes/search API."""
+    from crucible.researcher.openreview_search import search_openreview
+
+    query = args.get("query", "")
+    limit = int(args.get("limit", 10))
+    venue = args.get("venue") or None
+    year = args.get("year")
+    if year is not None:
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            year = None
+    multi_angle = bool(args.get("multi_angle", False))
+    results = search_openreview(
+        query, limit=limit, venue=venue, year=year, multi_angle=multi_angle,
+    )
+    return {"query": query, "count": len(results), "results": results}
+
+
 # ---------------------------------------------------------------------------
 # GitHub search
 # ---------------------------------------------------------------------------
@@ -6830,6 +6850,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     # HF ecosystem search
     "research_hf_search": research_hf_search,
     "research_arxiv_search": research_arxiv_search,
+    "research_openreview_search": research_openreview_search,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,

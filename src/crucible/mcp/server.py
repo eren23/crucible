@@ -3367,6 +3367,54 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="research_openreview_search",
+        description=(
+            "Search OpenReview via the public /notes/search API. Complements "
+            "research_arxiv_search (preprints) with the peer-review record from "
+            "ICLR / NeurIPS / TMLR / etc. — useful when the loop wants to weight "
+            "papers by review signal or filter by venue/year.\n\n"
+            "Output normalizes to the same paper-dict shape as research_arxiv_search "
+            "(title, summary, authors, url, published_at) for cross-source interleaving.\n\n"
+            "REQUIRES: query. No auth for public venues; private venues need "
+            "OPENREVIEW_TOKEN env var.\n"
+            "RETURNS: {query, count, results: [{openreview_id, title, summary, "
+            "authors, venue, venueid, published_at, url, pdf_url}, ...]}\n"
+            "NEXT: research_arxiv_search to cross-reference preprint versions, or "
+            "research_request_prompt(stage='hypothesis') with the results as "
+            "literature context."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Free-text query against title/abstract.",
+                },
+                "limit": {"type": "integer", "default": 10},
+                "venue": {
+                    "type": "string",
+                    "description": (
+                        "Optional OpenReview venue id, e.g., 'ICLR.cc/2024/Conference'."
+                    ),
+                },
+                "year": {
+                    "type": "integer",
+                    "description": (
+                        "Optional year filter (best-effort regex match against the "
+                        "venue field; for exact venue, use 'venue' instead)."
+                    ),
+                },
+                "multi_angle": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Expand the query via LLM and dedup across angles.",
+                },
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="research_arxiv_search",
         description=(
             "Search arXiv via the public Atom-feed API (no auth, no API key). "
