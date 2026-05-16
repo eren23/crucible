@@ -15,10 +15,25 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Label, ListItem, ListView, Static
+from textual.widgets import (
+    Footer,
+    Header,
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 from crucible.core.config import load_config
 from crucible.core.store import VersionStore
+from crucible.tui.panes import (
+    BriefingPane,
+    FleetPane,
+    LeaderboardPane,
+    QueuePane,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +237,9 @@ class HelpScreen(ModalScreen[None]):
 [bold]s[/bold]           Cycle status (draft \u2192 ready \u2192 running \u2192 \u2026)
 [bold]h[/bold]           Version history
 [bold]c[/bold]           Research context view
-[bold]r[/bold]           Run design (fleet)
+[bold]R[/bold]           Run design (fleet)  [dim](shift-r)[/dim]
+[bold]r[/bold]           Refresh active pane (Briefing / Fleet / Queue / Leaderboard)
+[bold]1\u20135[/bold]         Switch tab (designs / fleet / queue / leaderboard / briefing)
 [bold]?[/bold]           This help
 [bold]q[/bold]           Quit
 
@@ -248,7 +265,7 @@ class HelpScreen(ModalScreen[None]):
 # ---------------------------------------------------------------------------
 
 class CrucibleApp(App):
-    TITLE = "Crucible \u2014 Experiment Designs"
+    TITLE = "Crucible \u2014 Cockpit"
 
     CSS = """
     #main { height: 1fr; }
@@ -262,7 +279,6 @@ class CrucibleApp(App):
     }
     #stats-bar {
         height: 1;
-        dock: bottom;
         background: $boost;
         padding: 0 2;
     }
@@ -277,6 +293,8 @@ class CrucibleApp(App):
     }
     DesignDetail { padding: 0; }
     DiffView { padding: 0; }
+    TabbedContent { height: 1fr; }
+    TabPane { padding: 0; }
     """
 
     BINDINGS = [
@@ -284,9 +302,20 @@ class CrucibleApp(App):
         Binding("d", "diff", "Diff"),
         Binding("s", "cycle_status", "Status"),
         Binding("h", "history", "History"),
-        Binding("r", "run", "Run"),
+        # `R` (shift-r) runs the selected design via fleet. Lowercase
+        # `r` refreshes whichever cockpit pane is currently active.
+        # Pane-scoped bindings don't fire under TabbedContent because
+        # focus stays on the content-tabs strip, so this routing lives
+        # at the app level via action_refresh_active_pane.
+        Binding("R", "run", "Run"),
+        Binding("r", "refresh_active_pane", "Refresh"),
         Binding("c", "context", "Context"),
         Binding("question_mark", "help", "Help"),
+        Binding("1", "show_tab('designs')", "Designs", show=False),
+        Binding("2", "show_tab('fleet')", "Fleet", show=False),
+        Binding("3", "show_tab('queue')", "Queue", show=False),
+        Binding("4", "show_tab('leaderboard')", "Leaderboard", show=False),
+        Binding("5", "show_tab('briefing')", "Briefing", show=False),
     ]
 
     show_diff_mode: reactive[bool] = reactive(False)
@@ -295,7 +324,10 @@ class CrucibleApp(App):
 
     def __init__(self, screenshot_dir: Path | None = None) -> None:
         super().__init__()
-        self._store = _load_store()
+        self._config = load_config()
+        self._store = VersionStore(
+            self._config.project_root / self._config.store_dir
+        )
         self._designs = _load_designs(self._store)
         self._groups = _group_designs(self._designs)
         self._selected: dict[str, Any] | None = None
@@ -315,23 +347,71 @@ class CrucibleApp(App):
             for d in group_designs:
                 items.append(DesignItem(d))
 
-        with Horizontal(id="main"):
-            with Vertical(id="sidebar"):
-                yield ListView(*items)
-            with VerticalScroll(id="detail-scroll"):
-                yield DesignDetail(id="detail")
-                yield DiffView(id="diff-view")
+        with TabbedContent(initial="designs", id="cockpit"):
+            with TabPane("Designs (1)", id="designs"):
+                with Horizontal(id="main"):
+                    with Vertical(id="sidebar"):
+                        yield ListView(*items)
+                    with VerticalScroll(id="detail-scroll"):
+                        yield DesignDetail(id="detail")
+                        yield DiffView(id="diff-view")
+                # Stats bar lives inside the Designs tab; other tabs
+                # have their own summary lines.
+                counts = _status_counts(self._designs)
+                ctx_count = len(self._store.list_resources("research_context"))
+                parts = [f"[bold]{len(self._designs)}[/bold] designs"]
+                for status, color in STATUS_COLORS.items():
+                    if counts.get(status, 0) > 0:
+                        parts.append(f"[{color}]{counts[status]} {status}[/{color}]")
+                parts.append(f"{ctx_count} context")
+                yield Label(" \u2502 ".join(parts), id="stats-bar")
+            with TabPane("Fleet (2)", id="fleet"):
+                yield FleetPane(self._config)
+            with TabPane("Queue (3)", id="queue"):
+                yield QueuePane(self._config)
+            with TabPane("Leaderboard (4)", id="leaderboard"):
+                yield LeaderboardPane(self._config)
+            with TabPane("Briefing (5)", id="briefing"):
+                yield BriefingPane(self._config)
 
-        # Stats bar
-        counts = _status_counts(self._designs)
-        ctx_count = len(self._store.list_resources("research_context"))
-        parts = [f"[bold]{len(self._designs)}[/bold] designs"]
-        for status, color in STATUS_COLORS.items():
-            if counts.get(status, 0) > 0:
-                parts.append(f"[{color}]{counts[status]} {status}[/{color}]")
-        parts.append(f"{ctx_count} context")
-        yield Label(" \u2502 ".join(parts), id="stats-bar")
         yield Footer()
+
+    def action_show_tab(self, tab_id: str) -> None:
+        try:
+            self.query_one("#cockpit", TabbedContent).active = tab_id
+        except Exception:
+            pass
+
+    def action_refresh_active_pane(self) -> None:
+        """Refresh the data in whichever cockpit pane is currently active.
+
+        Lives at the app level because TabbedContent keeps keyboard
+        focus on its own content-tab strip, so pane-scoped ``r``
+        bindings never receive the keypress. We dispatch by tab id.
+        """
+        try:
+            tabbed = self.query_one("#cockpit", TabbedContent)
+        except Exception:
+            return
+        active = tabbed.active
+        # Find the pane widget for the active tab and call its
+        # refresh_data() if it exposes one. Designs tab has no
+        # equivalent — silently no-op there.
+        pane_id_to_widget_type = {
+            "fleet": FleetPane,
+            "queue": QueuePane,
+            "leaderboard": LeaderboardPane,
+            "briefing": BriefingPane,
+        }
+        widget_type = pane_id_to_widget_type.get(active)
+        if widget_type is None:
+            return
+        try:
+            widget = self.query_one(widget_type)
+            widget.refresh_data()
+            self.notify(f"{active.title()} refreshed", timeout=2)
+        except Exception as exc:
+            self.notify(f"Refresh failed: {exc}", severity="warning")
 
     def on_mount(self) -> None:
         self.query_one("#diff-view", DiffView).display = False
