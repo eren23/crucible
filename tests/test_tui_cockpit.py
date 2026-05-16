@@ -250,9 +250,10 @@ def test_briefing_pane_renders_markdown(project_dir):
             await pilot.press("5")
             await pilot.pause()
             md = app.query_one("#briefing-md", Markdown)
-            # Markdown widget has no public text accessor; check that it
-            # has a non-empty source via the underlying attribute.
-            assert getattr(md, "_markdown", None), "Markdown body should be populated"
+            # Use the public source property (Markdown.source) rather
+            # than the private _markdown attribute that earlier versions
+            # of this test reached into.
+            assert md.source, "Markdown body should be populated"
 
 
     _run(_body())
@@ -283,5 +284,38 @@ def test_empty_project_does_not_crash(tmp_path, monkeypatch):
             for tid in ("#fleet-table", "#queue-table", "#lb-table"):
                 table = app.query_one(tid, DataTable)
                 assert table.row_count == 0
+
+    _run(_body())
+
+
+def test_r_key_refreshes_active_pane(project_dir):
+    """Phase 2.3 review fix: the `r` keybinding now lives at the app
+    level (TabbedContent doesn't pass keypresses to child panes), so
+    pressing it while a cockpit tab is active must call the right
+    pane's ``refresh_data()``."""
+    async def _body():
+        from textual.widgets import DataTable
+
+        from crucible.tui.app import CrucibleApp
+        from crucible.tui.panes import FleetPane
+
+        app = CrucibleApp()
+        async with app.run_test() as pilot:
+            await pilot.press("2")  # fleet tab
+            await pilot.pause()
+            fleet_pane = app.query_one(FleetPane)
+            calls = {"n": 0}
+            original = fleet_pane.refresh_data
+
+            def counting():
+                calls["n"] += 1
+                original()
+
+            fleet_pane.refresh_data = counting  # type: ignore[assignment]
+            await pilot.press("r")
+            await pilot.pause()
+            assert calls["n"] == 1, (
+                f"`r` keypress must invoke active pane's refresh_data; got {calls['n']}"
+            )
 
     _run(_body())

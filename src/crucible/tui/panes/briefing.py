@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label, Markdown
 
@@ -18,11 +17,13 @@ from crucible.core.log import log_warn
 
 
 class BriefingPane(Vertical):
-    """Markdown briefing + recommended next tool."""
+    """Markdown briefing + recommended next tool.
 
-    BINDINGS = [
-        Binding("r", "refresh", "Refresh briefing", show=True),
-    ]
+    Refresh is driven by the app-level ``r`` binding (see
+    ``CrucibleApp.action_refresh_active_pane``) — TabbedContent keeps
+    focus on its content-tab strip, so pane-scoped bindings never
+    receive the keypress directly.
+    """
 
     DEFAULT_CSS = """
     BriefingPane { padding: 1 2; }
@@ -45,10 +46,6 @@ class BriefingPane(Vertical):
 
     def on_mount(self) -> None:
         self.refresh_data()
-
-    def action_refresh(self) -> None:
-        self.refresh_data()
-        self.notify("Briefing refreshed", timeout=2)
 
     def refresh_data(self) -> None:
         try:

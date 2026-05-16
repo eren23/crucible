@@ -237,7 +237,9 @@ class HelpScreen(ModalScreen[None]):
 [bold]s[/bold]           Cycle status (draft \u2192 ready \u2192 running \u2192 \u2026)
 [bold]h[/bold]           Version history
 [bold]c[/bold]           Research context view
-[bold]r[/bold]           Run design (fleet)
+[bold]R[/bold]           Run design (fleet)  [dim](shift-r)[/dim]
+[bold]r[/bold]           Refresh active pane (Briefing / Fleet / Queue / Leaderboard)
+[bold]1\u20135[/bold]         Switch tab (designs / fleet / queue / leaderboard / briefing)
 [bold]?[/bold]           This help
 [bold]q[/bold]           Quit
 
@@ -300,9 +302,13 @@ class CrucibleApp(App):
         Binding("d", "diff", "Diff"),
         Binding("s", "cycle_status", "Status"),
         Binding("h", "history", "History"),
-        # `r` reassigned to Shift-R so BriefingPane can use lowercase
-        # `r` for refresh (its binding is scoped to the pane).
+        # `R` (shift-r) runs the selected design via fleet. Lowercase
+        # `r` refreshes whichever cockpit pane is currently active.
+        # Pane-scoped bindings don't fire under TabbedContent because
+        # focus stays on the content-tabs strip, so this routing lives
+        # at the app level via action_refresh_active_pane.
         Binding("R", "run", "Run"),
+        Binding("r", "refresh_active_pane", "Refresh"),
         Binding("c", "context", "Context"),
         Binding("question_mark", "help", "Help"),
         Binding("1", "show_tab('designs')", "Designs", show=False),
@@ -375,6 +381,37 @@ class CrucibleApp(App):
             self.query_one("#cockpit", TabbedContent).active = tab_id
         except Exception:
             pass
+
+    def action_refresh_active_pane(self) -> None:
+        """Refresh the data in whichever cockpit pane is currently active.
+
+        Lives at the app level because TabbedContent keeps keyboard
+        focus on its own content-tab strip, so pane-scoped ``r``
+        bindings never receive the keypress. We dispatch by tab id.
+        """
+        try:
+            tabbed = self.query_one("#cockpit", TabbedContent)
+        except Exception:
+            return
+        active = tabbed.active
+        # Find the pane widget for the active tab and call its
+        # refresh_data() if it exposes one. Designs tab has no
+        # equivalent — silently no-op there.
+        pane_id_to_widget_type = {
+            "fleet": FleetPane,
+            "queue": QueuePane,
+            "leaderboard": LeaderboardPane,
+            "briefing": BriefingPane,
+        }
+        widget_type = pane_id_to_widget_type.get(active)
+        if widget_type is None:
+            return
+        try:
+            widget = self.query_one(widget_type)
+            widget.refresh_data()
+            self.notify(f"{active.title()} refreshed", timeout=2)
+        except Exception as exc:
+            self.notify(f"Refresh failed: {exc}", severity="warning")
 
     def on_mount(self) -> None:
         self.query_one("#diff-view", DiffView).display = False

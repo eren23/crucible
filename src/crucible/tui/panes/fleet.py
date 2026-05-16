@@ -14,6 +14,7 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Label, Static
 
 from crucible.core.config import ProjectConfig
+from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
 
 
@@ -50,10 +51,13 @@ class FleetPane(Vertical):
             self.set_interval(self._refresh_seconds, self.refresh_data)
 
     def refresh_data(self) -> None:
+        # Narrowed exception set — let genuinely unexpected errors
+        # (programming bugs) propagate so they surface in tests
+        # rather than getting silently swallowed in a timer callback.
         try:
             nodes = self._load_nodes()
             active_runs_by_node = self._load_active_runs_by_node()
-        except Exception as exc:
+        except (CrucibleError, OSError, ValueError) as exc:
             log_warn(f"FleetPane: refresh failed: {exc}")
             self.query_one("#fleet-summary", Label).update(
                 f"[red]Refresh failed: {exc}[/red]"

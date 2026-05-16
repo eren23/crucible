@@ -12,6 +12,7 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Label
 
 from crucible.core.config import ProjectConfig
+from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
 
 
@@ -48,9 +49,11 @@ class QueuePane(Vertical):
             self.set_interval(self._refresh_seconds, self.refresh_data)
 
     def refresh_data(self) -> None:
+        # Narrowed exception set — let unexpected errors propagate
+        # rather than getting swallowed in a timer callback.
         try:
             rows = self._load_queue()
-        except Exception as exc:
+        except (CrucibleError, OSError, ValueError) as exc:
             log_warn(f"QueuePane: refresh failed: {exc}")
             self.query_one("#queue-summary", Label).update(
                 f"[red]Refresh failed: {exc}[/red]"
