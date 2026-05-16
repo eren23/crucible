@@ -3537,6 +3537,77 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="harness_autonomous_loop",
+        description=(
+            "Persisted-session driver for the harness-optimization autonomous "
+            "loop. Wraps HarnessOptimizer in the orchestrator-contract pattern: "
+            "each iteration the orchestrator proposes Python harness candidates "
+            "matching a domain spec, the session validates + benchmarks them "
+            "(fire-and-forget enqueue), then waits for fleet ops before "
+            "continuing. Crucible never calls an LLM.\n\n"
+            "Judge-separation: panel.assert_separated() runs at action='start' "
+            "before any pod time is consumed, mirroring HarnessOptimizer.run_iteration.\n\n"
+            "Actions:\n"
+            "- 'start': assert judge-sep, return first proposal prompt.\n"
+            "- 'submit': parse Python+JSON response, validate, benchmark, return "
+            "  external_dispatch hint.\n"
+            "- 'continue': after dispatch + collect + tree_sync_results, return "
+            "  next proposal prompt or done.\n"
+            "- 'status': read-only session state.\n"
+            "- 'cancel': mark session canceled.\n\n"
+            "REQUIRES: action; for start also domain_spec + tree_name; for "
+            "submit/status/cancel/continue also session_id; for submit also response.\n"
+            "RETURNS: start → first prompt + session_id. submit → "
+            "{proposed, validated, benchmarked_node_ids, next_action}. status → "
+            "session state. cancel → checkpoint.\n"
+            "ERRORS: HarnessAutonomousSessionError when session terminal. "
+            "HarnessDoomLoopDetected when prompts repeat. ConfigError if "
+            "judges panel is mis-separated."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "submit", "continue", "status", "cancel"],
+                    "description": "Session lifecycle verb.",
+                },
+                "domain_spec": {
+                    "type": "string",
+                    "description": "Path to a domain_spec.yaml (start only).",
+                },
+                "tree_name": {
+                    "type": "string",
+                    "description": "SearchTree name to build / extend (start only).",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Session UUID. Required for submit/status/cancel/continue.",
+                },
+                "iterations": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Total iterations the session will run (start only).",
+                },
+                "n_candidates": {
+                    "type": "integer",
+                    "default": 3,
+                    "description": "Candidates to propose per iteration (start only).",
+                },
+                "response": {
+                    "type": "string",
+                    "description": "Raw orchestrator response — Python code blocks + JSON metadata (submit only).",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Free-text reason for cancel.",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    ),
     # -----------------------------------------------------------------------
     # Notebook exporter
     # -----------------------------------------------------------------------

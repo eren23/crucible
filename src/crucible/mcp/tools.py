@@ -1797,6 +1797,94 @@ def tree_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def harness_autonomous_loop(args: dict[str, Any]) -> dict[str, Any]:
+    """Persisted-session driver for the harness-optimization autonomous loop.
+
+    Wraps the existing HarnessOptimizer in the orchestrator-contract
+    pattern: each iteration the orchestrator proposes candidates, the
+    session validates + benchmarks them (fire-and-forget enqueue), then
+    waits for the orchestrator to drive fleet ops before continuing.
+
+    Verb dispatch (action arg):
+      - start: assert judge-separation, return first proposal prompt
+      - submit: parse/validate/benchmark candidates, advance, return external_dispatch hint
+      - continue: after fleet ops complete, return next proposal prompt or done
+      - status: read-only session state
+      - cancel: terminate session
+
+    Session state persists under .crucible/harness_autonomous_sessions/{uuid}.yaml.
+    """
+    from crucible.researcher import harness_autonomous_session as has
+
+    config = _get_config()
+    action = args.get("action")
+    try:
+        if action == "start":
+            domain_spec = args.get("domain_spec")
+            tree_name = args.get("tree_name")
+            if not domain_spec:
+                raise CrucibleError(
+                    "harness_autonomous_loop start: 'domain_spec' is required"
+                )
+            if not tree_name:
+                raise CrucibleError(
+                    "harness_autonomous_loop start: 'tree_name' is required"
+                )
+            return has.action_start(
+                config,
+                domain_spec=str(domain_spec),
+                tree_name=str(tree_name),
+                iterations=int(args.get("iterations", 5)),
+                n_candidates=int(args.get("n_candidates", 3)),
+                dry_run=bool(args.get("dry_run", False)),
+            )
+        if action == "submit":
+            session_id = args.get("session_id")
+            response = args.get("response")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop submit: 'session_id' is required"
+                )
+            if response is None:
+                raise CrucibleError(
+                    "harness_autonomous_loop submit: 'response' is required"
+                )
+            return has.action_submit(
+                config, session_id=str(session_id), response=str(response)
+            )
+        if action == "continue":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop continue: 'session_id' is required"
+                )
+            return has.action_continue(config, session_id=str(session_id))
+        if action == "status":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop status: 'session_id' is required"
+                )
+            return has.action_status(config, session_id=str(session_id))
+        if action == "cancel":
+            session_id = args.get("session_id")
+            if not session_id:
+                raise CrucibleError(
+                    "harness_autonomous_loop cancel: 'session_id' is required"
+                )
+            return has.action_cancel(
+                config,
+                session_id=str(session_id),
+                reason=str(args.get("reason", "") or ""),
+            )
+        raise CrucibleError(
+            f"harness_autonomous_loop: unknown action {action!r}. "
+            f"Valid: 'start', 'submit', 'continue', 'status', 'cancel'."
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 # ---------------------------------------------------------------------------
 # W&B tools
 # ---------------------------------------------------------------------------
@@ -6606,6 +6694,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_submit": research_submit,
     "autonomous_research_loop": autonomous_research_loop,
     "tree_autonomous_loop": tree_autonomous_loop,
+    "harness_autonomous_loop": harness_autonomous_loop,
     # W&B tools
     "wandb_log_image": wandb_log_image,
     "wandb_get_url": wandb_get_url,
