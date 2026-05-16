@@ -98,6 +98,8 @@ class TestBriefingNoExperiments:
         assert "budget" in briefing
         assert "hub_findings" in briefing
         assert "suggested_next_steps" in briefing
+        # Phase 2.2: structured next-action recommendation from tool_router.
+        assert "next_actions" in briefing
         assert "markdown_summary" in briefing
 
     def test_project_section(self, tmp_path: Path) -> None:
@@ -347,6 +349,51 @@ class TestBriefingBudgetLow:
         briefing = build_briefing(config)
         steps = briefing["suggested_next_steps"]
         assert any("budget" in s.lower() or "promotion" in s.lower() for s in steps)
+
+
+class TestBriefingNextActions:
+    """Phase 2.2: structured next-action recommendation from tool_router."""
+
+    def test_empty_project_recommends_provision(self, tmp_path: Path) -> None:
+        config = _setup_project(tmp_path)
+        briefing = build_briefing(config)
+        na = briefing["next_actions"]
+        assert na is not None, "next_actions must be present"
+        assert na["recommended_tool"] == "provision_nodes"
+        assert "rationale" in na
+        assert "alternatives" in na
+        assert "state" in na
+
+    def test_markdown_includes_recommended_tool(self, tmp_path: Path) -> None:
+        config = _setup_project(tmp_path)
+        briefing = build_briefing(config)
+        md = briefing["markdown_summary"]
+        assert "Recommended Next Tool" in md
+        assert "`provision_nodes`" in md
+
+    def test_router_failure_does_not_block_briefing(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Briefing must succeed even if the router blows up — graceful
+        degradation matches the section-level try/except pattern used
+        elsewhere in briefing.py."""
+        def explode(*args, **kwargs):
+            raise RuntimeError("router boom")
+        monkeypatch.setattr(
+            "crucible.researcher.briefing.recommend_next_action",
+            explode,
+            raising=False,
+        )
+        # Import-level reference is module-private; patch the import too.
+        from crucible.mcp import router as _r
+        monkeypatch.setattr(_r, "recommend_next_action", explode)
+        config = _setup_project(tmp_path)
+        briefing = build_briefing(config)
+        # Field must exist but may be None on failure.
+        assert "next_actions" in briefing
+        assert briefing["next_actions"] is None
+        # Markdown still rendered.
+        assert "Research Briefing" in briefing["markdown_summary"]
 
 
 class TestBriefingNeverFails:

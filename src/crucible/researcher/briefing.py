@@ -318,6 +318,7 @@ def _markdown_summary(
     budget: dict[str, float],
     suggested: list[str],
     hf_prior_runs: list[dict[str, Any]] | None = None,
+    next_actions: dict[str, Any] | None = None,
 ) -> str:
     """Render a human-readable markdown summary."""
     lines: list[str] = []
@@ -406,6 +407,18 @@ def _markdown_summary(
         lines.append(f"- {step}")
     lines.append("")
 
+    # Recommended next tool (from tool_router) — machine-readable
+    # counterpart to the prose suggestions above.
+    if next_actions:
+        rec = next_actions.get("recommended_tool")
+        rationale = next_actions.get("rationale", "")
+        if rec:
+            lines.append("## Recommended Next Tool")
+            lines.append(f"- **`{rec}`** — {rationale}")
+            for alt in next_actions.get("alternatives") or []:
+                lines.append(f"  - alt: `{alt.get('tool')}` — {alt.get('rationale', '')}")
+            lines.append("")
+
     # Workflow guidance
     lines.append("## Workflow Guidance")
     lines.append("- **Pre-run:** use `note_add` with `stage=\"pre-run\"` to record your hypothesis")
@@ -419,6 +432,22 @@ def _markdown_summary(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
+
+def _next_actions(config: ProjectConfig) -> dict[str, Any] | None:
+    """Structured next-action recommendation from the tool_router.
+
+    Returns the same shape as the tool_router MCP tool (recommended_tool,
+    rationale, alternatives, state) so a briefing consumer can act on the
+    recommendation without a second MCP round-trip. Returns None on
+    failure so the briefing never blocks on the router.
+    """
+    try:
+        from crucible.mcp.router import recommend_next_action
+        return recommend_next_action(config)
+    except Exception as exc:
+        log_warn(f"Briefing section 'next_actions' failed: {exc}")
+        return None
 
 
 def build_briefing(config: ProjectConfig) -> dict[str, Any]:
@@ -439,10 +468,12 @@ def build_briefing(config: ProjectConfig) -> dict[str, Any]:
     hub = _hub_findings(config)
     hf_prior_runs = _hf_prior_runs(config)
     suggested = _suggested_next_steps(experiments, findings, hypotheses, budget)
+    next_actions = _next_actions(config)
     summary = _markdown_summary(
         project, track, experiments, top3, hypotheses,
         findings, notes, beliefs, budget, suggested,
         hf_prior_runs=hf_prior_runs,
+        next_actions=next_actions,
     )
 
     return {
@@ -458,5 +489,6 @@ def build_briefing(config: ProjectConfig) -> dict[str, Any]:
         "hub_findings": hub,
         "hf_prior_runs": hf_prior_runs,
         "suggested_next_steps": suggested,
+        "next_actions": next_actions,
         "markdown_summary": summary,
     }
