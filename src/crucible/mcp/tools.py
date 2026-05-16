@@ -1855,6 +1855,122 @@ def external_mcp_call(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def research_peer_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Share + pull top findings via a shared HF Discussion thread (Phase 4.3).
+
+    Per-call:
+      1. Compute our top finding (caller can override via ``top_finding``).
+      2. Find or open the discussion thread for this ``challenge_id``.
+      3. Post our finding as a comment.
+      4. Read peer agents' previous posts in the same thread.
+
+    REQUIRES: challenge_id; optionally top_finding, leaderboard_row,
+              agent_id, repo_id (defaults to hf_collab.leaderboard_repo).
+    RETURNS: {challenge_id, agent_id, thread_num, thread_url,
+              posted_url, peer_count, peers: [...]}
+    NEXT: feed peers into the next iteration's literature_context, or
+          reference them in research_request_prompt(stage='hypothesis').
+    """
+    try:
+        from crucible.researcher.peer_sync import sync_peer_finding
+        from crucible.core.log import utc_now_iso
+
+        challenge_id = args.get("challenge_id", "").strip()
+        if not challenge_id:
+            return {"error": "[CrucibleError] 'challenge_id' is required."}
+
+        config = _get_config()
+        repo_id = args.get("repo_id") or getattr(
+            getattr(config, "hf_collab", None), "leaderboard_repo", "",
+        )
+        if not repo_id:
+            return {
+                "error": (
+                    "[CrucibleError] No repo_id supplied and "
+                    "hf_collab.leaderboard_repo is unset. Provide one or set it "
+                    "in crucible.yaml."
+                )
+            }
+
+        agent_id = args.get("agent_id") or _resolve_agent_id(config)
+
+        top_finding = args.get("top_finding")
+        if not isinstance(top_finding, dict):
+            top_finding = _resolve_top_finding(config)
+        if not top_finding:
+            top_finding = {
+                "title": "(no findings yet)",
+                "body": "Agent has no recorded findings in the current research state.",
+                "category": "observation",
+                "confidence": 0.0,
+            }
+
+        leaderboard_row = args.get("leaderboard_row")
+        if not isinstance(leaderboard_row, dict):
+            leaderboard_row = _resolve_top_leaderboard_row(config)
+
+        return sync_peer_finding(
+            repo_id=repo_id,
+            challenge_id=challenge_id,
+            agent_id=agent_id,
+            top_finding=top_finding,
+            leaderboard_row=leaderboard_row,
+            iso_now=utc_now_iso(),
+            repo_type=args.get("repo_type", "dataset"),
+            token=args.get("token"),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _resolve_agent_id(config: Any) -> str:
+    """Pick a stable agent identifier — env var, project name, fallback."""
+    import os
+    return (
+        os.environ.get("CRUCIBLE_AGENT_ID")
+        or getattr(config, "name", "")
+        or "crucible-agent"
+    )
+
+
+def _resolve_top_finding(config: Any) -> dict[str, Any] | None:
+    """Best-effort: find the highest-confidence finding from ResearchState."""
+    try:
+        from crucible.researcher.state import ResearchState
+        state_path = config.project_root / config.research_state_file
+        if not state_path.exists():
+            return None
+        rs = ResearchState(state_path)
+        if not rs.history:
+            return None
+        # Pick the most recent / highest-confidence non-rejected entry.
+        scored = [
+            (float(f.get("confidence", 0.0)), f)
+            for f in (rs.history or [])
+            if isinstance(f, dict) and f.get("category") != "rejected_hypothesis"
+        ]
+        if not scored:
+            return None
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1]
+    except Exception:
+        return None
+
+
+def _resolve_top_leaderboard_row(config: Any) -> dict[str, Any] | None:
+    """Best-effort: fetch the top-1 leaderboard row."""
+    try:
+        from crucible.analysis.leaderboard import leaderboard
+        from crucible.analysis.results import completed_results
+        results = completed_results(config)
+        if not results:
+            return None
+        ranked = leaderboard(results, top_n=1)
+        return ranked[0] if ranked else None
+    except Exception:
+        return None
+
+
 def note_generate_paper_draft(args: dict[str, Any]) -> dict[str, Any]:
     """Generate a markdown paper draft from a research track.
 
@@ -7206,6 +7322,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_openreview_search": research_openreview_search,
     "evaluator_list": evaluator_list,
     "note_generate_paper_draft": note_generate_paper_draft,
+    "research_peer_sync": research_peer_sync,
     "hpo_create_study": hpo_create_study,
     "hpo_ask_trial": hpo_ask_trial,
     "hpo_tell_result": hpo_tell_result,

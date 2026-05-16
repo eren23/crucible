@@ -3546,6 +3546,59 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="research_peer_sync",
+        description=(
+            "Share + pull top findings with peer agents racing on the same "
+            "challenge_id, via a shared HuggingFace Discussion thread "
+            "(Phase 4.3). Each call posts the agent's current top finding "
+            "and reads peers' previously-posted findings from the same "
+            "thread. Title convention: 'crucible-peer-sync:<challenge_id>'.\n\n"
+            "Best-effort: a network outage or missing HF SDK degrades to "
+            "{peer_count: 0, peers: []} rather than blocking the loop. "
+            "Secret redaction is applied to the posted body so a finding "
+            "containing an env dump won't leak credentials.\n\n"
+            "REQUIRES: challenge_id. Optional: repo_id (default from "
+            "hf_collab.leaderboard_repo), agent_id (default from "
+            "CRUCIBLE_AGENT_ID env or project name), top_finding "
+            "(overrides auto-pick from ResearchState), leaderboard_row.\n"
+            "RETURNS: {challenge_id, agent_id, thread_num, thread_url, "
+            "posted_url, peer_count, peers: [{agent_id, ts, body, ...}]}\n"
+            "NEXT: feed peers into the next iteration's literature_context, "
+            "or reference them in research_request_prompt(stage='hypothesis')."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "challenge_id": {"type": "string"},
+                "repo_id": {"type": "string"},
+                "repo_type": {
+                    "type": "string",
+                    "enum": ["dataset", "model", "space"],
+                    "default": "dataset",
+                },
+                "agent_id": {"type": "string"},
+                "top_finding": {
+                    "type": "object",
+                    "description": (
+                        "Override the auto-picked top finding. Shape: "
+                        "{title, body, category, confidence}."
+                    ),
+                    "additionalProperties": True,
+                },
+                "leaderboard_row": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+                "token": {
+                    "type": "string",
+                    "description": "HF token. Falls back to HF_TOKEN env.",
+                },
+            },
+            "required": ["challenge_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="note_generate_paper_draft",
         description=(
             "Generate a structured markdown paper draft from a research track "
