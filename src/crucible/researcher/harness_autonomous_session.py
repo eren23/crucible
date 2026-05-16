@@ -24,25 +24,21 @@ mis-separated judge panels fail before any pod time is consumed.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-
-import yaml
+from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError
-from crucible.core.file_lock import file_lock as _core_file_lock
 from crucible.core.log import utc_now_iso
+from crucible.researcher.session_base import (
+    BudgetExceeded,
+    SessionBase,
+    fingerprint_prompt as _fingerprint,
+)
 
 _SESSIONS_DIRNAME = "harness_autonomous_sessions"
-_DOOM_LOOP_WINDOW = 5
-_DEFAULT_LOCK_TIMEOUT = 30.0
-_CREATE_LOCK_FILENAME = ".create.lock"
 
 
 class HarnessAutonomousSessionError(ResearcherError):
@@ -51,41 +47,6 @@ class HarnessAutonomousSessionError(ResearcherError):
 
 class HarnessDoomLoopDetected(ResearcherError):
     """The harness loop produced N identical proposal prompts in a row."""
-
-
-def _file_lock(
-    lock_path: Path,
-    *,
-    timeout: float = _DEFAULT_LOCK_TIMEOUT,
-    poll_interval: float = 0.1,
-):
-    """Thin wrapper around the core file_lock that raises
-    :class:`HarnessAutonomousSessionError` on timeout."""
-    return _core_file_lock(
-        lock_path,
-        timeout=timeout,
-        poll_interval=poll_interval,
-        on_timeout=lambda msg: HarnessAutonomousSessionError(
-            msg.replace("file lock", "harness session lock")
-        ),
-    )
-
-
-def _sessions_dir(project_root: Path) -> Path:
-    return Path(project_root) / ".crucible" / _SESSIONS_DIRNAME
-
-
-def _session_yaml_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.yaml"
-
-
-def _session_jsonl_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.jsonl"
-
-
-def _fingerprint(system: str | None, user: str | None) -> str:
-    combined = f"{system or ''}\n\n{user or ''}"
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
 
 
 def _make_optimizer(
@@ -108,92 +69,28 @@ def _make_optimizer(
     )
 
 
-class HarnessAutonomousSession:
-    """Persisted harness-optimization autonomous loop session."""
+class HarnessAutonomousSession(SessionBase):
+    """Persisted harness-optimization autonomous loop session.
 
-    SCHEMA_VERSION = 1
+    Inherits common lifecycle from :class:`SessionBase`.
+    """
+
+    SESSIONS_DIRNAME = _SESSIONS_DIRNAME
+    NOT_FOUND_EXC = HarnessAutonomousSessionError
+    LOCK_TIMEOUT_EXC = HarnessAutonomousSessionError
+    DOOM_LOOP_EXC = HarnessDoomLoopDetected
+
     STAGE_PROPOSAL = "proposal"
     STAGE_BENCHMARK_WAIT = "benchmark_wait"
-    STATUS_RUNNING = "running"
-    STATUS_DONE = "done"
-    STATUS_CANCELED = "canceled"
-    STATUS_ERROR = "error"
-
-    def __init__(self, config: ProjectConfig, session_id: str) -> None:
-        self.config = config
-        self.session_id = session_id
-        self.state_data: dict[str, Any] = {}
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    @property
-    def yaml_path(self) -> Path:
-        return _session_yaml_path(self.config.project_root, self.session_id)
-
-    @property
-    def jsonl_path(self) -> Path:
-        return _session_jsonl_path(self.config.project_root, self.session_id)
-
-    @property
-    def lock_path(self) -> Path:
-        return _sessions_dir(self.config.project_root) / f"{self.session_id}.lock"
-
-    def load(self) -> "HarnessAutonomousSession":
-        if not self.yaml_path.exists():
-            raise HarnessAutonomousSessionError(
-                f"Harness session {self.session_id!r} not found at {self.yaml_path}"
-            )
-        self.state_data = yaml.safe_load(self.yaml_path.read_text(encoding="utf-8")) or {}
-        return self
-
-    def save(self) -> None:
-        self.state_data["updated_at"] = utc_now_iso()
-        self.yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.yaml_path.with_suffix(self.yaml_path.suffix + ".tmp")
-        tmp.write_text(yaml.safe_dump(self.state_data, sort_keys=False), encoding="utf-8")
-        os.replace(tmp, self.yaml_path)
-
-    def append_event(self, event_type: str, **extra: Any) -> None:
-        self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-        record = {"ts": utc_now_iso(), "event": event_type, **extra}
-        with self.jsonl_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def _create_lock_path(cls, config: ProjectConfig) -> Path:
-        return _sessions_dir(config.project_root) / _CREATE_LOCK_FILENAME
 
     @classmethod
     def find_active(
         cls, config: ProjectConfig, tree_name: str
     ) -> "HarnessAutonomousSession | None":
-        sessions_dir = _sessions_dir(config.project_root)
-        if not sessions_dir.exists():
-            return None
-        candidates: list[tuple[str, str]] = []
-        for p in sessions_dir.glob("*.yaml"):
-            try:
-                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            except (yaml.YAMLError, OSError):
-                continue
-            if data.get("tree_name") != tree_name:
-                continue
-            status = data.get("status")
-            if status in (cls.STATUS_DONE, cls.STATUS_CANCELED, cls.STATUS_ERROR):
-                continue
-            candidates.append((data.get("updated_at", ""), p.stem))
-        if not candidates:
-            return None
-        candidates.sort(reverse=True)
-        session = cls(config, candidates[0][1])
-        session.load()
-        return session
+        for _ts, sid, data in cls._find_active_yamls(config):
+            if data.get("tree_name") == tree_name:
+                return cls(config, sid).load()
+        return None
 
     @classmethod
     def create(
@@ -205,8 +102,9 @@ class HarnessAutonomousSession:
         iterations: int,
         n_candidates: int = 3,
         dry_run: bool = False,
+        budget_usd: float | None = None,
     ) -> "HarnessAutonomousSession":
-        with _file_lock(cls._create_lock_path(config)):
+        with cls._file_lock(cls._create_lock_path(config)):
             existing = cls.find_active(config, tree_name)
             if existing is not None:
                 return existing
@@ -244,6 +142,8 @@ class HarnessAutonomousSession:
                 "iterations_planned": int(iterations),
                 "iterations_completed": 0,
                 "current_iteration": 0,
+                "budget_usd": budget_usd,
+                "budget_spent_usd": 0.0,
                 "last_prompt_fingerprint": None,
                 "recent_fingerprints": [],
                 "last_pending_node_ids": [],
@@ -256,19 +156,14 @@ class HarnessAutonomousSession:
                 domain_spec=domain_spec,
                 iterations_planned=iterations,
                 n_candidates=n_candidates,
+                budget_usd=budget_usd,
             )
             return session
 
     # ------------------------------------------------------------------
-    # Driving
+    # Driving (is_terminal, cancel, _mark_error, _refresh_budget,
+    # doom-loop helpers inherited from SessionBase)
     # ------------------------------------------------------------------
-
-    def is_terminal(self) -> bool:
-        return self.state_data.get("status") in (
-            self.STATUS_DONE,
-            self.STATUS_CANCELED,
-            self.STATUS_ERROR,
-        )
 
     def _build_optimizer(self):
         return _make_optimizer(
@@ -316,20 +211,12 @@ class HarnessAutonomousSession:
         system, user = optimizer._build_proposal_prompt(int(self.state_data["n_candidates"]))
         fingerprint = _fingerprint(system, user)
 
-        # Doom-loop detection
-        recent = list(self.state_data.get("recent_fingerprints") or [])
-        recent.append(fingerprint)
-        if len(recent) > _DOOM_LOOP_WINDOW:
-            recent = recent[-_DOOM_LOOP_WINDOW:]
-        if len(recent) >= _DOOM_LOOP_WINDOW and len(set(recent)) == 1:
-            self._mark_error(
-                f"Doom-loop detected: identical proposal prompt fingerprint "
-                f"{fingerprint} for {_DOOM_LOOP_WINDOW} iterations."
-            )
-            raise HarnessDoomLoopDetected(self.state_data["last_error"])
+        # Doom-loop detection via shared base class.
+        self._check_doom_loop(fingerprint, stage_label="proposal")
 
-        self.state_data["recent_fingerprints"] = recent
-        self.state_data["last_prompt_fingerprint"] = fingerprint
+        # Phase 1.8: refresh budget before returning the prompt.
+        self._refresh_budget_and_maybe_cancel()
+
         self.save()
         self.append_event(
             "proposal_prompted",
@@ -363,7 +250,7 @@ class HarnessAutonomousSession:
         between submit and continue is to drive collect_results and
         tree_sync_results so pending nodes get their metrics.
         """
-        with _file_lock(self.lock_path):
+        with self._file_lock(self.lock_path):
             self.load()
             if self.is_terminal():
                 raise HarnessAutonomousSessionError(
@@ -453,31 +340,6 @@ class HarnessAutonomousSession:
                 ),
             }
 
-    def cancel(self, reason: str = "") -> dict[str, Any]:
-        with _file_lock(self.lock_path):
-            self.load()
-            if self.is_terminal():
-                return {
-                    "session_id": self.session_id,
-                    "session_status": self.state_data["status"],
-                    "already_terminal": True,
-                }
-            self.state_data["status"] = self.STATUS_CANCELED
-            self.state_data["last_error"] = reason or None
-            self.save()
-            self.append_event("canceled", reason=reason)
-            return {
-                "session_id": self.session_id,
-                "session_status": self.STATUS_CANCELED,
-                "already_terminal": False,
-            }
-
-    def _mark_error(self, message: str) -> None:
-        self.state_data["status"] = self.STATUS_ERROR
-        self.state_data["last_error"] = message
-        self.save()
-        self.append_event("error", message=message)
-
 
 # ---------------------------------------------------------------------------
 # Action dispatch
@@ -492,6 +354,7 @@ def action_start(
     iterations: int,
     n_candidates: int = 3,
     dry_run: bool = False,
+    budget_usd: float | None = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise CrucibleError("harness_autonomous_loop: iterations must be >= 1")
@@ -504,6 +367,7 @@ def action_start(
         iterations=iterations,
         n_candidates=n_candidates,
         dry_run=dry_run,
+        budget_usd=budget_usd,
     )
     return session.build_proposal_prompt()
 

@@ -22,26 +22,21 @@ marks the session errored, mirroring the autonomous_research_loop guard.
 """
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 import uuid
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-
-import yaml
+from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitError
-from crucible.core.file_lock import file_lock as _core_file_lock
 from crucible.core.log import utc_now_iso
 from crucible.researcher.search_tree import SearchTree
+from crucible.researcher.session_base import (
+    BudgetExceeded,
+    SessionBase,
+    fingerprint_prompt as _fingerprint,
+)
 
 _SESSIONS_DIRNAME = "tree_autonomous_sessions"
-_DOOM_LOOP_WINDOW = 5
-_DEFAULT_LOCK_TIMEOUT = 30.0
-_CREATE_LOCK_FILENAME = ".create.lock"
 
 
 class TreeAutonomousSessionError(ResearcherError):
@@ -52,130 +47,31 @@ class TreeDoomLoopDetected(ResearcherError):
     """The tree loop produced N identical expansion prompts in a row."""
 
 
-def _file_lock(
-    lock_path: Path,
-    *,
-    timeout: float = _DEFAULT_LOCK_TIMEOUT,
-    poll_interval: float = 0.1,
-):
-    """Thin wrapper around :func:`crucible.core.file_lock.file_lock` that
-    raises :class:`TreeAutonomousSessionError` on timeout."""
-    return _core_file_lock(
-        lock_path,
-        timeout=timeout,
-        poll_interval=poll_interval,
-        on_timeout=lambda msg: TreeAutonomousSessionError(
-            msg.replace("file lock", "tree session lock")
-        ),
-    )
-
-
-def _sessions_dir(project_root: Path) -> Path:
-    return Path(project_root) / ".crucible" / _SESSIONS_DIRNAME
-
-
-def _session_yaml_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.yaml"
-
-
-def _session_jsonl_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.jsonl"
-
-
-def _fingerprint(system: str | None, user: str | None) -> str:
-    combined = f"{system or ''}\n\n{user or ''}"
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-
-
 def _tree_dir(config: ProjectConfig, tree_name: str) -> Path:
     return Path(config.project_root) / ".crucible" / "search_trees" / tree_name
 
 
-class TreeAutonomousSession:
-    """Persisted tree-search autonomous loop session."""
+class TreeAutonomousSession(SessionBase):
+    """Persisted tree-search autonomous loop session.
 
-    SCHEMA_VERSION = 1
-    STATUS_RUNNING = "running"
-    STATUS_DONE = "done"
-    STATUS_CANCELED = "canceled"
-    STATUS_ERROR = "error"
+    Inherits common lifecycle (paths, save/load/append_event, cancel,
+    is_terminal, doom-loop, budget refresh) from :class:`SessionBase`.
+    """
 
-    def __init__(self, config: ProjectConfig, session_id: str) -> None:
-        self.config = config
-        self.session_id = session_id
-        self.state_data: dict[str, Any] = {}
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    @property
-    def yaml_path(self) -> Path:
-        return _session_yaml_path(self.config.project_root, self.session_id)
-
-    @property
-    def jsonl_path(self) -> Path:
-        return _session_jsonl_path(self.config.project_root, self.session_id)
-
-    @property
-    def lock_path(self) -> Path:
-        return _sessions_dir(self.config.project_root) / f"{self.session_id}.lock"
-
-    def load(self) -> "TreeAutonomousSession":
-        if not self.yaml_path.exists():
-            raise TreeAutonomousSessionError(
-                f"Tree session {self.session_id!r} not found at {self.yaml_path}"
-            )
-        self.state_data = yaml.safe_load(self.yaml_path.read_text(encoding="utf-8")) or {}
-        return self
-
-    def save(self) -> None:
-        self.state_data["updated_at"] = utc_now_iso()
-        self.yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.yaml_path.with_suffix(self.yaml_path.suffix + ".tmp")
-        tmp.write_text(yaml.safe_dump(self.state_data, sort_keys=False), encoding="utf-8")
-        os.replace(tmp, self.yaml_path)
-
-    def append_event(self, event_type: str, **extra: Any) -> None:
-        self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-        record = {"ts": utc_now_iso(), "event": event_type, **extra}
-        with self.jsonl_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def _create_lock_path(cls, config: ProjectConfig) -> Path:
-        return _sessions_dir(config.project_root) / _CREATE_LOCK_FILENAME
+    SESSIONS_DIRNAME = _SESSIONS_DIRNAME
+    NOT_FOUND_EXC = TreeAutonomousSessionError
+    LOCK_TIMEOUT_EXC = TreeAutonomousSessionError
+    DOOM_LOOP_EXC = TreeDoomLoopDetected
 
     @classmethod
     def find_active(
         cls, config: ProjectConfig, tree_name: str
     ) -> "TreeAutonomousSession | None":
         """Return the most recent non-terminal session for this tree, if any."""
-        sessions_dir = _sessions_dir(config.project_root)
-        if not sessions_dir.exists():
-            return None
-        candidates: list[tuple[str, str]] = []
-        for p in sessions_dir.glob("*.yaml"):
-            try:
-                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            except (yaml.YAMLError, OSError):
-                continue
-            if data.get("tree_name") != tree_name:
-                continue
-            status = data.get("status")
-            if status in (cls.STATUS_DONE, cls.STATUS_CANCELED, cls.STATUS_ERROR):
-                continue
-            candidates.append((data.get("updated_at", ""), p.stem))
-        if not candidates:
-            return None
-        candidates.sort(reverse=True)
-        session = cls(config, candidates[0][1])
-        session.load()
-        return session
+        for _ts, sid, data in cls._find_active_yamls(config):
+            if data.get("tree_name") == tree_name:
+                return cls(config, sid).load()
+        return None
 
     @classmethod
     def create(
@@ -185,9 +81,10 @@ class TreeAutonomousSession:
         tree_name: str,
         iterations: int,
         n_children: int = 3,
+        budget_usd: float | None = None,
     ) -> "TreeAutonomousSession":
         """Create a session (or return the existing one for this tree)."""
-        with _file_lock(cls._create_lock_path(config)):
+        with cls._file_lock(cls._create_lock_path(config)):
             existing = cls.find_active(config, tree_name)
             if existing is not None:
                 return existing
@@ -215,6 +112,8 @@ class TreeAutonomousSession:
                 "current_iteration": 0,
                 "n_children": int(n_children),
                 "current_node_id": None,
+                "budget_usd": budget_usd,
+                "budget_spent_usd": 0.0,
                 "last_tree_snapshot": None,
                 "last_prompt_fingerprint": None,
                 "recent_fingerprints": [],
@@ -226,19 +125,14 @@ class TreeAutonomousSession:
                 tree_name=tree_name,
                 iterations_planned=iterations,
                 n_children=n_children,
+                budget_usd=budget_usd,
             )
             return session
 
     # ------------------------------------------------------------------
-    # Driving
+    # Driving (is_terminal, cancel, _mark_error, _refresh_budget,
+    # doom-loop helpers inherited from SessionBase)
     # ------------------------------------------------------------------
-
-    def is_terminal(self) -> bool:
-        return self.state_data.get("status") in (
-            self.STATUS_DONE,
-            self.STATUS_CANCELED,
-            self.STATUS_ERROR,
-        )
 
     def _select_next_expandable(self, tree: SearchTree) -> str | None:
         """Pick the next expandable node (best-metric among completed-but-
@@ -319,20 +213,14 @@ class TreeAutonomousSession:
         tree_snapshot = tree.snapshot(node_id=node_id)
         fingerprint = _fingerprint(prompt["system"], prompt["user"])
 
-        # Doom-loop detection
-        recent = list(self.state_data.get("recent_fingerprints") or [])
-        recent.append(fingerprint)
-        if len(recent) > _DOOM_LOOP_WINDOW:
-            recent = recent[-_DOOM_LOOP_WINDOW:]
-        if len(recent) >= _DOOM_LOOP_WINDOW and len(set(recent)) == 1:
-            self._mark_error(
-                f"Doom-loop detected: identical expansion prompt fingerprint "
-                f"{fingerprint} for {_DOOM_LOOP_WINDOW} iterations."
-            )
-            raise TreeDoomLoopDetected(self.state_data["last_error"])
+        # Doom-loop detection via shared base class — raises
+        # TreeDoomLoopDetected when the recent window is fully identical.
+        self._check_doom_loop(fingerprint, stage_label="expansion")
 
-        self.state_data["recent_fingerprints"] = recent
-        self.state_data["last_prompt_fingerprint"] = fingerprint
+        # Phase 1.8: refresh budget before returning the prompt. Auto-
+        # cancels + raises BudgetExceeded if the cap is hit.
+        self._refresh_budget_and_maybe_cancel()
+
         self.state_data["last_tree_snapshot"] = tree_snapshot
         self.state_data["current_node_id"] = node_id
         self.save()
@@ -357,7 +245,7 @@ class TreeAutonomousSession:
 
     def apply_response(self, response: Any, submitted_snapshot: dict | None) -> dict[str, Any]:
         """Apply orchestrator response under per-session + tree locks."""
-        with _file_lock(self.lock_path):
+        with self._file_lock(self.lock_path):
             self.load()
             if self.is_terminal():
                 raise TreeAutonomousSessionError(
@@ -426,31 +314,6 @@ class TreeAutonomousSession:
                 "iteration": self.state_data["current_iteration"],
             }
 
-    def cancel(self, reason: str = "") -> dict[str, Any]:
-        with _file_lock(self.lock_path):
-            self.load()
-            if self.is_terminal():
-                return {
-                    "session_id": self.session_id,
-                    "session_status": self.state_data["status"],
-                    "already_terminal": True,
-                }
-            self.state_data["status"] = self.STATUS_CANCELED
-            self.state_data["last_error"] = reason or None
-            self.save()
-            self.append_event("canceled", reason=reason)
-            return {
-                "session_id": self.session_id,
-                "session_status": self.STATUS_CANCELED,
-                "already_terminal": False,
-            }
-
-    def _mark_error(self, message: str) -> None:
-        self.state_data["status"] = self.STATUS_ERROR
-        self.state_data["last_error"] = message
-        self.save()
-        self.append_event("error", message=message)
-
 
 # ---------------------------------------------------------------------------
 # Action dispatch
@@ -463,6 +326,7 @@ def action_start(
     tree_name: str,
     iterations: int,
     n_children: int = 3,
+    budget_usd: float | None = None,
 ) -> dict[str, Any]:
     """Start (or resume) a tree autonomous loop session."""
     if iterations < 1:
@@ -474,6 +338,7 @@ def action_start(
         tree_name=tree_name,
         iterations=iterations,
         n_children=n_children,
+        budget_usd=budget_usd,
     )
     return session.build_next_prompt()
 

@@ -28,48 +28,26 @@ iterations trip :func:`detect_doom_loop` and the session aborts.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import uuid
-from collections import deque
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import yaml
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitError
-from crucible.core.file_lock import file_lock as _core_file_lock
 from crucible.core.log import utc_now_iso
 from crucible.researcher import orchestrator_api as oa
+from crucible.researcher.session_base import (
+    BudgetExceeded,
+    SessionBase,
+    fingerprint_prompt as _fingerprint,
+)
 from crucible.researcher.state import ResearchState
 
 _SESSIONS_DIRNAME = "autonomous_sessions"
-_DOOM_LOOP_WINDOW = 5
 _DEFAULT_BUDGET_HOURS_FALLBACK = 10.0
-_DEFAULT_SESSION_LOCK_TIMEOUT = 30.0
-_CREATE_LOCK_FILENAME = ".create.lock"
-
-
-def _file_lock(
-    lock_path: Path,
-    *,
-    timeout: float = _DEFAULT_SESSION_LOCK_TIMEOUT,
-    poll_interval: float = 0.1,
-):
-    """Thin wrapper around :func:`crucible.core.file_lock.file_lock` that
-    raises :class:`AutonomousSessionError` on timeout (rather than the
-    generic ``FileLockTimeout``)."""
-    return _core_file_lock(
-        lock_path,
-        timeout=timeout,
-        poll_interval=poll_interval,
-        on_timeout=lambda msg: AutonomousSessionError(
-            msg.replace("file lock", "session lock")
-        ),
-    )
 
 
 class AutonomousSessionError(ResearcherError):
@@ -85,37 +63,11 @@ class DoomLoopDetected(ResearcherError):
     """
 
 
-class BudgetExceeded(ResearcherError):
-    """Session's wall-clock × declared-pod-rate spend exceeded budget_usd.
-
-    Session is automatically marked canceled with the reason captured in
-    state_data.last_error. The orchestrator can inspect ``budget_spent_usd``
-    in the session state to confirm.
-    """
-
-
-def _sessions_dir(project_root: Path) -> Path:
-    return Path(project_root) / ".crucible" / _SESSIONS_DIRNAME
-
-
-def _session_yaml_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.yaml"
-
-
-def _session_jsonl_path(project_root: Path, session_id: str) -> Path:
-    return _sessions_dir(project_root) / f"{session_id}.jsonl"
-
-
 def _new_session_id() -> str:
     return str(uuid.uuid4())
 
 
-def _fingerprint(system: str | None, user: str | None) -> str:
-    combined = f"{system or ''}\n\n{user or ''}"
-    return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:16]
-
-
-class AutonomousSession:
+class AutonomousSession(SessionBase):
     """A persisted autonomous research loop session.
 
     The session owns no LLM client — it brokers between the
@@ -126,90 +78,28 @@ class AutonomousSession:
     existing ``session_id`` rather than creating a new one (parallel
     autonomous loops in the same project would race over
     ``research_state.jsonl``).
+
+    Inherits common lifecycle (paths, save/load/append_event,
+    cancel, is_terminal, doom-loop fingerprint windowing, budget
+    refresh) from :class:`SessionBase`.
     """
 
-    SCHEMA_VERSION = 1
+    SESSIONS_DIRNAME = _SESSIONS_DIRNAME
+    NOT_FOUND_EXC = AutonomousSessionError
+    LOCK_TIMEOUT_EXC = AutonomousSessionError
+    DOOM_LOOP_EXC = DoomLoopDetected
+
     STAGE_HYPOTHESIS = "hypothesis"
     STAGE_REFLECTION = "reflection"
-    STATUS_RUNNING = "running"
-    STATUS_DONE = "done"
-    STATUS_CANCELED = "canceled"
-    STATUS_ERROR = "error"
-
-    def __init__(self, config: ProjectConfig, session_id: str) -> None:
-        self.config = config
-        self.session_id = session_id
-        self.state_data: dict[str, Any] = {}
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    @property
-    def yaml_path(self) -> Path:
-        return _session_yaml_path(self.config.project_root, self.session_id)
-
-    @property
-    def jsonl_path(self) -> Path:
-        return _session_jsonl_path(self.config.project_root, self.session_id)
-
-    @property
-    def lock_path(self) -> Path:
-        """Per-session advisory lock — serializes apply_response / cancel."""
-        return _sessions_dir(self.config.project_root) / f"{self.session_id}.lock"
-
-    def load(self) -> "AutonomousSession":
-        if not self.yaml_path.exists():
-            raise AutonomousSessionError(
-                f"Session {self.session_id!r} not found at {self.yaml_path}"
-            )
-        self.state_data = yaml.safe_load(self.yaml_path.read_text(encoding="utf-8")) or {}
-        return self
-
-    def save(self) -> None:
-        self.state_data["updated_at"] = utc_now_iso()
-        self.yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.yaml_path.with_suffix(self.yaml_path.suffix + ".tmp")
-        tmp.write_text(yaml.safe_dump(self.state_data, sort_keys=False), encoding="utf-8")
-        os.replace(tmp, self.yaml_path)
-
-    def append_event(self, event_type: str, **extra: Any) -> None:
-        self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-        record = {"ts": utc_now_iso(), "event": event_type, **extra}
-        with self.jsonl_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     @classmethod
     def find_active(cls, config: ProjectConfig) -> "AutonomousSession | None":
-        """Return the most recent non-terminal session for this project, if any."""
-        sessions_dir = _sessions_dir(config.project_root)
-        if not sessions_dir.exists():
-            return None
-        candidates: list[tuple[str, str]] = []  # (updated_at, session_id)
-        for p in sessions_dir.glob("*.yaml"):
-            try:
-                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-            except (yaml.YAMLError, OSError):
-                continue
-            status = data.get("status")
-            if status in (cls.STATUS_DONE, cls.STATUS_CANCELED, cls.STATUS_ERROR):
-                continue
-            candidates.append((data.get("updated_at", ""), p.stem))
+        """Return the most recent non-terminal session for this project."""
+        candidates = cls._find_active_yamls(config)
         if not candidates:
             return None
-        candidates.sort(reverse=True)
-        sid = candidates[0][1]
-        session = cls(config, sid)
-        session.load()
-        return session
-
-    @classmethod
-    def _create_lock_path(cls, config: ProjectConfig) -> Path:
-        return _sessions_dir(config.project_root) / _CREATE_LOCK_FILENAME
+        _, sid, _ = candidates[0]
+        return cls(config, sid).load()
 
     @classmethod
     def create(
@@ -225,7 +115,7 @@ class AutonomousSession:
     ) -> "AutonomousSession":
         # Lock around find_active + write to prevent two concurrent
         # action_start calls from each creating distinct sessions.
-        with _file_lock(cls._create_lock_path(config)):
+        with cls._file_lock(cls._create_lock_path(config)):
             existing = cls.find_active(config)
             if existing is not None:
                 # Idempotent: second start while session running returns the same one.
@@ -280,56 +170,9 @@ class AutonomousSession:
             return session
 
     # ------------------------------------------------------------------
-    # Driving
+    # Driving (is_terminal, cancel, _mark_error, _refresh_budget_and_maybe_cancel
+    # are inherited from SessionBase)
     # ------------------------------------------------------------------
-
-    def is_terminal(self) -> bool:
-        return self.state_data.get("status") in (
-            self.STATUS_DONE,
-            self.STATUS_CANCELED,
-            self.STATUS_ERROR,
-        )
-
-    def _refresh_budget_and_maybe_cancel(self) -> None:
-        """Recompute spend; if over budget, mark session canceled + raise.
-
-        Phase 1.8: per-session cost guard. ``budget_usd`` was already
-        accepted by ``create()`` but never enforced. Now called at the
-        top of ``build_prompt`` (before any new prompt is constructed)
-        AND at the bottom of ``_apply_response_locked`` (after a
-        successful submit, while still holding the session lock). The
-        spend estimate (wall-clock × declared pod rate from
-        cost_tracker) auto-cancels the session when the cap is reached.
-
-        Skipped when ``budget_usd`` is None (no cap configured).
-        """
-        budget = self.state_data.get("budget_usd")
-        if budget is None:
-            return
-        from crucible.runner.cost_tracker import compute_session_spend
-
-        spend = compute_session_spend(
-            self.config, self.state_data.get("created_at", "")
-        )
-        self.state_data["budget_spent_usd"] = spend["spend_usd"]
-        self.state_data["last_budget_check"] = spend
-        if spend["spend_usd"] >= float(budget):
-            reason = (
-                f"budget exceeded: spent ${spend['spend_usd']:.2f} "
-                f"(${spend['hourly_rate']:.2f}/hr × {spend['hours_elapsed']:.2f}h) "
-                f"≥ cap ${float(budget):.2f}"
-            )
-            self.state_data["status"] = self.STATUS_CANCELED
-            self.state_data["last_error"] = reason
-            self.save()
-            self.append_event(
-                "budget_exceeded",
-                budget_usd=float(budget),
-                spend_usd=spend["spend_usd"],
-                hourly_rate=spend["hourly_rate"],
-                hours_elapsed=spend["hours_elapsed"],
-            )
-            raise BudgetExceeded(reason)
 
     def build_prompt(self, state: ResearchState) -> dict[str, Any]:
         """Build the prompt for the session's current stage."""
@@ -367,21 +210,11 @@ class AutonomousSession:
         )
         fingerprint = _fingerprint(prompt.get("system"), prompt.get("user"))
 
-        # Doom-loop detection: same prompt fingerprint N times in a row.
-        recent = list(self.state_data.get("recent_fingerprints") or [])
-        recent.append(fingerprint)
-        if len(recent) > _DOOM_LOOP_WINDOW:
-            recent = recent[-_DOOM_LOOP_WINDOW:]
-        if len(recent) >= _DOOM_LOOP_WINDOW and len(set(recent)) == 1:
-            self._mark_error(
-                f"Doom-loop detected: identical {stage} prompt fingerprint "
-                f"{fingerprint} for {_DOOM_LOOP_WINDOW} iterations. "
-                f"Belief/reflection updates aren't moving the prompt forward."
-            )
-            raise DoomLoopDetected(self.state_data["last_error"])
+        # Doom-loop detection via shared base class. Raises DOOM_LOOP_EXC
+        # (DoomLoopDetected for this subclass) when the recent window is
+        # fully identical.
+        self._check_doom_loop(fingerprint, stage_label=stage)
 
-        self.state_data["recent_fingerprints"] = recent
-        self.state_data["last_prompt_fingerprint"] = fingerprint
         self.state_data["last_state_snapshot"] = prompt.get("state_snapshot")
         self.save()
         self.append_event(
@@ -419,7 +252,7 @@ class AutonomousSession:
         for the research-state file; the two locks are nested in this
         consistent order (session → research-state) by every caller.
         """
-        with _file_lock(self.lock_path):
+        with self._file_lock(self.lock_path):
             # Reload to see any state written by a peer that held the lock
             # before us.
             self.load()
@@ -504,34 +337,6 @@ class AutonomousSession:
             "session_status": self.state_data["status"],
             "apply_result": apply_result,
         }
-
-    def cancel(self, reason: str = "") -> dict[str, Any]:
-        with _file_lock(self.lock_path):
-            # Reload to see whether a concurrent submit already terminated us.
-            self.load()
-            if self.is_terminal():
-                return {
-                    "session_id": self.session_id,
-                    "session_status": self.state_data["status"],
-                    "checkpoint_path": str(self.yaml_path),
-                    "already_terminal": True,
-                }
-            self.state_data["status"] = self.STATUS_CANCELED
-            self.state_data["last_error"] = reason or None
-            self.save()
-            self.append_event("canceled", reason=reason)
-            return {
-                "session_id": self.session_id,
-                "session_status": self.STATUS_CANCELED,
-                "checkpoint_path": str(self.yaml_path),
-                "already_terminal": False,
-            }
-
-    def _mark_error(self, message: str) -> None:
-        self.state_data["status"] = self.STATUS_ERROR
-        self.state_data["last_error"] = message
-        self.save()
-        self.append_event("error", message=message)
 
 
 # ---------------------------------------------------------------------------

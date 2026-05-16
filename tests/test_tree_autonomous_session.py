@@ -215,6 +215,25 @@ class TestStatusAndCancel:
         assert status["tree_name"] == tree_name
         assert status["status"] == TreeAutonomousSession.STATUS_RUNNING
 
+    def test_budget_exceeded_auto_cancels(self, project_config, monkeypatch):
+        """Phase 1.8 propagation: tree session also enforces budget cap
+        via SessionBase._refresh_budget_and_maybe_cancel."""
+        from crucible.researcher.session_base import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        monkeypatch.setattr(
+            cost_tracker, "compute_session_spend",
+            lambda *a, **kw: {
+                "spend_usd": 100.0, "hours_elapsed": 1.0,
+                "hourly_rate": 100.0, "active_pods": 1,
+            },
+        )
+        tree_name = _make_expandable_tree(project_config)
+        with pytest.raises(BudgetExceeded):
+            tas.action_start(
+                project_config, tree_name=tree_name, iterations=3, budget_usd=5.0,
+            )
+
     def test_cancel_marks_canceled(self, project_config):
         tree_name = _make_expandable_tree(project_config)
         first = tas.action_start(project_config, tree_name=tree_name, iterations=2)

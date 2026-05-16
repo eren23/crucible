@@ -84,7 +84,7 @@ class Harness:
 # ---------------------------------------------------------------------------
 
 
-def _start(config, spec, tree_name, iterations=2, **kwargs):
+def _start(config, spec, tree_name="default", iterations=2, **kwargs):
     """Test helper: action_start with dry_run=True so benchmark doesn't dispatch."""
     return has.action_start(
         config, domain_spec=spec, tree_name=tree_name,
@@ -223,6 +223,23 @@ class TestStatusAndCancel:
         assert status["session_id"] == sid
         assert status["tree_name"] == "stat"
         assert status["status"] == HarnessAutonomousSession.STATUS_RUNNING
+
+    def test_budget_exceeded_auto_cancels(self, project_config, monkeypatch):
+        """Phase 1.8 propagation: harness session also enforces budget cap
+        via SessionBase._refresh_budget_and_maybe_cancel."""
+        from crucible.researcher.session_base import BudgetExceeded
+        from crucible.runner import cost_tracker
+
+        monkeypatch.setattr(
+            cost_tracker, "compute_session_spend",
+            lambda *a, **kw: {
+                "spend_usd": 100.0, "hours_elapsed": 1.0,
+                "hourly_rate": 100.0, "active_pods": 1,
+            },
+        )
+        config, spec = project_config
+        with pytest.raises(BudgetExceeded):
+            _start(config, spec, tree_name="bud", iterations=3, budget_usd=5.0)
 
     def test_cancel_marks_canceled(self, project_config):
         config, spec = project_config
