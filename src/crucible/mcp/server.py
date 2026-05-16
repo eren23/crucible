@@ -3367,6 +3367,28 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="evaluator_list",
+        description=(
+            "List registered evaluator plugins (Phase 3.3 plugin family). "
+            "Evaluators are the output side of the data pipeline — where "
+            "data_sources/ describes training inputs, evaluators/ describes "
+            "benchmarks scored against a trained checkpoint. Builtin: "
+            "lm_eval_harness. User plugins land under "
+            ".crucible/plugins/evaluators/*.py (project-local) or "
+            "~/.crucible-hub/plugins/evaluators/*.py (global) and are "
+            "auto-discovered on each list call.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {count, evaluators: [{name, type, source}, ...]}\n"
+            "NEXT: configure an evaluator in crucible.yaml under eval_suite "
+            "and wire it via eval_watch_start."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="research_openreview_search",
         description=(
             "Search OpenReview via the public /notes/search API. Complements "

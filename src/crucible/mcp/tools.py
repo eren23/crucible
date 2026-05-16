@@ -1624,6 +1624,33 @@ def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
     return {"query": query, "count": len(results), "results": results}
 
 
+def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List registered evaluator plugins.
+
+    Triggers plugin discovery (local + global) before listing so user
+    plugins under ``.crucible/plugins/evaluators/`` are picked up
+    without explicit registration.
+    """
+    from crucible.core.evaluators import (
+        describe_evaluator,
+        discover_evaluator_plugins,
+        list_evaluators,
+    )
+    try:
+        config = _get_config()
+        discover_evaluator_plugins(project_root=config.project_root)
+    except CrucibleError:
+        # Project not loaded yet — fall back to builtins + already-registered.
+        pass
+    names = list_evaluators()
+    return {
+        "count": len(names),
+        "evaluators": [
+            (describe_evaluator(name) or {"name": name}) for name in names
+        ],
+    }
+
+
 def research_openreview_search(args: dict[str, Any]) -> dict[str, Any]:
     """Search OpenReview via the public /notes/search API."""
     from crucible.researcher.openreview_search import search_openreview
@@ -6851,6 +6878,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_hf_search": research_hf_search,
     "research_arxiv_search": research_arxiv_search,
     "research_openreview_search": research_openreview_search,
+    "evaluator_list": evaluator_list,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,
