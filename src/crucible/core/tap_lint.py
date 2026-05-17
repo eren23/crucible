@@ -231,11 +231,25 @@ class L005_CruftDirectories(_BaseTapCheck):
         "__pycache__", ".pytest_cache", ".mypy_cache", "venv", ".venv",
     )
     _CRUFT_FILES = (".DS_Store",)
+    # When the bulk data has been migrated to HuggingFace, taps often want
+    # to leave a small `data/` or `checkpoints/` directory containing only
+    # a `README.md` pointer. That pattern is fine — flagging it punishes
+    # the right cleanup. Whitelist: a "cruft-named" directory with ONLY
+    # README.md inside is allowed.
+    _POINTER_DIR_NAMES = ("data", "checkpoints")
+
+    def _is_pointer_dir(self, entry: Path) -> bool:
+        if entry.name not in self._POINTER_DIR_NAMES:
+            return False
+        contents = list(entry.iterdir())
+        return len(contents) == 1 and contents[0].name == "README.md"
 
     def run(self, tap_root: Path) -> list[LintIssue]:
         issues: list[LintIssue] = []
         for entry in tap_root.iterdir():
             if entry.is_dir() and entry.name in self._CRUFT_NAMES:
+                if self._is_pointer_dir(entry):
+                    continue  # README-only pointer dir is allowed
                 issues.append(self._issue(
                     f"cruft directory committed: {entry.name}/",
                     entry,

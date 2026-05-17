@@ -167,6 +167,36 @@ class TestL005CruftDirectories:
         _add_plugin(tmp_path, "optimizers", "clean")
         assert L005_CruftDirectories().run(tmp_path) == []
 
+    def test_data_dir_with_only_readme_is_allowed(self, tmp_path: Path):
+        """When bulk data has been migrated to HF, leaving a `data/`
+        directory with only a README.md pointer is the right cleanup —
+        L005 shouldn't punish it."""
+        _make_tap(tmp_path)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "README.md").write_text(
+            "# Data — moved to HF\nSee https://huggingface.co/datasets/...\n",
+            encoding="utf-8",
+        )
+        assert L005_CruftDirectories().run(tmp_path) == []
+
+    def test_checkpoints_dir_with_only_readme_is_allowed(self, tmp_path: Path):
+        _make_tap(tmp_path)
+        (tmp_path / "checkpoints").mkdir()
+        (tmp_path / "checkpoints" / "README.md").write_text(
+            "# Checkpoints — moved to HF\n", encoding="utf-8",
+        )
+        assert L005_CruftDirectories().run(tmp_path) == []
+
+    def test_data_dir_with_other_files_still_flagged(self, tmp_path: Path):
+        """Pointer whitelist applies ONLY when the dir contains exclusively
+        README.md. Any other file in data/ trips the cruft check."""
+        _make_tap(tmp_path)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "README.md").write_text("ok", encoding="utf-8")
+        (tmp_path / "data" / "big.h5").write_bytes(b"x" * 100)
+        issues = L005_CruftDirectories().run(tmp_path)
+        assert any("data" in i.message for i in issues)
+
 
 class TestL006LargeFileInTap:
     def test_fires_for_file_over_1mb(self, tmp_path: Path):
