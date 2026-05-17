@@ -246,6 +246,200 @@ def validate_manifest_file(path: Path) -> ManifestValidationResult:
     return ManifestValidationResult(path=path, ok=ok, issues=issues)
 
 
+#: Required field set for a top-level ``tap.yaml`` manifest. A tap.yaml is
+#: optional today (filesystem walk still works without it), but if one
+#: exists it must declare these.
+_TAP_REQUIRED_FIELDS = ("name", "description", "version")
+
+#: Optional-but-recommended fields. Missing → warning.
+_TAP_RECOMMENDED_FIELDS = ("author", "license", "crucible_compat")
+
+
+def validate_tap_manifest_dict(data: dict[str, Any]) -> list[ValidationIssue]:
+    """Validate a loaded ``tap.yaml`` (top-level tap manifest) dict.
+
+    A tap manifest describes the tap repo itself — name, version, license,
+    upstream URL, maintainer — distinct from the per-plugin ``plugin.yaml``
+    manifests living under ``{type}/{name}/``. Returns a list of issues.
+    """
+    issues: list[ValidationIssue] = []
+    if not isinstance(data, dict):
+        return [ValidationIssue("error", "<root>", "tap.yaml must be a YAML mapping")]
+
+    # ── required ──────────────────────────────────────────────────────
+    name = data.get("name")
+    if not name:
+        issues.append(ValidationIssue("error", "name", "missing or empty"))
+    elif not isinstance(name, str):
+        issues.append(ValidationIssue("error", "name", f"must be a string, got {type(name).__name__}"))
+    elif not _NAME_PATTERN.match(name):
+        issues.append(ValidationIssue(
+            "error", "name",
+            f"{name!r} does not match [a-zA-Z_][a-zA-Z0-9_-]*"
+        ))
+
+    description = data.get("description")
+    if not description:
+        issues.append(ValidationIssue("error", "description", "missing or empty"))
+    elif not isinstance(description, str):
+        issues.append(ValidationIssue(
+            "error", "description", f"must be a string, got {type(description).__name__}"
+        ))
+    elif "\n" in description.strip():
+        # tap.yaml descriptions follow the same one-liner rule as plugin.yaml.
+        issues.append(ValidationIssue(
+            "warning", "description",
+            "should be a single line (move detail to README.md)"
+        ))
+
+    version = data.get("version")
+    if version is None:
+        issues.append(ValidationIssue("error", "version", "missing"))
+    elif not isinstance(version, (str, int, float)):
+        issues.append(ValidationIssue(
+            "error", "version", f"must be a string, got {type(version).__name__}"
+        ))
+    elif not _VERSION_PATTERN.match(str(version)):
+        issues.append(ValidationIssue(
+            "warning", "version",
+            f"{version!r} does not look like semver (expected M.m.p)"
+        ))
+
+    # ── recommended (warnings only) ────────────────────────────────────
+    for field_name in _TAP_RECOMMENDED_FIELDS:
+        val = data.get(field_name)
+        if val is None:
+            issues.append(ValidationIssue(
+                "warning", field_name, f"missing — recommended"
+            ))
+        elif not isinstance(val, str):
+            issues.append(ValidationIssue(
+                "error", field_name,
+                f"must be a string, got {type(val).__name__}",
+            ))
+
+    # ── purely optional fields ────────────────────────────────────────
+    for opt in ("homepage", "maintainer_contact"):
+        val = data.get(opt)
+        if val is not None and not isinstance(val, str):
+            issues.append(ValidationIssue(
+                "error", opt, f"must be a string, got {type(val).__name__}"
+            ))
+
+    return issues
+
+
+def validate_tap_manifest_file(path: Path) -> ManifestValidationResult:
+    """Validate the ``tap.yaml`` at *path*, returning a ManifestValidationResult.
+
+    Missing file is reported as a *warning* (not an error) because tap.yaml
+    is optional — older taps may not have one yet.
+    """
+    if not path.exists():
+        return ManifestValidationResult(
+            path=path,
+            ok=True,
+            issues=[ValidationIssue(
+                "warning", "<file>",
+                f"tap.yaml missing at {path} — recommended at tap root",
+            )],
+        )
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        return ManifestValidationResult(
+            path=path,
+            ok=False,
+            issues=[ValidationIssue("error", "<yaml>", f"invalid YAML: {exc}")],
+        )
+    issues = validate_tap_manifest_dict(raw)
+    ok = not any(i.severity == "error" for i in issues)
+    return ManifestValidationResult(path=path, ok=ok, issues=issues)
+
+
+# ---------------------------------------------------------------------------
+# crucible_compat version-range parsing & matching
+# ---------------------------------------------------------------------------
+
+# Each token is one of: >=X.Y, >X.Y, <=X.Y, <X.Y, ==X.Y, =X.Y. Tokens are
+# separated by commas. Numeric versions may have any number of dot-segments.
+_RANGE_TOKEN_RE = re.compile(r"^\s*(>=|<=|==|=|>|<)\s*([0-9]+(?:\.[0-9]+)*(?:[-+][a-zA-Z0-9.-]+)?)\s*$")
+
+
+def _parse_version(version: str, *, pad_to: int = 3) -> tuple[int, ...]:
+    """Parse a version string into a comparable integer tuple.
+
+    Ignores pre-release / build suffixes for comparison purposes (matches
+    the loose semver intent of crucible_compat: '>=0.2,<0.3' should match
+    '0.2.5-dev'). Zero-pads to *pad_to* segments so '0.2' and '0.2.0'
+    compare equal (otherwise Python tuple comparison treats (0,2) < (0,2,0)
+    which is wrong for semver).
+    """
+    base = re.split(r"[-+]", str(version), maxsplit=1)[0]
+    parts: list[int] = []
+    for seg in base.split("."):
+        try:
+            parts.append(int(seg))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < pad_to:
+        parts.append(0)
+    return tuple(parts)
+
+
+def parse_version_range(range_spec: str) -> list[tuple[str, tuple[int, ...]]]:
+    """Parse a comma-separated range spec like ``'>=0.2,<0.3'``.
+
+    Returns a list of ``(operator, version_tuple)`` constraints. Raises
+    :class:`PluginError` on malformed tokens so a bad ``crucible_compat``
+    field doesn't silently disable enforcement.
+    """
+    if not range_spec or not isinstance(range_spec, str):
+        return []
+    constraints: list[tuple[str, tuple[int, ...]]] = []
+    for token in range_spec.split(","):
+        if not token.strip():
+            continue
+        m = _RANGE_TOKEN_RE.match(token)
+        if not m:
+            raise PluginError(
+                f"Invalid version-range token {token!r} in {range_spec!r}. "
+                f"Expected operators >= > <= < == = followed by a version."
+            )
+        op, ver = m.group(1), m.group(2)
+        if op == "=":  # normalize
+            op = "=="
+        constraints.append((op, _parse_version(ver)))
+    return constraints
+
+
+def version_matches_range(version: str, range_spec: str) -> bool:
+    """Return True if *version* satisfies *range_spec*.
+
+    Empty / None range spec is permissive — returns True. A range with no
+    parseable constraints (e.g. trailing commas) also returns True so we
+    don't reject installs on a no-op spec.
+    """
+    if not range_spec:
+        return True
+    constraints = parse_version_range(range_spec)
+    if not constraints:
+        return True
+    actual = _parse_version(version)
+    for op, expected in constraints:
+        if op == ">=" and not (actual >= expected):
+            return False
+        if op == ">" and not (actual > expected):
+            return False
+        if op == "<=" and not (actual <= expected):
+            return False
+        if op == "<" and not (actual < expected):
+            return False
+        if op == "==" and not (actual == expected):
+            return False
+    return True
+
+
 def validate_tap_directory(root: Path) -> list[ManifestValidationResult]:
     """Validate every ``plugin.yaml`` file discovered under *root*.
 

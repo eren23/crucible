@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 import yaml
 
-from crucible.core.errors import TapError
+from crucible.core.errors import CrucibleError, TapError
 from crucible.core.tap import TapManager, VALID_PLUGIN_TYPES
 
 
@@ -422,6 +422,7 @@ class TestPublish:
                 "name": "demo_launcher",
                 "type": "launchers",
                 "version": "0.1.0",
+                "description": "demo launcher",
                 "entry": "demo_launcher.py",
             }),
             encoding="utf-8",
@@ -430,6 +431,260 @@ class TestPublish:
         result = tap_manager.publish("demo_launcher", "launchers", "launcher-publish", project_root=project)
         assert result["status"] == "published"
         assert (tap_manager._taps_dir / "launcher-publish" / "launchers" / "demo_launcher" / "demo_launcher.py").exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase A.4 — publish pre-flight schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestPublishValidatePreflight:
+    def _setup_project(self, tmp_path: Path, manifest: dict) -> Path:
+        project = tmp_path / "project_preflight"
+        plug_dir = project / ".crucible" / "plugins" / "optimizers"
+        plug_dir.mkdir(parents=True)
+        (plug_dir / "preflight.py").write_text(
+            "def build(*a, **kw): return None\n", encoding="utf-8"
+        )
+        (plug_dir / "preflight.yaml").write_text(
+            yaml.safe_dump(manifest), encoding="utf-8"
+        )
+        return project
+
+    def test_publish_rejects_manifest_missing_description(
+        self, tap_manager: TapManager, local_tap: Path, tmp_path: Path
+    ):
+        tap_manager.add_tap(str(local_tap), name="preflight-1")
+        project = self._setup_project(tmp_path, {
+            "name": "preflight",
+            "type": "optimizers",
+            "version": "0.1.0",
+            # no description — schema error
+        })
+        with pytest.raises(CrucibleError, match="refusing to publish"):
+            tap_manager.publish(
+                "preflight", "optimizers", "preflight-1",
+                project_root=project,
+            )
+
+    def test_publish_with_no_validate_bypasses_preflight(
+        self, tap_manager: TapManager, local_tap: Path, tmp_path: Path
+    ):
+        tap_manager.add_tap(str(local_tap), name="preflight-2")
+        project = self._setup_project(tmp_path, {
+            "name": "preflight",
+            "type": "optimizers",
+            "version": "0.1.0",
+        })
+        result = tap_manager.publish(
+            "preflight", "optimizers", "preflight-2",
+            project_root=project, validate=False,
+        )
+        assert result["status"] == "published"
+
+    def test_publish_passes_when_manifest_valid(
+        self, tap_manager: TapManager, local_tap: Path, tmp_path: Path
+    ):
+        tap_manager.add_tap(str(local_tap), name="preflight-3")
+        project = self._setup_project(tmp_path, {
+            "name": "preflight",
+            "type": "optimizers",
+            "version": "0.1.0",
+            "description": "valid",
+            "author": "ci",
+            "tags": ["test"],
+        })
+        result = tap_manager.publish(
+            "preflight", "optimizers", "preflight-3",
+            project_root=project,
+        )
+        assert result["status"] == "published"
+
+
+# ---------------------------------------------------------------------------
+# Phase A.5 — crucible_compat enforcement at install
+# ---------------------------------------------------------------------------
+
+
+class TestInstallCompatEnforcement:
+    def _make_tap_with_compat(self, tap_root: Path, *, compat: str) -> None:
+        d = tap_root / "optimizers" / "compat_demo"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "compat_demo.py").write_text("def build(*a, **kw): return None\n",
+                                           encoding="utf-8")
+        (d / "plugin.yaml").write_text(
+            yaml.safe_dump({
+                "name": "compat_demo",
+                "type": "optimizers",
+                "version": "0.1.0",
+                "description": "compat test plugin",
+                "author": "ci",
+                "tags": ["test"],
+                "crucible_compat": compat,
+            }),
+            encoding="utf-8",
+        )
+
+    def test_install_rejected_when_compat_mismatches(
+        self, tap_manager: TapManager, tmp_path: Path
+    ):
+        tap_root = tmp_path / "demo-tap"
+        tap_root.mkdir()
+        # Init the bare tap (TapManager.add_tap clones via file://)
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        self._make_tap_with_compat(tap_root, compat=">=99.0,<100.0")
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="compat-bad")
+        with pytest.raises(CrucibleError, match="crucible_compat"):
+            tap_manager.install("compat_demo")
+
+    def test_install_with_force_overrides_compat_mismatch(
+        self, tap_manager: TapManager, tmp_path: Path
+    ):
+        tap_root = tmp_path / "demo-tap-force"
+        tap_root.mkdir()
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        self._make_tap_with_compat(tap_root, compat=">=99.0,<100.0")
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="compat-force")
+        result = tap_manager.install("compat_demo", force=True)
+        assert result["status"] == "installed"
+        assert any("crucible_compat" in w for w in result.get("warnings", []))
+
+    def test_install_succeeds_when_compat_matches(
+        self, tap_manager: TapManager, tmp_path: Path
+    ):
+        tap_root = tmp_path / "demo-tap-ok"
+        tap_root.mkdir()
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        self._make_tap_with_compat(tap_root, compat=">=0.1,<99.0")
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="compat-ok")
+        result = tap_manager.install("compat_demo")
+        assert result["status"] == "installed"
+        assert "warnings" not in result or not any(
+            "crucible_compat" in w for w in result["warnings"]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase A.6 — dependency-resolution warning
+# ---------------------------------------------------------------------------
+
+
+class TestInstallDependencyWarning:
+    def test_install_warns_on_missing_typed_dep(
+        self, tap_manager: TapManager, tmp_path: Path
+    ):
+        tap_root = tmp_path / "dep-tap"
+        tap_root.mkdir()
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        d = tap_root / "optimizers" / "with_dep"
+        d.mkdir(parents=True)
+        (d / "with_dep.py").write_text("def build(*a, **kw): return None\n",
+                                        encoding="utf-8")
+        (d / "plugin.yaml").write_text(
+            yaml.safe_dump({
+                "name": "with_dep",
+                "type": "optimizers",
+                "version": "0.1.0",
+                "description": "depends on something",
+                "author": "ci",
+                "tags": ["test"],
+                "dependencies": [
+                    {"name": "missing_optimizer", "type": "optimizers"},
+                ],
+            }),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="dep-tap")
+        result = tap_manager.install("with_dep")
+        assert result["status"] == "installed"
+        assert any(
+            "missing_optimizer" in w for w in result.get("warnings", [])
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase A.3 — TapManager.get_tap_manifest
+# ---------------------------------------------------------------------------
+
+
+class TestGetTapManifest:
+    def test_returns_none_when_missing(self, tap_manager: TapManager, local_tap: Path):
+        tap_manager.add_tap(str(local_tap), name="manifest-missing")
+        # local_tap fixture doesn't ship tap.yaml.
+        assert tap_manager.get_tap_manifest("manifest-missing") is None
+
+    def test_returns_dict_when_present(self, tap_manager: TapManager, tmp_path: Path):
+        tap_root = tmp_path / "manifested-tap"
+        tap_root.mkdir()
+        (tap_root / "tap.yaml").write_text(
+            yaml.safe_dump({
+                "name": "manifested-tap",
+                "description": "demo",
+                "version": "0.1.0",
+            }),
+            encoding="utf-8",
+        )
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="manifested-tap")
+        manifest = tap_manager.get_tap_manifest("manifested-tap")
+        assert manifest is not None
+        assert manifest["name"] == "manifested-tap"
+        assert manifest["version"] == "0.1.0"
+
+    def test_returns_none_for_unknown_tap(self, tap_manager: TapManager):
+        assert tap_manager.get_tap_manifest("nonexistent") is None
+
+    def test_raises_on_malformed_yaml(self, tap_manager: TapManager, tmp_path: Path):
+        from crucible.core.errors import TapError
+        tap_root = tmp_path / "broken-tap"
+        tap_root.mkdir()
+        (tap_root / "tap.yaml").write_text("name: x\n  : bad", encoding="utf-8")
+        import subprocess
+        subprocess.run(["git", "init", "-q"], cwd=str(tap_root), check=True)
+        subprocess.run(["git", "add", "."], cwd=str(tap_root), check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=ci@x", "-c", "user.name=ci",
+             "commit", "-q", "-m", "init"],
+            cwd=str(tap_root), check=True,
+        )
+        tap_manager.add_tap(str(tap_root), name="broken-tap")
+        with pytest.raises(TapError, match="malformed"):
+            tap_manager.get_tap_manifest("broken-tap")
 
 
 # ---------------------------------------------------------------------------

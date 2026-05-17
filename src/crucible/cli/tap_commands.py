@@ -35,7 +35,12 @@ def handle_tap(args: argparse.Namespace) -> None:
     """Dispatch tap subcommands."""
     cmd = getattr(args, "tap_command", None)
     if cmd is None:
-        print("Usage: crucible tap {add|remove|list|sync|search|install|uninstall|installed|publish|info|validate}", file=sys.stderr)
+        print(
+            "Usage: crucible tap "
+            "{init|add|remove|list|sync|search|install|uninstall|installed|"
+            "publish|info|push|submit-pr|validate|lint}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     try:
@@ -65,12 +70,72 @@ def handle_tap(args: argparse.Namespace) -> None:
             _cmd_submit_pr(args)
         elif cmd == "validate":
             _cmd_validate(args)
+        elif cmd == "lint":
+            _cmd_lint(args)
+        elif cmd == "init":
+            _cmd_init(args)
         else:
             print(f"Unknown tap command: {cmd}", file=sys.stderr)
             sys.exit(1)
     except CrucibleError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_lint(args: argparse.Namespace) -> None:
+    """Run quality checks on a tap directory.
+
+    Usage:
+        crucible tap lint <path>
+        crucible tap lint --warnings-as-errors <path>
+
+    Exits 0 if no errors. Warnings count as failures only if
+    --warnings-as-errors is passed.
+    """
+    from pathlib import Path
+
+    from crucible.core.tap_lint import format_lint_report, lint_tap_directory
+
+    tap_path = Path(args.path).expanduser().resolve()
+    issues = lint_tap_directory(tap_path)
+    print(format_lint_report(issues, tap_path))
+
+    strict = bool(getattr(args, "warnings_as_errors", False))
+    has_error = any(i.severity == "error" for i in issues)
+    has_warning = any(i.severity == "warning" for i in issues)
+    if has_error or (strict and has_warning):
+        reason = "errors" if has_error else "warnings (--warnings-as-errors)"
+        print(f"\nLint failed: {reason}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_init(args: argparse.Namespace) -> None:
+    """Scaffold a new tap repo at *path*.
+
+    Usage:
+        crucible tap init <path> [--name N] [--author A] [--license LIC] [--no-git]
+    """
+    from pathlib import Path
+
+    from crucible.core.tap_scaffold import scaffold_tap
+
+    target = Path(args.path).expanduser().resolve()
+    name = getattr(args, "name", "") or target.name
+    result = scaffold_tap(
+        target,
+        name=name,
+        author=getattr(args, "author", "") or "",
+        license_id=getattr(args, "license", "") or "MIT",
+        description=getattr(args, "description", "") or f"{name} — Crucible community tap",
+        init_git=not getattr(args, "no_git", False),
+    )
+    print(f"Initialized tap at {result['path']}")
+    print(f"  files written: {result['files_written']}")
+    print(f"  example plugin: {result['example_plugin_dir']}")
+    print()
+    print("Next steps:")
+    for step in result["next_steps"]:
+        print(f"  {step}")
 
 
 def _cmd_validate(args: argparse.Namespace) -> None:
@@ -172,9 +237,12 @@ def _cmd_install(args: argparse.Namespace) -> None:
         args.name,
         tap=getattr(args, "tap", "") or "",
         plugin_type=getattr(args, "type", "") or "",
+        force=bool(getattr(args, "force", False)),
     )
     print(f"Installed: {result['name']} ({result['type']}) v{result.get('version', '?')} from [{result['tap']}]")
     print(f"  -> {result['path']}")
+    for warning in result.get("warnings", []):
+        print(f"  WARN: {warning}", file=sys.stderr)
 
 
 def _cmd_uninstall(args: argparse.Namespace) -> None:
@@ -195,7 +263,12 @@ def _cmd_installed(args: argparse.Namespace) -> None:
 
 def _cmd_publish(args: argparse.Namespace) -> None:
     tm = _get_tap_manager(args)
-    result = tm.publish(args.name, args.type, args.tap)
+    result = tm.publish(
+        args.name,
+        args.type,
+        args.tap,
+        validate=not bool(getattr(args, "no_validate", False)),
+    )
     print(f"Published: {result['name']} ({result['type']}) to [{result['tap']}]")
     for step in result.get("next_steps", []):
         print(f"  {step}")

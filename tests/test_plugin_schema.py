@@ -253,3 +253,162 @@ class TestValidateTapDirectory:
         f.write_text("x")
         with pytest.raises(PluginError, match="not a directory"):
             validate_tap_directory(f)
+
+
+# ---------------------------------------------------------------------------
+# Phase A.3 — top-level tap.yaml schema
+# ---------------------------------------------------------------------------
+
+
+from crucible.core.plugin_schema import (
+    parse_version_range,
+    validate_tap_manifest_dict,
+    validate_tap_manifest_file,
+    version_matches_range,
+)
+
+
+class TestTapManifestSchema:
+    def test_well_formed_returns_no_errors(self):
+        data = {
+            "name": "demo-tap",
+            "description": "one-line desc",
+            "version": "0.1.0",
+            "author": "me",
+            "license": "MIT",
+            "crucible_compat": ">=0.2,<0.3",
+            "homepage": "https://example.com",
+            "maintainer_contact": "me@example.com",
+        }
+        errors = [i for i in validate_tap_manifest_dict(data) if i.severity == "error"]
+        assert errors == []
+
+    def test_missing_name_is_error(self):
+        data = {"description": "x", "version": "0.1.0"}
+        issues = validate_tap_manifest_dict(data)
+        assert any(i.severity == "error" and i.field == "name" for i in issues)
+
+    def test_missing_description_is_error(self):
+        data = {"name": "x", "version": "0.1.0"}
+        issues = validate_tap_manifest_dict(data)
+        assert any(i.severity == "error" and i.field == "description" for i in issues)
+
+    def test_missing_recommended_fields_are_warnings(self):
+        data = {"name": "x", "description": "d", "version": "0.1.0"}
+        issues = validate_tap_manifest_dict(data)
+        warnings = {i.field for i in issues if i.severity == "warning"}
+        assert {"author", "license", "crucible_compat"} <= warnings
+
+    def test_multiline_description_is_warning(self):
+        data = {
+            "name": "x",
+            "description": "line one\nline two",
+            "version": "0.1.0",
+        }
+        issues = validate_tap_manifest_dict(data)
+        assert any(i.severity == "warning" and i.field == "description" for i in issues)
+
+    def test_non_string_root_is_error(self):
+        issues = validate_tap_manifest_dict("not a dict")  # type: ignore[arg-type]
+        assert any(i.severity == "error" for i in issues)
+
+    def test_bad_name_pattern_is_error(self):
+        issues = validate_tap_manifest_dict({
+            "name": "has spaces", "description": "x", "version": "0.1.0",
+        })
+        assert any(i.severity == "error" and i.field == "name" for i in issues)
+
+    def test_non_string_homepage_is_error(self):
+        issues = validate_tap_manifest_dict({
+            "name": "x", "description": "y", "version": "0.1.0", "homepage": 42,
+        })
+        assert any(i.severity == "error" and i.field == "homepage" for i in issues)
+
+    def test_missing_file_is_warning_not_error(self, tmp_path: Path):
+        # Optional manifest — its absence is OK.
+        result = validate_tap_manifest_file(tmp_path / "tap.yaml")
+        assert result.ok
+        assert any(i.severity == "warning" for i in result.issues)
+
+    def test_well_formed_file(self, tmp_path: Path):
+        manifest = tmp_path / "tap.yaml"
+        manifest.write_text(yaml.dump({
+            "name": "x", "description": "y", "version": "0.1.0",
+            "author": "me", "license": "MIT", "crucible_compat": ">=0.2,<0.3",
+        }), encoding="utf-8")
+        result = validate_tap_manifest_file(manifest)
+        assert result.ok
+
+    def test_invalid_yaml_in_file_is_error(self, tmp_path: Path):
+        manifest = tmp_path / "tap.yaml"
+        manifest.write_text("name: x\n  :::bad indent", encoding="utf-8")
+        result = validate_tap_manifest_file(manifest)
+        assert not result.ok
+
+
+class TestParseVersionRange:
+    def test_simple_geq(self):
+        # Versions zero-padded to 3 segments for stable comparison.
+        assert parse_version_range(">=0.2") == [(">=", (0, 2, 0))]
+
+    def test_compound_range(self):
+        assert parse_version_range(">=0.2,<0.3") == [
+            (">=", (0, 2, 0)), ("<", (0, 3, 0)),
+        ]
+
+    def test_eq_normalizes(self):
+        assert parse_version_range("=0.1.0") == [("==", (0, 1, 0))]
+        assert parse_version_range("==0.1.0") == [("==", (0, 1, 0))]
+
+    def test_strips_whitespace(self):
+        assert parse_version_range(" >=0.1 , < 1.0 ") == [
+            (">=", (0, 1, 0)), ("<", (1, 0, 0)),
+        ]
+
+    def test_empty_returns_empty_list(self):
+        assert parse_version_range("") == []
+        assert parse_version_range(None) == []  # type: ignore[arg-type]
+
+    def test_malformed_raises_plugin_error(self):
+        with pytest.raises(PluginError, match="Invalid version-range"):
+            parse_version_range("not a range")
+
+    def test_trailing_comma_skips_empty_token(self):
+        assert parse_version_range(">=0.2,") == [(">=", (0, 2, 0))]
+
+
+class TestVersionMatchesRange:
+    def test_in_range(self):
+        assert version_matches_range("0.2.1", ">=0.2,<0.3")
+
+    def test_below_min(self):
+        assert not version_matches_range("0.1.0", ">=0.2,<0.3")
+
+    def test_at_or_above_upper_bound(self):
+        assert not version_matches_range("0.3.0", ">=0.2,<0.3")
+        assert version_matches_range("0.2.999", ">=0.2,<0.3")
+
+    def test_pre_release_suffix_is_ignored(self):
+        # 0.2.1-alpha should compare as 0.2.1 for range matching.
+        assert version_matches_range("0.2.1-alpha", ">=0.2,<0.3")
+
+    def test_eq_operator(self):
+        assert version_matches_range("0.1.0", "==0.1.0")
+        assert not version_matches_range("0.1.1", "==0.1.0")
+
+    def test_lt_operator(self):
+        assert version_matches_range("0.1.0", "<0.2")
+        assert not version_matches_range("0.2.0", "<0.2")
+
+    def test_gt_operator(self):
+        assert version_matches_range("0.3.0", ">0.2")
+        assert not version_matches_range("0.2.0", ">0.2")
+
+    def test_le_operator(self):
+        assert version_matches_range("0.2.0", "<=0.2")
+        assert version_matches_range("0.1.9", "<=0.2")
+        assert not version_matches_range("0.2.1", "<=0.2")
+
+    def test_empty_range_is_permissive(self):
+        assert version_matches_range("999.0.0", "")
+        assert version_matches_range("0.0.0", None)  # type: ignore[arg-type]

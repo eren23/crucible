@@ -312,6 +312,27 @@ class TapManager:
         """List all available packages across all taps."""
         return self.search("", plugin_type=plugin_type)
 
+    def get_tap_manifest(self, tap_name: str) -> dict[str, Any] | None:
+        """Read a tap's top-level ``tap.yaml`` manifest, if present.
+
+        tap.yaml is optional — older taps may not have one. Returns the
+        parsed dict on success, ``None`` if the file is missing, and raises
+        :class:`TapError` if the file is present but malformed.
+        """
+        tap_dir = self._taps_dir / tap_name
+        if not tap_dir.is_dir():
+            return None
+        manifest_path = tap_dir / "tap.yaml"
+        if not manifest_path.is_file():
+            return None
+        try:
+            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise TapError(f"tap.yaml at {manifest_path} is malformed: {exc}") from exc
+        if not isinstance(data, dict):
+            raise TapError(f"tap.yaml at {manifest_path} must be a YAML mapping")
+        return data
+
     def get_package_info(self, name: str) -> dict[str, Any] | None:
         """Get detailed info for a specific package, including install status."""
         taps = self._load_taps_yaml()
@@ -336,6 +357,7 @@ class TapManager:
         *,
         tap: str = "",
         plugin_type: str = "",
+        force: bool = False,
     ) -> dict[str, Any]:
         """Install a plugin from a tap into the hub's plugins directory.
 
@@ -346,8 +368,14 @@ class TapManager:
         tap (e.g. ``code_wm`` as both ``architectures`` and ``evaluations``),
         pass ``plugin_type`` to disambiguate.
 
-        Raises :class:`TapError` if the package is not found, is ambiguous,
-        or is already installed.
+        Phase A.5: if the plugin's manifest declares ``crucible_compat``,
+        the current Crucible version must satisfy it. ``force=True``
+        overrides the check (warning emitted on the returned dict).
+        Phase A.6: declared ``dependencies`` are checked against the
+        installed-plugin ledger; missing deps surface as warnings.
+
+        Raises :class:`TapError` if the package is not found, is
+        ambiguous, already installed, or fails the compat check.
         """
         _validate_name(name, "package")
 
@@ -357,7 +385,9 @@ class TapManager:
         # projects can't both pass the dup-check and silently overwrite
         # each other's files.
         with hub_lock(self.hub_dir):
-            return self._install_locked(name, tap=tap, plugin_type=plugin_type)
+            return self._install_locked(
+                name, tap=tap, plugin_type=plugin_type, force=force
+            )
 
     def _install_locked(
         self,
@@ -365,6 +395,7 @@ class TapManager:
         *,
         tap: str = "",
         plugin_type: str = "",
+        force: bool = False,
     ) -> dict[str, Any]:
         # Check if already installed (name + type combination — allows
         # installing the same name across different types without collision).
@@ -422,6 +453,51 @@ class TapManager:
         plugin_type = manifest.get("type", "")
         if plugin_type not in VALID_PLUGIN_TYPES:
             raise TapError(f"Invalid plugin type {plugin_type!r} in manifest for {name!r}")
+
+        # Phase A.5: crucible_compat enforcement.
+        warnings_emitted: list[str] = []
+        compat_spec = manifest.get("crucible_compat", "")
+        if compat_spec and isinstance(compat_spec, str):
+            from crucible import __version__ as _crucible_version
+            from crucible.core.errors import PluginError as _PluginError
+            from crucible.core.plugin_schema import version_matches_range
+            try:
+                ok = version_matches_range(_crucible_version, compat_spec)
+            except _PluginError as exc:
+                # Malformed crucible_compat. Treat as a warning rather
+                # than a blocker — user can fix their manifest later.
+                warnings_emitted.append(
+                    f"malformed crucible_compat {compat_spec!r}: {exc}"
+                )
+                ok = True
+            if not ok:
+                msg = (
+                    f"Package {name!r} declares crucible_compat={compat_spec!r}, "
+                    f"but this Crucible is {_crucible_version}. "
+                    f"Pass force=True (or --force from the CLI) to override."
+                )
+                if force:
+                    warnings_emitted.append(msg)
+                else:
+                    raise TapError(msg)
+
+        # Phase A.6: dependency-resolution warning. Read the installed
+        # ledger and surface missing per-plugin deps as warnings (no
+        # auto-install — the user decides).
+        declared_deps = manifest.get("dependencies", []) or []
+        if isinstance(declared_deps, list):
+            for dep in declared_deps:
+                if isinstance(dep, dict) and dep.get("type") and dep.get("name"):
+                    dep_name = dep["name"]
+                    dep_type = dep["type"]
+                    if not any(
+                        p.get("name") == dep_name and p.get("type") == dep_type
+                        for p in installed
+                    ):
+                        warnings_emitted.append(
+                            f"declared dependency not installed: "
+                            f"{dep_type}/{dep_name}"
+                        )
 
         # Find the package payload — with symlink escape guard
         pkg_dir = Path(manifest["_dir"])
@@ -492,7 +568,7 @@ class TapManager:
         installed.append(record)
         self._save_installed_yaml(installed)
 
-        return {
+        result: dict[str, Any] = {
             "status": "installed",
             "name": name,
             "type": plugin_type,
@@ -500,6 +576,9 @@ class TapManager:
             "tap": tap_name,
             "path": str(dest_path),
         }
+        if warnings_emitted:
+            result["warnings"] = warnings_emitted
+        return result
 
     def uninstall(self, name: str, *, plugin_type: str = "") -> None:
         """Remove an installed tap plugin.
@@ -593,13 +672,21 @@ class TapManager:
         project_root: Path | None = None,
         store_dir: str = ".crucible",
         plugins_subdir: str = "plugins",
+        validate: bool = True,
     ) -> dict[str, Any]:
         """Publish a local plugin to a tap repository.
 
         Copies the plugin file and its metadata (if present) to the tap,
         stages and commits. The user must push manually.
 
-        Raises :class:`TapError` if the local plugin or tap is not found.
+        When *validate* is True (default), runs the per-plugin manifest
+        schema against the local plugin.yaml BEFORE staging — refuses to
+        publish a manifest with schema errors. Pass ``validate=False`` to
+        override (CI escape hatch).
+
+        Raises :class:`TapError` if the local plugin or tap is not found,
+        or (when validation is enabled) if the local plugin.yaml has
+        schema errors.
         """
         _validate_name(name, "plugin")
 
@@ -623,6 +710,32 @@ class TapManager:
             local_plugin = local_root / f"{name}.py"
             if not local_plugin.exists():
                 raise TapError(f"Local plugin not found: {local_plugin}")
+
+        # Phase A.4 pre-flight: validate the plugin.yaml schema before
+        # staging the commit. A missing manifest is allowed (we'll
+        # generate a default below); but if one exists, it must pass.
+        if validate:
+            local_meta_path = (
+                (local_bundle / "plugin.yaml")
+                if is_bundle
+                else local_plugin.with_suffix(".yaml")
+            )
+            if local_meta_path.exists():
+                from crucible.core.plugin_schema import (
+                    validate_manifest_file,
+                )
+                result = validate_manifest_file(local_meta_path)
+                if result.errors:
+                    err_lines = [
+                        f"  [{i.severity}] {i.field}: {i.message}"
+                        for i in result.errors
+                    ]
+                    raise TapError(
+                        f"plugin.yaml has schema errors — refusing to publish.\n"
+                        f"  manifest: {local_meta_path}\n"
+                        + "\n".join(err_lines)
+                        + "\n  Fix the manifest, or pass validate=False to override."
+                    )
 
         # Check for existing package in tap
         dest_dir = tap_dir / plugin_type / name

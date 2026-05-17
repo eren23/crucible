@@ -227,6 +227,11 @@ def _main() -> None:
         help="Plugin type (e.g. architectures, launchers, evaluations). "
         "Required when the same name exists across multiple plugin types.",
     )
+    ti.add_argument(
+        "--force",
+        action="store_true",
+        help="Override crucible_compat mismatch (warning emitted, install proceeds).",
+    )
     tu = tap_sub.add_parser("uninstall", help="Uninstall a plugin")
     tu.add_argument("name")
     tu.add_argument(
@@ -241,6 +246,11 @@ def _main() -> None:
     tpub.add_argument("name")
     tpub.add_argument("--type", required=True)
     tpub.add_argument("--tap", required=True)
+    tpub.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip the plugin.yaml schema pre-flight (escape hatch).",
+    )
     tinfo = tap_sub.add_parser("info", help="Show plugin details")
     tinfo.add_argument("name")
     tpush = tap_sub.add_parser("push", help="Push tap repo to remote")
@@ -258,6 +268,42 @@ def _main() -> None:
         "--warnings-as-errors",
         action="store_true",
         help="Exit non-zero even if only warnings are found (CI-friendly)",
+    )
+    tlint = tap_sub.add_parser(
+        "lint",
+        help="Run repo-level quality checks on a tap directory",
+    )
+    tlint.add_argument("path", help="Path to the tap repo root")
+    tlint.add_argument(
+        "--warnings-as-errors",
+        action="store_true",
+        help="Exit non-zero even if only warnings are found (CI-friendly)",
+    )
+    tinit = tap_sub.add_parser(
+        "init",
+        help="Scaffold a new tap with README, LICENSE, tap.yaml, and an example plugin",
+    )
+    tinit.add_argument("path", help="Directory to create the tap in (created if absent)")
+    tinit.add_argument(
+        "--name",
+        default="",
+        help="Tap name; defaults to the target directory's basename",
+    )
+    tinit.add_argument("--author", default="", help="Tap maintainer handle/email")
+    tinit.add_argument(
+        "--license",
+        default="MIT",
+        help="License identifier (MIT, Apache-2.0, BSD-3-Clause). Default MIT.",
+    )
+    tinit.add_argument(
+        "--description",
+        default="",
+        help="One-line description of the tap. Defaults to a placeholder.",
+    )
+    tinit.add_argument(
+        "--no-git",
+        action="store_true",
+        help="Skip 'git init' and the initial commit",
     )
 
     # ── track ──
