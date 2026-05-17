@@ -800,3 +800,150 @@ Homebrew-style plugin sharing via git repositories.
 5. hub_tap_push      → push tap to remote
 6. hub_submit_pr     → open PR to upstream (if fork)
 ```
+
+---
+
+## Autonomous Loop Sessions (Tier 16, 4 tools)
+
+Persisted-session drivers built on the [orchestrator contract](orchestrator-contract.md). Each session owns its lifecycle: `start → submit/continue → status → cancel`. State persists under `.crucible/{type}_sessions/{session_id}.{yaml,jsonl}` and survives process restarts. Full guide: [autonomous-loops.md](autonomous-loops.md).
+
+| Tool | Description |
+|------|-------------|
+| `autonomous_research_loop` | Linear hypothesize → experiment → reflect loop. Verbs: `start`, `submit`, `status`, `cancel`. Supports `budget_usd` cap and `with_literature` HF Papers pre-injection. |
+| `tree_autonomous_loop` | Branching tree-search expansion. Adds `continue` verb (re-probes after orchestrator drove external fleet ops in response to `next_action='external_dispatch'`). |
+| `harness_autonomous_loop` | Meta-harness optimizer loop. Response payload is Python source for a harness file, not a structured config. Synchronous validate + benchmark per submit. |
+| `tree_auto_expand` | Phase 1.3 refactor of the legacy one-shot expander. Now follows the orchestrator contract: `action='request_prompt'` returns `{system, user, schema}`; `action='submit'` applies the parsed children. No internal LLM call. |
+
+### Shared invariants
+
+- **state_snapshot stale-submit guard.** Each `request_prompt` embeds a snapshot of the underlying state (research state / tree state). Submits with a stale snapshot raise `StaleSubmitError`. See [orchestrator-contract.md](orchestrator-contract.md) for the snapshot fields and rejection semantics.
+- **Budget cap.** Optional `budget_usd` enforces wall-clock × fleet hourly rate. Auto-cancels the session when the cap is hit; records `spend_usd` in the session yaml.
+- **Judge-separation hook.** At `start`, calls `panel.assert_separated()` if `config.judges` is configured. Mis-separated panels raise `ConfigError` before pod time is consumed.
+- **Doom-loop detection.** Sliding window of recent prompt fingerprints. Five identical prompts in a row aborts the session with `DoomLoopDetected`.
+
+---
+
+## Discoverability (Tier 17, 2 tools)
+
+Phase 2 — flatten the surface so an orchestrator doesn't have to guess which tool to call next.
+
+| Tool | Description |
+|------|-------------|
+| `tool_router` | Pure-heuristic state-aware recommender. Inspects nodes / queue / completed / active sessions and returns `{recommended_tool, rationale, alternatives, state}`. `check_orphans=true` adds a live RunPod GraphQL probe (skipped by default to avoid per-call latency). |
+| `runs_search` | SQL-ish predicate filter over the run ledger. AST whitelist (no function calls, no arithmetic). Identifiers resolve against row dicts with dotted access. `strict_fields=true` validates predicate identifiers against actual rows for typo detection. |
+
+### `runs_search` examples
+
+```python
+runs_search(where="val_bpb < 1.5 AND status == 'completed'", order_by="val_bpb", limit=10)
+runs_search(where="config.MODEL_DIM == '256'", select=["name", "val_bpb", "config.LR"])
+runs_search(where="val_lossss < 2", strict_fields=True)  # → typed error: did you mean 'val_loss'?
+```
+
+### `tool_router` decision graph (11-branch summary)
+
+```
+no nodes        → provision_nodes
+nodes idle      → bootstrap_nodes
+no queue items  → design_enqueue_batch
+queue pending   → dispatch_experiments
+runs in-flight  → get_fleet_status
+runs completed  → collect_results / get_leaderboard
+active session  → autonomous_research_loop(action='status') or continue
+...
+```
+
+---
+
+## Ecosystem Ingestion + Plumbing (Tier 18, 11 tools)
+
+Phase 3 — make Crucible bidirectional with the ML ecosystem.
+
+| Tool | Description |
+|------|-------------|
+| `research_arxiv_search` | arXiv Atom-feed search. defusedxml-safe parse. Returns title / authors / abstract / pdf URL. |
+| `research_openreview_search` | OpenReview v2 + v1 API. `source=forum` filter for paper-only results (skips comments). |
+| `evaluator_list` | List registered benchmark evaluator plugins. Builtin: `lm_eval_harness`. Pluggable family parallel to `data_sources`. |
+| `hpo_create_study` | Create an Optuna study (TPE / random / CMA-ES / BoTorch). Idempotent; `force=True` overrides. |
+| `hpo_ask_trial` | Ask the sampler for the next trial's hyperparameters. Optuna is optional → `HPOImportError` if missing. |
+| `hpo_tell_result` | Tell the study a trial's outcome (objective value + optional intermediate metrics). |
+| `hpo_status` | Read-only study state: best value, trial count, sampler config. |
+| `external_mcp_list_servers` | List configured external MCP servers (`external_mcp_servers:` block in `crucible.yaml`). |
+| `external_mcp_list_tools` | List tools exposed by a named external MCP server. |
+| `external_mcp_call` | Call a tool on an external server with stdio JSON-RPC. Per-call timeout (default 30s). atexit hook warns about orphan subprocesses on parent crash. |
+| `code_mutation_list` | List registered code-mutation policies. Phase 3.6 interface stub; full Phase 5+ impl tracked in `docs/code-mutation-design.md`. |
+
+### HPO bridge — tell-and-ask flow
+
+```python
+hpo_create_study(study_name="lr-search", direction="minimize", sampler="tpe")
+trial = hpo_ask_trial(study_name="lr-search",
+                     search_space={"lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}})
+# orchestrator drives an experiment with trial['params']
+hpo_tell_result(study_name="lr-search", trial_id=trial["trial_id"], value=0.42)
+```
+
+### `external_mcp` — calling out to user-supplied servers
+
+Useful for delegating taste-curation (Spider Chat), code mutations (Codex), or any specialized MCP server you trust. Configure under `crucible.yaml`:
+
+```yaml
+external_mcp_servers:
+  - name: spider-chat
+    command: ["mcp-spiderchat"]
+    env: {SPIDERCHAT_TOKEN: ${SPIDERCHAT_TOKEN}}
+```
+
+Then:
+
+```python
+external_mcp_list_tools(server="spider-chat")
+external_mcp_call(server="spider-chat", tool="search_memories", args={"query": "muon optimizer findings"})
+```
+
+---
+
+## Showcase (Tier 19, 2 tools + 1 extended)
+
+Phase 4 — defensible-niche features that surface what Crucible's loops have learned.
+
+| Tool | Description |
+|------|-------------|
+| `note_generate_paper_draft` | Orchestrator-contract paper draft generator. `action='request_prompt'` returns `{system, user, schema}` keyed by `track_name`. The schema requires 7 sections (abstract, introduction, method, results, discussion, limitations, related_work) plus optional title / key_findings. `action='submit'` validates completeness and returns rendered markdown with LLM-supplied H1/H2 demoted to H3 to keep the document outline intact. |
+| `research_peer_sync` | Share + pull top findings via a shared HF Discussion thread (`crucible-peer-sync:<challenge_id>` title convention). Best-effort: network outage → `{peer_count: 0, peers: []}`. `redact_secrets` applied on both write and read sides — peers' unredacted env dumps don't propagate to your tool result. |
+| `design_synthesize_from_findings` | Phase 4.2 extension: new `policy='memory_filter'` ranks pairs by `(confidence × recency_decay) + cross_project_diversity + tag_overlap` instead of uniform sampling. Tunable via `memory_filter_config`. |
+
+### Paper draft workflow
+
+```python
+# Step 1: ask Crucible for the prompt envelope
+out = note_generate_paper_draft(action="request_prompt", track_name="muon-vs-adamw")
+# out["system"] / out["user"] / out["schema"] / out["state_snapshot"]
+
+# Step 2: orchestrator's LLM emits a JSON object matching the schema
+draft = call_my_llm(out)  # {"abstract": "...", "introduction": "...", ...}
+
+# Step 3: submit — Crucible validates + renders
+rendered = note_generate_paper_draft(action="submit", track_name="muon-vs-adamw", response=draft)
+# rendered["markdown"] is the paper draft as a single document.
+```
+
+The draft pulls track findings + leaderboard + notes + hypotheses from the project state, so the prompt is grounded in actual results rather than a blank canvas.
+
+### Peer sync — multi-agent challenge coordination
+
+```python
+research_peer_sync(challenge_id="parameter-golf-2026")
+# → {peer_count: N, peers: [{agent_id, top_finding, val_bpb, ...}], my_post_url}
+```
+
+Multiple Crucible instances running the same `challenge_id` see each other's top findings within ~5 seconds. Read-side redaction means a peer leaking secrets in their post won't leak through your tool's response.
+
+---
+
+## See also
+
+- [autonomous-loops.md](autonomous-loops.md) — the three persisted-session drivers in detail.
+- [orchestrator-contract.md](orchestrator-contract.md) — the wire protocol under all Tier 16-19 tools.
+- [judge-separation.md](judge-separation.md) — LM-as-judge contract enforced at session start.
+- [eval-watcher.md](eval-watcher.md) — Tier 13 auto-eval daemon (now consumes Tier 18 evaluator plugins).
