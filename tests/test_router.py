@@ -324,6 +324,69 @@ class TestActiveSession:
         # Wait-stage hint should reach the rationale.
         assert "status" in out["rationale"] or "wait" in out["rationale"].lower()
 
+    def test_tree_session_waiting_for_dispatch_recommends_status(
+        self, monkeypatch, fake_config
+    ):
+        """H.1.1 deep-review fix: tree sessions never persist a 'stage'
+        key, so the wait_stages check used to always return False for
+        them — the router told orchestrators to call action='continue'
+        even when the session was clearly waiting for external dispatch
+        + collect. Fix: check current_node_id == None on running tree
+        sessions as the wait signal."""
+        _patch(
+            monkeypatch,
+            _load_nodes=[],
+            _load_queue=[],
+            _load_completed_count=0,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 1.0},
+            _find_active_session=lambda *a, **k: {
+                "kind": "tree", "session_id": "t-waiting",
+                "stage": None,  # tree never writes a stage key
+                "status": "running",
+                "current_node_id": None,  # apply_response cleared it
+            },
+        )
+        out = router.recommend_next_action(fake_config)
+        assert out["recommended_tool"] == "tree_autonomous_loop"
+        # Wait-stage hint must trigger the action='status' guidance,
+        # not action='continue'.
+        rat = out["rationale"]
+        assert "action='status'" in rat, (
+            f"tree session with current_node_id=None should be treated "
+            f"as waiting; got rationale: {rat!r}"
+        )
+        assert "external work" in rat or "wait" in rat.lower()
+
+    def test_tree_session_with_active_node_recommends_continue(
+        self, monkeypatch, fake_config
+    ):
+        """Counterpart: a tree session that has a current_node_id (just
+        got a fresh prompt) is NOT in a wait state — the orchestrator
+        should be told to call submit, not status."""
+        _patch(
+            monkeypatch,
+            _load_nodes=[],
+            _load_queue=[],
+            _load_completed_count=0,
+            _load_research_state={"available": True, "hypotheses": [],
+                                  "pending_count": 0, "history_count": 0,
+                                  "budget_remaining": 1.0},
+            _find_active_session=lambda *a, **k: {
+                "kind": "tree", "session_id": "t-active",
+                "stage": None,
+                "status": "running",
+                "current_node_id": "node-abc123",  # active prompt pending
+            },
+        )
+        out = router.recommend_next_action(fake_config)
+        rat = out["rationale"]
+        assert "action='continue'" in rat, (
+            f"tree session with current_node_id set should be told to "
+            f"submit/continue; got: {rat!r}"
+        )
+
     def test_active_harness_session_maps_to_harness_loop(
         self, monkeypatch, fake_config
     ):

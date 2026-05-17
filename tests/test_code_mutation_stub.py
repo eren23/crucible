@@ -68,8 +68,10 @@ class TestRegistry:
             assert result.success is True
             assert result.score == 0.5
         finally:
+            # H.2: PluginRegistry exposes _registry / _meta (not _plugins).
             from crucible.researcher.code_mutation import _POLICY_REGISTRY
-            _POLICY_REGISTRY.pop("_test_policy", None)
+            _POLICY_REGISTRY._registry.pop("_test_policy", None)
+            _POLICY_REGISTRY._meta.pop("_test_policy", None)
 
 
 class TestStubBehavior:
@@ -95,6 +97,35 @@ class TestStubBehavior:
         from crucible.core.errors import CrucibleError
         assert issubclass(CodeMutationNotImplemented, CodeMutationError)
         assert issubclass(CodeMutationError, CrucibleError)
+
+
+class TestH2RegistryMigration:
+    """H.2 fix: code_mutation moved from a private dict to PluginRegistry
+    so it gets 3-tier (builtin/global/local) auto-discovery."""
+
+    def test_uses_plugin_registry_not_private_dict(self):
+        from crucible.researcher.code_mutation import _POLICY_REGISTRY
+        from crucible.core.plugin_registry import PluginRegistry
+        assert isinstance(_POLICY_REGISTRY, PluginRegistry)
+
+    def test_describe_returns_source_metadata(self):
+        from crucible.researcher.code_mutation import describe_code_mutation_policy
+        meta = describe_code_mutation_policy("code_mutation")
+        assert meta is not None
+        assert meta["name"] == "code_mutation"
+        assert "source" in meta
+
+    def test_mcp_code_mutation_list_exposes_stub(self, tmp_path, monkeypatch):
+        from crucible.core.errors import CrucibleError
+        def boom():
+            raise CrucibleError("no project")
+        monkeypatch.setattr("crucible.mcp.tools._get_config", boom)
+        from crucible.mcp.tools import TOOL_DISPATCH
+
+        out = TOOL_DISPATCH["code_mutation_list"]({})
+        names = [p.get("name") for p in out["policies"]]
+        assert "code_mutation" in names
+        assert "Phase 5" in out["note"]
 
 
 class TestABCEnforcement:

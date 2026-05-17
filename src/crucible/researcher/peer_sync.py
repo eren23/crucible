@@ -303,10 +303,18 @@ def _fetch_peer_findings(
 
 
 def _parse_peer_post(body: str) -> dict[str, Any] | None:
-    """Pull the v1 header fields out of a discussion comment body."""
+    """Pull the v1 header fields out of a discussion comment body.
+
+    Read-side redaction (H.1.2): peer agents post via
+    :func:`render_finding_post`, which redacts before write. But a peer
+    running an older Crucible (no redaction) or a different system
+    entirely could post an unredacted env dump. Apply
+    :func:`redact_secrets` to the body we return so our MCP response
+    doesn't forward another agent's leaked credentials verbatim.
+    """
     if "crucible-peer-finding" not in body:
         return None
-    out: dict[str, Any] = {"body": body}
+    out: dict[str, Any] = {"body": redact_secrets(body)}
     for line in body.splitlines():
         if line.startswith("agent_id:"):
             out["agent_id"] = line.split(":", 1)[1].strip()

@@ -111,6 +111,26 @@ class TestPeerPostParser:
         body = "## crucible-peer-finding (v1)\nchallenge_id: c\n"
         assert ps._parse_peer_post(body) is None
 
+    def test_read_side_redacts_peer_secrets(self):
+        """H.1.2 fix: a peer who didn't run redact on write must not
+        leak credentials through our MCP response. Read-side parsing
+        re-redacts the body before returning."""
+        body = (
+            "## crucible-peer-finding (v1)\n"
+            "agent_id: lazy-peer\n"
+            "challenge_id: c\n"
+            "ts: 2026-05-17T00:00:00+00:00\n\n"
+            "### Top finding\n"
+            "I forgot to redact HF_TOKEN=hf_abcdefABCDEF1234567890abcdefABCDEF12 "
+            "and AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLEBADXX in my post.\n"
+        )
+        parsed = ps._parse_peer_post(body)
+        assert parsed is not None
+        assert "hf_abcdefABCDEF" not in parsed["body"]
+        assert "AKIAIOSFODNN7EXAMPLEBADXX" not in parsed["body"]
+        # Some redaction marker shows up.
+        assert ("REDACTED" in parsed["body"]) or ("***" in parsed["body"])
+
 
 # ---------------------------------------------------------------------------
 # sync_peer_finding — uses monkeypatched HF surface

@@ -3641,6 +3641,27 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="code_mutation_list",
+        description=(
+            "List registered code-mutation policies (Phase 3.6 interface stub). "
+            "All policies currently stub-only — see docs/code-mutation-design.md "
+            "for the Phase 5+ implementation plan. User policies plug into "
+            ".crucible/plugins/code_mutation/*.py (local) or "
+            "~/.crucible-hub/plugins/code_mutation/*.py (global) and are "
+            "auto-discovered on each list call.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {count, policies: [{name, type, source}], note}\n"
+            "NEXT: This surface is a stub. To wire a real implementation, "
+            "subclass CodeMutationPolicy in researcher/code_mutation.py and "
+            "register via register_code_mutation_policy()."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="evaluator_list",
         description=(
             "List registered evaluator plugins (Phase 3.3 plugin family). "

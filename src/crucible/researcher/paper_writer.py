@@ -164,9 +164,16 @@ def build_paper_draft_prompt(context: dict[str, Any]) -> dict[str, Any]:
     if findings:
         user_parts.append(f"\n## Findings (top {len(findings)})")
         for i, f in enumerate(findings, 1):
+            # H.2 fix: coerce confidence (LLMs sometimes return as
+            # string). Fall back to verbatim display on bad input.
+            raw_conf = f.get("confidence", 0.0)
+            try:
+                conf_str = f"{float(raw_conf):.2f}"
+            except (TypeError, ValueError):
+                conf_str = str(raw_conf)
             user_parts.append(
                 f"\n### Finding {i} — [{f.get('category', 'observation')}] "
-                f"confidence={f.get('confidence', 0.0):.2f} "
+                f"confidence={conf_str} "
                 f"scope={f.get('_source_scope', f.get('scope', '?'))}"
             )
             title = f.get("title") or ""

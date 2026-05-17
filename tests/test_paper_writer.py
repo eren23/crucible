@@ -226,8 +226,20 @@ class TestMCPDispatch:
             project_root = tmp_path
             store_dir = ".crucible"
             research_state_file = "research_state.jsonl"
+            # H.2 fix narrowed the dispatcher's except clause from
+            # bare Exception to (CrucibleError, OSError, ValueError).
+            # AttributeError no longer swallowed silently, so the
+            # fixture needs the full attribute set the loaders expect.
+            results_file = "experiments.jsonl"
+            fleet_results_file = "experiments_fleet.jsonl"
+            class metrics:
+                primary = "val_loss"
+                secondary = ""
+                direction = "minimize"
 
         (tmp_path / ".crucible").mkdir()
+        (tmp_path / "experiments.jsonl").touch()
+        (tmp_path / "experiments_fleet.jsonl").touch()
 
         monkeypatch.setattr(_tools, "_get_config", lambda: _C())
         monkeypatch.setattr(
