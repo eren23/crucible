@@ -1,0 +1,165 @@
+name: publish-first-plugin
+title: Publish a Crucible community plugin from scratch (tap init → push)
+created_at: '2026-05-17T00:00:00+00:00'
+created_by: crucible-core
+goal: |
+  Take a new contributor from "I have a custom optimizer" to "anyone can
+  `crucible tap install my_optimizer`" in under 10 minutes. Uses the
+  Phase A tooling (tap init / tap lint / publish pre-flight) so the result
+  is born clean and stays clean via the CI workflow that ships with the
+  scaffold.
+project_spec: ''
+environment:
+  notes: |
+    Replace placeholders below with your own values. The path ~/my-tap is
+    a suggestion; tap init works against any empty (or non-existent)
+    directory. You need a GitHub account if you want to publish to a
+    remote, but local-only taps work too (use `tap add file:///path`).
+  required_env_files: []
+  required_yaml: []
+steps:
+  - tool: bash
+    args:
+      command: crucible tap init ~/my-tap --author you@example.com --license MIT
+    purpose: |
+      Scaffold a fresh tap: README, LICENSE, tap.yaml, .gitignore,
+      .github/workflows/lint.yaml, and an example_optimizer plugin stub.
+      Initializes git and makes the first commit. Output prints the
+      "next steps" hint.
+    expect:
+      stdout_contains: 'Initialized tap at'
+  - tool: bash
+    args:
+      command: crucible tap lint ~/my-tap
+    purpose: |
+      Confirm the scaffold is born clean. Must report 0 errors and 0
+      warnings. If it doesn't, the printed `fix:` hint tells you what
+      to change.
+    expect:
+      stdout_contains: '0 issues'
+      exit_code: 0
+  - tool: bash
+    args:
+      command: |
+        mkdir -p ~/my-tap/optimizers/my_optimizer
+        cat > ~/my-tap/optimizers/my_optimizer/my_optimizer.py <<'PY'
+        """my_optimizer — example custom optimizer plugin."""
+        from __future__ import annotations
+        import torch
+        def build(params, *, lr=1e-3, **kwargs):
+            return torch.optim.Adam(params, lr=lr)
+        PY
+        cat > ~/my-tap/optimizers/my_optimizer/plugin.yaml <<'YAML'
+        "name": "my_optimizer"
+        "type": "optimizers"
+        "version": "0.1.0"
+        "description": "Custom Adam wrapper — replace with your real optimizer"
+        "author": "you@example.com"
+        "tags": ["adam", "custom"]
+        "crucible_compat": ">=0.2,<0.3"
+        "dependencies":
+        - "torch>=2.0"
+        "parameters":
+          "LR": "Learning rate (default: 1e-3)"
+        YAML
+        cat > ~/my-tap/optimizers/my_optimizer/README.md <<'MD'
+        # my_optimizer
+
+        Custom Adam wrapper.
+
+        ## Install
+
+        \`\`\`bash
+        crucible tap install my_optimizer
+        \`\`\`
+        MD
+    purpose: |
+      Drop in a real plugin alongside the example. Folder name must equal
+      the manifest's name: field (L007 lint check enforces this).
+  - tool: bash
+    args:
+      command: crucible tap lint ~/my-tap
+    purpose: |
+      Re-run lint after adding the new plugin. Must still be 0/0.
+    expect:
+      exit_code: 0
+  - tool: bash
+    args:
+      command: crucible tap validate ~/my-tap
+    purpose: |
+      Per-plugin manifest schema check. Reads every plugin.yaml under the
+      tap root and reports schema errors + recommended-field warnings.
+    expect:
+      exit_code: 0
+  - tool: bash
+    args:
+      command: |
+        cd ~/my-tap
+        git add .
+        git commit -m "Add optimizers/my_optimizer"
+    purpose: Commit the new plugin. tap init already initialized git.
+  - tool: bash
+    args:
+      command: |
+        cd ~/my-tap
+        git remote add origin https://github.com/<your-handle>/<my-tap>
+        git push -u origin main
+    purpose: |
+      Push the tap to your GitHub remote. Replace the URL placeholder
+      first. The .github/workflows/lint.yaml that ships with the scaffold
+      will run `crucible tap lint .` on every PR.
+  - tool: bash
+    args:
+      command: |
+        crucible tap add https://github.com/<your-handle>/<my-tap>
+        crucible tap search my_optimizer
+        crucible tap install my_optimizer
+    purpose: |
+      Verify someone else can install. Replaces `your-handle` and `<my-tap>`
+      with real values. Output should show "Installed: my_optimizer
+      (optimizers) v0.1.0".
+    expect:
+      stdout_contains: 'Installed: my_optimizer'
+  - tool: bash
+    args:
+      command: OPTIMIZER=my_optimizer LR=3e-4 crucible run experiment --preset smoke
+    purpose: |
+      VERIFICATION STEP. Use the just-installed plugin in a real experiment.
+      The smoke preset finishes in ~60s. If you see "OPTIMIZER my_optimizer
+      not found", the hub plugins directory didn't see the install — check
+      ~/.crucible-hub/plugins/optimizers/my_optimizer.py exists.
+gotchas:
+  - symptom: '`crucible tap init` refuses with "directory is not empty"'
+    fix: 'Pick an empty directory (or a non-existent path tap init will create). The scaffold refuses to clobber existing files.'
+  - symptom: 'lint reports "L007 folder name != manifest name"'
+    fix: 'Folder name must exactly equal plugin.yaml''s name: field. Rename the folder or update the manifest — they must match because the install path uses one and the registry resolves by the other.'
+  - symptom: 'lint reports "L009 version is unquoted"'
+    fix: 'Wrap the version in double quotes in plugin.yaml: version: "0.1.0" (not version: 0.1.0). Unquoted M.m.p strings are technically valid YAML but visually ambiguous.'
+  - symptom: '`crucible tap publish` rejects with "schema errors — refusing to publish"'
+    fix: 'Phase A.4 pre-flight enforces the manifest schema. Read the printed errors, fix the plugin.yaml. Or pass --no-validate as an escape hatch (CI should NOT use this).'
+  - symptom: '`crucible tap install` rejected with "crucible_compat" mismatch'
+    fix: 'The plugin declares a Crucible version range that doesn''t include your running version. Either upgrade Crucible or pass --force to override (warning emitted).'
+  - symptom: 'Install warns "declared dependency not installed: architectures/wm_base"'
+    fix: 'Your plugin lists wm_base as a dep but it isn''t installed in the hub. Run `crucible tap install wm_base` first (no auto-install yet — that''s a Phase 5+ feature).'
+  - symptom: 'OPTIMIZER=my_optimizer fails with "unknown optimizer"'
+    fix: 'Three things to check: (1) ~/.crucible-hub/plugins/optimizers/my_optimizer.py exists; (2) the file defines a build() function; (3) you haven''t shadowed it with a local .crucible/plugins/optimizers/my_optimizer.py with different content.'
+  - symptom: 'lint reports L006 large files in tap'
+    fix: 'Files over 1 MB don''t belong in a tap. Upload to HuggingFace via huggingface_hub.upload_file(repo_id="<you>/<repo>", repo_type="model") and leave a pointer in the plugin''s README.'
+  - symptom: 'lint reports L005 cruft directories (data/, wandb/, __pycache__/)'
+    fix: 'rm -rf the directory and add it to .gitignore (the scaffold''s .gitignore already covers the common ones).'
+results:
+  expected_artifacts:
+    - 'tap init: ~/my-tap/{README.md,LICENSE,tap.yaml,.gitignore}'
+    - 'tap init: ~/my-tap/.github/workflows/lint.yaml'
+    - 'tap init: ~/my-tap/optimizers/example_optimizer/'
+    - 'after publish: ~/.crucible-hub/plugins/optimizers/my_optimizer.py'
+  exit_criteria:
+    - 'crucible tap lint ~/my-tap returns 0 errors, 0 warnings'
+    - 'crucible tap install my_optimizer succeeds without warnings'
+    - 'OPTIMIZER=my_optimizer in an experiment resolves and trains'
+tags:
+  - taps
+  - plugins
+  - publishing
+  - canonical
+  - onboarding

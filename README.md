@@ -211,6 +211,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Highest-impact areas:
 - **Training examples** — show Crucible working with your framework
 - **Bug reports** — file issues, we'll fix them
 
+**Publishing a plugin?** `crucible tap init ~/my-tap` scaffolds a born-clean tap (README, LICENSE, tap.yaml, CI workflow, example plugin); `crucible tap lint .` enforces 11 quality checks before publish. Full guide: [`docs/community-plugins.md`](docs/community-plugins.md); recipe: [`docs/recipes/publish-first-plugin.yaml`](docs/recipes/publish-first-plugin.yaml).
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the full plan — what works, what's next, what we won't build, and honest competitive assessment.

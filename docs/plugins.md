@@ -7,6 +7,8 @@ title: Architecture Plugins
 
 Crucible ships with 4 built-in transformer architectures (baseline, looped, convloop, prefix_memory). Everything else is a **plugin** — created declaratively via YAML specs or as Python code.
 
+> **Looking to publish a plugin (optimizer / callback / launcher / etc.) to a community tap?** See [community-plugins.md](community-plugins.md) for the full authoring guide and the [`publish-first-plugin`](recipes/publish-first-plugin.yaml) recipe. This doc focuses on the *architecture* plugin family specifically.
+
 ## Two Ways to Create Architectures
 
 ### Option A: Declarative Composition (Recommended)
