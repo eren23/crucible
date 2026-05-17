@@ -6,6 +6,8 @@
 
 Short version: **for labs that can't afford DeepMind's compute but want Sakana's autonomy.**
 
+The defensible niche is the seven-way intersection: **autonomous + reproducible + open + commodity-GPU-native + multi-pod fleet + judge-separated + cross-project memory + plugin-extensible**. Each individual property has a competitor — Sakana on autonomy, autoresearch on simplicity, SkyPilot on multi-cloud, Optuna on HPO math, W&B on tracking. None at the seven-way intersection. See [`docs/positioning.md`](docs/positioning.md) for the full landscape and what Crucible explicitly is NOT.
+
 You bring a training script and a rented GPU. Crucible owns the loop — hypothesize, dispatch across a fleet, collect, reflect, synthesize across findings, repeat. Model-agnostic (Claude, GPT, Gemini, Llama via your orchestrator), modality-agnostic (LM, diffusion, vision, world models, custom), vendor-agnostic (RunPod today, SSH anywhere, SkyPilot coming).
 
 ## Why Crucible?

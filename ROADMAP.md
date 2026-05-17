@@ -70,7 +70,7 @@ Before building more, we acknowledge what others do better:
 
 Full plan + audit at `/Users/eren/.claude/plans/ai-native-discovery-engines-xuster-virtual-hare.md`. Realistic timeline: 10-13 weeks.
 
-### Phase 0: Strategic Anchoring (current)
+### Phase 0: Strategic Anchoring (DONE — `b284723`)
 
 Lock the positioning statement in the codebase, prune scope.
 
@@ -79,60 +79,62 @@ Lock the positioning statement in the codebase, prune scope.
 - [x] CLAUDE.md "What is this?" updated
 - [x] `docs/positioning.md` 1-pager (landscape, what we are NOT, scope tests)
 - [x] ROADMAP.md refreshed (this file)
-- [ ] `docs/index.md` aligned
+- [x] `docs/index.md` aligned (Phase 2.7 learning-path reorg)
 
 **Exit:** Positioning statement appears verbatim in README, CLAUDE.md, docs/positioning.md.
 
-### Phase 1: Close the Autonomy Loop (2-3 weeks, highest leverage)
+### Phase 1: Close the Autonomy Loop (DONE — `b89319a` merge)
 
 Make one MCP call drive N iterations end-to-end while keeping the orchestrator-contract design intact.
 
-- [ ] `autonomous_research_loop` MCP tool — wraps `research_request_prompt` / `research_submit` for N iterations, with doom-loop detector
-- [ ] `tree_autonomous_loop` MCP tool — pick policy (UCB1/greedy/agent-directed/GRPO), expand N rounds, sync between rounds
-- [ ] `harness_autonomous_loop` MCP tool — wrap existing `HarnessOptimizer.run()` Python API
-- [ ] Auto-promote findings — `context_push_finding` ≥ threshold confidence auto-calls `finding_promote`
-- [ ] `tree_prune_auto` MCP tool — deterministic greedy kill when no reflection LLM is available
-- [ ] Literature pre-injection — top-K HF Papers / arxiv abstracts embedded into `research_request_prompt(stage="hypothesis")` system message
-- [ ] CLI: `crucible research run --iterations N --tier proxy`
-- [ ] Integration test: `tests/integration/test_autonomous_loop.py` runs end-to-end on a smoke project
+- [x] `autonomous_research_loop` MCP tool — persisted-session driver (start/submit/status/cancel), doom-loop detector, content-hash state_snapshot, wall-clock × pod-rate budget cap (Phase 1.1/1.2/1.8)
+- [x] `tree_autonomous_loop` MCP tool — same protocol over tree search; external_dispatch hint when pending nodes await fleet ops (Phase 1.4)
+- [x] `harness_autonomous_loop` MCP tool — wraps HarnessOptimizer + judge-separation guard (Phase 1.5)
+- [x] Auto-promote findings — `context_push_finding(auto_promote=True)` honors PROMOTION_RULES per-scope thresholds (Phase 1.7 small-batch)
+- [x] `tree_prune(mode='auto')` — deterministic greedy kill via configured metric threshold (Phase 1.10, collapsed into the existing tool per "don't add a sibling tool when a parameter does the job")
+- [x] Literature pre-injection — `with_literature=True` on autonomous_research_loop pulls top-K HF Papers via `literature.py` (Phase 1.7)
+- [x] CLI: `crucible research run --iterations N --tier proxy --budget-usd $X` (Phase 1.1)
+- [x] Plus the `autoresearch` importer (`crucible research import autoresearch <path>`) — strategic differentiator hedge against Lightning AI bolting multi-GPU onto autoresearch (Phase 1.6)
+- [x] Part G — production-hardening sweep: 8 schema-skew / race-safety seams closed (state file_lock, atomic writes, content_hash, doom-loop, budget guard, file-lock factory typing, stale-submit MCP roundtrip, TUI partial-data)
 
 **Exit:** One MCP call + one CLI command can drive a full closed loop with no orchestrator handholding beyond initial setup.
 
-### Phase 2: Discoverability Surge (2-3 weeks)
+### Phase 2: Discoverability Surge (DONE — merged via `3518f75`)
 
 Flatten 12-step onboarding to 5, make the 200+ MCP tools navigable, turn the TUI into a live cockpit.
 
-- [ ] `tool_router` MCP — returns the recommended next tool given current `ResearchState`
-- [ ] Briefing → suggested-actions upgrade — `get_research_briefing()` adds top 3 next MCP calls with rationale
-- [ ] TUI cockpit screens — FleetScreen, QueueScreen, LeaderboardScreen, BriefingScreen, wired as tabs
-- [ ] `docs/quickstart-5-minutes.md` — `git clone` to first hypothesis in 5 steps using SSH provider (no RunPod required)
-- [ ] `runs_search` MCP tool — SQL-ish filter over `runs.jsonl`
-- [ ] Recipe index — `crucible recipe list` promoted in docs and CLI help
-- [ ] `docs/index.md` reorganized as a learning path
+- [x] `tool_router` MCP — 11-branch state-aware recommender (Phase 2.1)
+- [x] Briefing `next_actions` field — `get_research_briefing()` returns structured tool recommendation + markdown "Recommended Next Tool" section (Phase 2.2)
+- [x] TUI cockpit screens — FleetPane, QueuePane, LeaderboardPane, BriefingPane in TabbedContent (Phase 2.3, branch `phase-2-3-tui-cockpit`)
+- [x] `docs/quickstart-5-minutes.md` — cold start to leaderboard + tool-router rec in 5 commands (Phase 2.4)
+- [x] `runs_search` MCP tool — SQL-ish predicate with safe AST whitelist + optional `strict_fields` typo detection (Phase 2.5)
+- [x] `crucible recipe list / get` CLI + recipe index in docs (Phase 2.6)
+- [x] `docs/index.md` learning path — 5-section organization (Phase 2.7)
+- [x] Plus `crucible mcp call <tool>` CLI single-shot dispatcher (Phase 2.4 hook)
 
 **Exit:** First-day onboarding goes from 12 steps to 5; TUI shows live state; agents never have to guess "what should I call next?"
 
-### Phase 3: Ecosystem Connections (3-4 weeks)
+### Phase 3: Ecosystem Connections (DONE — merged via `fe5c2d3`)
 
 Make Crucible bidirectional — publish outward today, ingest inward tomorrow.
 
-- [ ] Benchmark ingestion adapters — `lm_eval_harness`, `big_bench`, `papers_with_code` (as builtin evaluator plugins)
-- [ ] Optuna/Ax bridge — `HyperparameterOptimizer` plugin type; wraps Optuna studies, feeds `study.tell()` for posterior updates; wires as a `tree_expand_*` policy
-- [ ] External MCP consumption — `external_mcp_servers:` config; autonomous loop can call out to user-supplied MCP servers
-- [ ] Code-level mutation MVP — new `code_mutation` tree expansion policy; orchestrator LLM proposes edits to training script; sandboxed via `--preview-only`
-- [ ] `research_arxiv_search` / `research_openreview_search` MCP tools
+- [x] Evaluators plugin family — `core/evaluators.py` parallel to data_sources/; builtin `lm_eval_harness` shells out to lm-eval CLI; `evaluator_list` MCP tool (Phase 3.3)
+- [x] Optuna HPO bridge — `hpo_create_study` / `hpo_ask_trial` / `hpo_tell_result` / `hpo_status` MCP. Tell-and-ask over TPE/random/CMA-ES/BoTorch samplers; in-process cache (threading.Lock from Part H) + persisted JSON for resume (Phase 3.4)
+- [x] External MCP consumption — `external_mcp_servers:` config + `external_mcp_list_servers` / `list_tools` / `call` MCP tools with per-call timeout (Phase 3.5)
+- [x] Code-level mutation — Phase 5+ deferred per "Sakana spent 6 weeks on this"; interface stub + design doc + `code_mutation_list` MCP tool ship in Phase 3.6 (full impl in `docs/code-mutation-design.md`)
+- [x] `research_arxiv_search` (Phase 3.1) + `research_openreview_search` (Phase 3.2) MCP tools — Atom-feed + v2/v1 fallback, defusedxml-safe parse
 
 **Exit:** Crucible ingests external benchmark scores, consumes Optuna posteriors, calls external MCP, and mutates training code.
 
-### Phase 4: Defensible-Niche Showcase (2-3 weeks)
+### Phase 4: Defensible-Niche Showcase (DONE — on `phase-4-showcase` branch pending merge)
 
 Demonstrate the niche with an end-to-end story plus features competitors don't have.
 
-- [ ] `note_generate_paper_draft(track_name)` MCP tool — completed track + top findings + leaderboard → structured markdown paper draft via orchestrator contract
-- [ ] Memory-aware GIANTS synthesis — `design_synthesize_from_findings` `memory_filter` mode (confidence + recency + cross-project diversity)
-- [ ] `research_peer_sync(challenge_id)` — post current top finding to shared HF Discussion thread, pull peers' top findings
-- [ ] `examples/full_autonomous_discovery/` — runnable ~$5-of-spot-GPU demo from clone to paper draft in 30 minutes
-- [ ] Public showcase video / asciinema for the README (optional, high-leverage)
+- [x] `note_generate_paper_draft(track_name)` MCP tool — request_prompt/submit orchestrator contract, 7 required sections, markdown H1/H2 demotion to prevent header injection (Phase 4.1)
+- [x] Memory-aware GIANTS synthesis — `design_synthesize_from_findings(policy='memory_filter')` with tunable `memory_filter_config` for half_life_days / cross_project_bonus / etc. (Phase 4.2)
+- [x] `research_peer_sync(challenge_id)` — shared HF Discussion thread with v1 header convention; redact_secrets on both write and read sides (Phase 4.3 + Part H.1.2 read-side fix)
+- [x] `examples/full_autonomous_discovery/` — 11-step playbook README exercising every Phase 1-4 surface end-to-end (Phase 4.4)
+- [ ] Public showcase video / asciinema for the README (optional, deferred)
 
 **Exit:** A new user can clone, run the demo, and have a paper draft + reproducibility bundle by lunch.
 
