@@ -111,3 +111,8 @@ CLAUDE.md.*.bak
 # fcntl advisory locks (created at runtime by core/file_lock.py)
 *.jsonl.lock
 *.yaml.lock
+
+# pytest-cov outputs
+.coverage
+.coverage.*
+htmlcov/
