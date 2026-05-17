@@ -32,7 +32,7 @@ import shlex
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -50,9 +50,24 @@ class EvalWatcherError(CrucibleError):
 
 @dataclass
 class EvalSpec:
-    """One entry from a project YAML ``eval_suite:`` block."""
-    script: str
-    args: list[str]
+    """One entry from a project YAML ``eval_suite:`` block.
+
+    Two flavors:
+      - Script: ``{script: train_eval.py, args: [--task, foo]}`` — shells
+        out to the named script with ``--checkpoint`` + ``--out``.
+      - Evaluator plugin (H.4.D): ``{evaluator: lm_eval_harness,
+        config: {tasks: [hellaswag], batch_size: 8}}`` — instantiates a
+        registered evaluator (see ``crucible.core.evaluators``) and
+        invokes its ``evaluate()`` method. The evaluator returns an
+        ``EvalResult`` whose ``scores`` dict is logged like the JSON
+        a script would emit.
+
+    Exactly one of ``script`` / ``evaluator`` must be set.
+    """
+    script: str = ""
+    args: list[str] = field(default_factory=list)
+    evaluator: str = ""
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 def _project_root() -> Path:
@@ -278,12 +293,20 @@ def _read_eval_suite(project_name: str) -> list[EvalSpec]:
     suite_raw = raw.get("eval_suite") or []
     out: list[EvalSpec] = []
     for entry in suite_raw:
-        if not isinstance(entry, dict) or "script" not in entry:
+        if not isinstance(entry, dict):
             continue
-        out.append(EvalSpec(
-            script=str(entry["script"]),
-            args=[str(a) for a in entry.get("args", [])],
-        ))
+        # H.4.D: prefer evaluator plugin over script when both keys
+        # are present; warn so the operator catches the duplication.
+        if "evaluator" in entry:
+            out.append(EvalSpec(
+                evaluator=str(entry["evaluator"]),
+                config=dict(entry.get("config") or {}),
+            ))
+        elif "script" in entry:
+            out.append(EvalSpec(
+                script=str(entry["script"]),
+                args=[str(a) for a in entry.get("args", [])],
+            ))
     return out
 
 
@@ -305,7 +328,16 @@ def _resolve_script_path(script: str) -> str:
 
 def _run_one_eval(ckpt_path: Path, ckpt_sha: str, label: str,
                   spec: EvalSpec, env: dict[str, str], timeout: int = 1800) -> dict[str, Any]:
-    """Run a single script, capture its JSON output if produced."""
+    """Run a single eval entry, capture its scores.
+
+    Two dispatch paths:
+      - ``spec.evaluator`` set (H.4.D): dispatch via the registered
+        evaluator plugin (see ``crucible.core.evaluators``).
+      - ``spec.script`` set: shell out to the script with
+        ``--checkpoint`` and ``--out`` flags (original path).
+    """
+    if spec.evaluator:
+        return _run_one_evaluator_plugin(ckpt_path, ckpt_sha, label, spec)
     script_path = _resolve_script_path(spec.script)
     out_json = _state_dir() / f".tmp_run_{ckpt_sha}_{Path(spec.script).stem}.json"
     cmd = ["python3", script_path, "--checkpoint", str(ckpt_path), "--out", str(out_json)]
@@ -339,6 +371,58 @@ def _run_one_eval(ckpt_path: Path, ckpt_sha: str, label: str,
         "stdout_tail": proc_stdout if not ok else "",
         "stderr_tail": proc_stderr if not ok else "",
         "ran_at": utc_now_iso(),
+    }
+
+
+def _run_one_evaluator_plugin(
+    ckpt_path: Path, ckpt_sha: str, label: str, spec: EvalSpec,
+) -> dict[str, Any]:
+    """Dispatch a Phase 3.3 evaluator plugin against a checkpoint.
+
+    Errors from the plugin (missing binary, bad config, etc.) come
+    back as ``EvalResult(success=False, error=...)`` and are surfaced
+    here as ``ok=False`` with the message in stderr_tail. Matches
+    the script-path return shape so eval_watch.jsonl readers don't
+    need to branch.
+    """
+    from crucible.core import evaluators as _evals
+
+    try:
+        _evals.discover_evaluator_plugins(project_root=_project_root())
+    except Exception:  # pragma: no cover — best-effort discovery
+        pass
+
+    t0 = time.time()
+    plugin_name = spec.evaluator
+    try:
+        plugin = _evals.instantiate_evaluator(plugin_name, spec.config)
+    except KeyError as exc:
+        return {
+            "label": label,
+            "script": f"evaluator:{plugin_name}",
+            "ckpt_sha": ckpt_sha,
+            "ok": False,
+            "elapsed_s": round(time.time() - t0, 1),
+            "result": None,
+            "stdout_tail": "",
+            "stderr_tail": str(exc),
+            "ran_at": utc_now_iso(),
+        }
+
+    out = plugin.evaluate(ckpt_path)
+    return {
+        "label": label,
+        # Reuse the ``script`` field for log compatibility; the
+        # prefix makes it visually distinct in eval_watch.jsonl.
+        "script": f"evaluator:{plugin_name}",
+        "ckpt_sha": ckpt_sha,
+        "ok": bool(out.success),
+        "elapsed_s": round(time.time() - t0, 1),
+        "result": dict(out.scores) if out.success else None,
+        "stdout_tail": "",
+        "stderr_tail": out.error or "",
+        "ran_at": utc_now_iso(),
+        "metadata": dict(out.metadata),
     }
 
 

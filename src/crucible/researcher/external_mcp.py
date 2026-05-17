@@ -32,17 +32,67 @@ hooks, not hot-path inference.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import os
 import shlex
 import sys
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
 from crucible.core.errors import CrucibleError
+from crucible.core.log import log_warn
+
+# H.4.E: track active sub-MCP calls. atexit hook below warns if the
+# parent exits while subprocesses are still in flight — on SIGKILL
+# this hook doesn't run and orphans are possible, but for normal
+# exits + Ctrl-C the asyncio context cleanup + this counter give the
+# operator visibility into incomplete cleanup. Full process-group
+# isolation would require monkey-patching mcp.client.stdio's
+# subprocess creation, which is out of MVP scope.
+_ACTIVE_CALLS_LOCK = threading.Lock()
+_ACTIVE_CALLS: int = 0
+_ATEXIT_REGISTERED = False
+
+
+def _track_active_call(delta: int) -> None:
+    global _ACTIVE_CALLS
+    with _ACTIVE_CALLS_LOCK:
+        _ACTIVE_CALLS = max(0, _ACTIVE_CALLS + delta)
+
+
+def _atexit_warn_orphans() -> None:
+    """Log if external_mcp subprocesses might be in flight at exit."""
+    with _ACTIVE_CALLS_LOCK:
+        active = _ACTIVE_CALLS
+    if active > 0:
+        log_warn(
+            f"external_mcp: process exiting with {active} call(s) still "
+            f"in flight. Subprocess cleanup runs via stdio_client async "
+            f"context; SIGKILL of the parent may leave orphan child "
+            f"processes. Use `ps -ef | grep -i mcp` to verify."
+        )
+
+
+def _ensure_atexit_registered() -> None:
+    global _ATEXIT_REGISTERED
+    if _ATEXIT_REGISTERED:
+        return
+    atexit.register(_atexit_warn_orphans)
+    _ATEXIT_REGISTERED = True
 
 
 class ExternalMCPError(CrucibleError):
-    """External MCP server failed (subprocess, protocol, tool exec)."""
+    """External MCP server failed (subprocess, protocol, tool exec).
+
+    SIGKILL caveat: if the parent Crucible process is hard-killed
+    while an external-mcp tool is in flight, the child subprocess
+    spawned by ``mcp.client.stdio`` may be orphaned. Normal exits +
+    Ctrl-C run the asyncio cleanup; SIGKILL bypasses it. The
+    :func:`_atexit_warn_orphans` hook logs a warning at exit when
+    calls are still in flight. Process-group isolation is a Phase 5+
+    rewrite item.
+    """
 
 
 class ExternalMCPConfigError(CrucibleError):
@@ -97,16 +147,21 @@ def _spec_timeout(server_spec: dict[str, Any], override: float | None) -> float:
 async def _list_tools_async(
     server_spec: dict[str, Any], *, timeout: float = _DEFAULT_EXT_MCP_TIMEOUT,
 ) -> list[dict[str, Any]]:
-    async with _connect(server_spec) as session:
-        listed = await asyncio.wait_for(session.list_tools(), timeout=timeout)
-        return [
-            {
-                "name": t.name,
-                "description": (t.description or "").strip().splitlines()[0]
-                if t.description else "",
-            }
-            for t in listed.tools
-        ]
+    _ensure_atexit_registered()
+    _track_active_call(+1)
+    try:
+        async with _connect(server_spec) as session:
+            listed = await asyncio.wait_for(session.list_tools(), timeout=timeout)
+            return [
+                {
+                    "name": t.name,
+                    "description": (t.description or "").strip().splitlines()[0]
+                    if t.description else "",
+                }
+                for t in listed.tools
+            ]
+    finally:
+        _track_active_call(-1)
 
 
 async def _call_tool_async(
@@ -116,10 +171,13 @@ async def _call_tool_async(
     *,
     timeout: float = _DEFAULT_EXT_MCP_TIMEOUT,
 ) -> dict[str, Any]:
-    async with _connect(server_spec) as session:
-        result = await asyncio.wait_for(
-            session.call_tool(tool_name, tool_args), timeout=timeout,
-        )
+    _ensure_atexit_registered()
+    _track_active_call(+1)
+    try:
+        async with _connect(server_spec) as session:
+            result = await asyncio.wait_for(
+                session.call_tool(tool_name, tool_args), timeout=timeout,
+            )
         # MCP CallToolResult has a `content` list of TextContent /
         # ImageContent etc. Flatten to plain dicts for JSON transport.
         content = []
@@ -133,6 +191,8 @@ async def _call_tool_async(
             "is_error": getattr(result, "isError", False),
             "content": content,
         }
+    finally:
+        _track_active_call(-1)
 
 
 def _run_async(coro):

@@ -1630,7 +1630,15 @@ def research_hf_search(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search arXiv via the public Atom-feed API (no auth)."""
+    """Search arXiv via the public Atom-feed API (no auth).
+
+    REQUIRES: query.
+    RETURNS: {query, count, results: [{arxiv_id, title, summary,
+              authors, categories, published_at, url, source}, ...]}
+    NEXT: research_hf_search for cross-reference, or
+          research_request_prompt(stage='hypothesis') with the results
+          as literature context.
+    """
     from crucible.researcher.arxiv_search import search_arxiv
 
     query = args.get("query", "")
@@ -2155,11 +2163,16 @@ def note_generate_paper_draft(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
-    """List registered evaluator plugins.
+    """List registered evaluator plugins (Phase 3.3 plugin family).
 
     Triggers plugin discovery (local + global) before listing so user
     plugins under ``.crucible/plugins/evaluators/`` are picked up
     without explicit registration.
+
+    REQUIRES: Nothing.
+    RETURNS: {count, evaluators: [{name, type, source}, ...]}
+    NEXT: declare the evaluator under ``eval_suite:`` in crucible.yaml
+          + ``eval_watch_start`` to run it on every new checkpoint.
     """
     from crucible.core.evaluators import (
         describe_evaluator,
@@ -2182,7 +2195,16 @@ def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_openreview_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search OpenReview via the public /notes/search API."""
+    """Search OpenReview via the public /notes/search API.
+
+    REQUIRES: query. Optional venue / year filters; OPENREVIEW_TOKEN
+              env for restricted venues (public papers need no auth).
+    RETURNS: {query, count, results: [{openreview_id, title, summary,
+              authors, venue, venueid, published_at, url, pdf_url}, ...]}
+    NEXT: research_arxiv_search for preprint cross-reference, or
+          research_request_prompt(stage='hypothesis') as literature
+          context for the autonomous loop.
+    """
     from crucible.researcher.openreview_search import search_openreview
 
     query = args.get("query", "")
