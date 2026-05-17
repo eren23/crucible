@@ -107,10 +107,18 @@ def render_finding_post(
     if body:
         lines.append(body)
     lines.append("")
-    confidence = top_finding.get("confidence")
+    confidence_raw = top_finding.get("confidence")
     category = top_finding.get("category", "observation")
-    if confidence is not None:
-        lines.append(f"_category={category}, confidence={confidence:.2f}_")
+    # Coerce confidence to float — LLMs sometimes return numeric values
+    # as strings (e.g., "0.85"), which would crash the :.2f format spec.
+    # Fall back to the raw string if coercion fails so the value still
+    # shows up in the post.
+    if confidence_raw is not None:
+        try:
+            conf_val = float(confidence_raw)
+            lines.append(f"_category={category}, confidence={conf_val:.2f}_")
+        except (TypeError, ValueError):
+            lines.append(f"_category={category}, confidence={confidence_raw}_")
     # Apply secret redaction so a finding accidentally containing an env
     # dump or stack trace doesn't leak credentials to a public repo.
     return redact_secrets("\n".join(lines))
@@ -211,10 +219,13 @@ def _post_comment_or_new_discussion(
     repo_type: str,
     token: str | None,
 ) -> str:
-    """Append a comment to an existing discussion.
+    """Append a comment to an existing discussion thread.
 
-    Falls back to opening a new discussion if the SDK doesn't expose
-    a comment API (older huggingface_hub versions).
+    If the installed ``huggingface_hub`` version lacks
+    ``HfApi.comment_discussion``, raises :class:`HfError` rather than
+    silently opening a new top-level discussion — the previous
+    fallback violated the peer-read contract (peers reading the
+    original thread never saw the orphan reply).
     """
     try:
         from huggingface_hub import HfApi  # type: ignore
@@ -222,21 +233,21 @@ def _post_comment_or_new_discussion(
 
         api = HfApi(token=resolve_token(token))
         comment = getattr(api, "comment_discussion", None)
-        if callable(comment):
-            d = comment(repo_id=repo_id, repo_type=repo_type, discussion_num=num, comment=body)
-            url = getattr(d, "url", None)
-            return str(url or "")
-        # Fall through: post a fresh discussion that references the
-        # parent thread. Less ideal but keeps the protocol working.
-        from crucible.researcher.hf_discussions import post_discussion as _open
-        opened = _open(
-            repo_id,
-            title=f"{_DISCUSSION_TITLE_PREFIX}reply-{num}",
-            description=body + f"\n\n_Reply to thread #{num}._",
-            repo_type=repo_type,
-            token=token,
+        if not callable(comment):
+            raise HfError(
+                "huggingface_hub.HfApi.comment_discussion is unavailable "
+                "in this SDK version; cannot append to discussion thread "
+                f"#{num}. Upgrade huggingface_hub to >=0.13 or post the "
+                "finding manually."
+            )
+        d = comment(
+            repo_id=repo_id, repo_type=repo_type,
+            discussion_num=num, comment=body,
         )
-        return str(opened.get("url", ""))
+        url = getattr(d, "url", None)
+        return str(url or "")
+    except HfError:
+        raise
     except Exception as exc:
         raise HfError(f"comment_discussion failed: {exc}") from exc
 

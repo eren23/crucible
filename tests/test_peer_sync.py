@@ -43,6 +43,30 @@ class TestTitleAndRender:
         assert "VICReg lifts predictor rank" in body
         assert "Effective rank >16" in body
 
+    def test_render_handles_string_confidence_without_crashing(self):
+        """Phase 4 review fix: LLMs sometimes return confidence as
+        a string. The :.2f format spec used to crash; now coerces."""
+        body = ps.render_finding_post(
+            agent_id="a", challenge_id="c",
+            top_finding={
+                "title": "T", "body": "B",
+                "confidence": "0.85",  # string, not float
+            },
+            iso_now="now",
+        )
+        # Either successfully formatted as 0.85 (after float coerce) or
+        # echoed verbatim — must not raise.
+        assert ("confidence=0.85" in body) or ("confidence=0.85_" in body)
+
+    def test_render_handles_unparseable_confidence(self):
+        body = ps.render_finding_post(
+            agent_id="a", challenge_id="c",
+            top_finding={"title": "T", "body": "B", "confidence": "not-a-number"},
+            iso_now="now",
+        )
+        # Falls back to verbatim string display, no crash.
+        assert "not-a-number" in body
+
     def test_render_redacts_secrets_from_body(self):
         body = ps.render_finding_post(
             agent_id="a",
@@ -196,6 +220,29 @@ class TestSyncPeerFinding:
         assert out["posted_url"] == ""
         assert out["peer_count"] == 1
         assert out["peers"][0]["agent_id"] == "peer-c"
+
+    def test_missing_comment_api_raises_instead_of_orphan_thread(self, monkeypatch):
+        """Phase 4 review fix: when HfApi.comment_discussion is unavailable,
+        we now raise HfError instead of silently opening a new top-level
+        discussion that peers reading the original thread will never see."""
+        from crucible.core.errors import HfError
+
+        class _FakeApi:
+            def __init__(self, *a, **kw): pass
+            # No comment_discussion attribute → fallback path.
+
+        monkeypatch.setitem(
+            __import__("sys").modules, "huggingface_hub",
+            type("hf", (), {"HfApi": _FakeApi})(),
+        )
+        monkeypatch.setattr(
+            "crucible.core.hf_writer.resolve_token", lambda t: "fake-token",
+        )
+        with pytest.raises(HfError, match="comment_discussion is unavailable"):
+            ps._post_comment_or_new_discussion(
+                repo_id="org/repo", num=42, body="x",
+                repo_type="dataset", token=None,
+            )
 
     def test_my_agent_id_filtered_from_peers(self, monkeypatch):
         """_fetch_peer_findings receives my_agent_id and is expected to

@@ -280,19 +280,48 @@ def _read_track(hub_store: Any, track_name: str) -> dict[str, Any] | None:
     return None
 
 
+def _demote_top_level_headers(text: str) -> str:
+    """Demote any leading-line H1/H2 ATX headers by one level.
+
+    Section bodies arrive from the orchestrator's LLM as free-text
+    markdown. If a body contains its own ``# Headline`` or ``## Sub``,
+    those would collide with the renderer's structural headers
+    (``# {title}`` and ``## Method``). Demote to keep the rendered
+    document's outline intact: ``#`` → ``###``, ``##`` → ``###``.
+    Deeper levels are left alone.
+    """
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            indent = line[: len(line) - len(stripped)]
+            out.append(f"{indent}### {stripped[2:]}")
+        elif stripped.startswith("## ") and not stripped.startswith("### "):
+            indent = line[: len(line) - len(stripped)]
+            out.append(f"{indent}### {stripped[3:]}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def _render_markdown(
     title: str,
     sections: dict[str, str],
     key_findings: list[str],
 ) -> str:
-    """Assemble the final markdown paper draft."""
+    """Assemble the final markdown paper draft.
+
+    Each section body is run through :func:`_demote_top_level_headers`
+    so LLM-supplied ATX headers (``#`` / ``##``) don't compete with
+    the renderer's own structure.
+    """
     lines: list[str] = [f"# {title}", ""]
 
     abstract = sections.get("abstract", "").strip()
     if abstract:
         lines.append("## Abstract")
         lines.append("")
-        lines.append(abstract)
+        lines.append(_demote_top_level_headers(abstract))
         lines.append("")
 
     if key_findings:
@@ -317,6 +346,6 @@ def _render_markdown(
             continue
         lines.append(f"## {header}")
         lines.append("")
-        lines.append(body)
+        lines.append(_demote_top_level_headers(body))
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

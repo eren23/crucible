@@ -175,6 +175,33 @@ class TestParseResponse:
         with pytest.raises(PaperDraftError, match="must be dict"):
             parse_paper_draft_response([1, 2, 3], "track")
 
+    def test_orchestrator_supplied_headers_get_demoted(self):
+        """Phase 4 review fix: if a section body contains its own
+        ``# Headline`` or ``## Sub``, those would collide with the
+        renderer's structural headers. They're now demoted to ###
+        so the document outline stays intact."""
+        sneaky = dict(VALID_RESPONSE)
+        sneaky["method"] = (
+            "# Sneaky H1\n"
+            "## Sneaky H2\n"
+            "Body text under the heading.\n"
+            "### Already deep — leave alone"
+        )
+        out = parse_paper_draft_response(sneaky, "track")
+        md = out["markdown"]
+        # Document still has exactly one H1 (the title) and the H2s
+        # the renderer added.
+        h1_count = sum(
+            1 for line in md.splitlines()
+            if line.startswith("# ") and not line.startswith("## ")
+        )
+        assert h1_count == 1, f"expected exactly 1 H1, got {h1_count}"
+        # The sneaky headers got demoted.
+        assert "### Sneaky H1" in md
+        assert "### Sneaky H2" in md
+        # And the already-deep ### header was left as-is (no double-demote).
+        assert "### Already deep" in md
+
     def test_section_counts_present_in_rendered_markdown(self):
         """Each non-empty required section appears once in markdown."""
         out = parse_paper_draft_response(VALID_RESPONSE, "track")

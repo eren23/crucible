@@ -91,6 +91,7 @@ def mine_pairs(
     seed: int | None = None,
     required_tags: set[str] | None = None,
     now: str | None = None,
+    memory_filter_config: dict[str, float] | None = None,
 ) -> list[Pair]:
     """Sample ``k`` unordered finding pairs from ``findings`` per ``policy``.
 
@@ -107,6 +108,13 @@ def mine_pairs(
     ``required_tags`` (optional) applies an OR filter at the pair level.
     ``now`` (optional ISO-8601 string) pins the "current time" for
     recency decay; if None, uses ``utc_now_iso()``.
+
+    ``memory_filter_config`` (optional) overrides the default scoring
+    constants per call. Recognized keys: ``half_life_days``,
+    ``cross_project_bonus``, ``same_project_penalty``,
+    ``tag_overlap_bonus``, ``missing_timestamp_decay``. Useful when a
+    project iterates faster (smaller half-life) or has different
+    diversity priorities than the default.
 
     Returns at most ``k`` pairs; fewer if the eligible-pair pool is smaller.
     """
@@ -147,7 +155,11 @@ def mine_pairs(
 
     if policy == "memory_filter":
         ref_now = now or _now_iso()
-        scored = [(score_pair(a, b, now=ref_now), (a, b)) for a, b in eligible]
+        cfg = memory_filter_config or {}
+        scored = [
+            (score_pair(a, b, now=ref_now, config=cfg), (a, b))
+            for a, b in eligible
+        ]
         scored.sort(key=lambda x: x[0], reverse=True)
         return [pair for _score, pair in scored[:k]]
 
@@ -180,35 +192,68 @@ def _parse_ts(ts: str | None) -> float | None:
         return None
 
 
-def _recency_decay(created_at: str | None, now: str) -> float:
+# Default decay when timestamps can't be parsed. 1.0 = "treat as fresh"
+# (don't penalize a finding for missing metadata). Was 0.5 in the
+# initial Phase 4.2 ship; reviewers flagged that as actively
+# halving the score of timestamp-less findings instead of being
+# neutral. Operators can override via memory_filter_config.
+_DEFAULT_MISSING_TS_DECAY = 1.0
+
+
+def _recency_decay(
+    created_at: str | None,
+    now: str,
+    *,
+    half_life_days: float = _RECENCY_HALF_LIFE_DAYS,
+    missing_decay: float = _DEFAULT_MISSING_TS_DECAY,
+) -> float:
     """Exponential decay from a finding's age in days.
 
-    Half-life = ``_RECENCY_HALF_LIFE_DAYS``. A finding created today
-    scores ~1.0; one ~3 months old scores ~0.5; older fades toward 0.
-    Returns 0.5 when timestamps can't be parsed (neutral default).
+    A finding created today scores ~1.0; one at ``half_life_days``
+    scores 0.5; older fades toward 0. Returns ``missing_decay`` (1.0
+    by default) when timestamps can't be parsed — don't penalize a
+    finding for missing metadata.
     """
     import math
 
     t_then = _parse_ts(created_at)
     t_now = _parse_ts(now)
     if t_then is None or t_now is None:
-        return 0.5
+        return missing_decay
     age_days = max(0.0, (t_now - t_then) / 86_400.0)
-    return math.exp(-age_days * math.log(2) / _RECENCY_HALF_LIFE_DAYS)
+    return math.exp(-age_days * math.log(2) / half_life_days)
 
 
-def score_finding(finding: dict[str, Any], *, now: str) -> float:
+def score_finding(
+    finding: dict[str, Any],
+    *,
+    now: str,
+    config: dict[str, float] | None = None,
+) -> float:
     """Per-finding score: confidence × recency decay.
 
     Public helper for callers that want to surface individual finding
     salience (e.g., a "what should I look at first?" view in the
     briefing). The pair scorer multiplies these and adds bonuses.
     """
+    cfg = config or {}
     confidence = float(finding.get("confidence", 0.0))
-    return max(0.0, confidence) * _recency_decay(finding.get("created_at"), now)
+    decay = _recency_decay(
+        finding.get("created_at"),
+        now,
+        half_life_days=cfg.get("half_life_days", _RECENCY_HALF_LIFE_DAYS),
+        missing_decay=cfg.get("missing_timestamp_decay", _DEFAULT_MISSING_TS_DECAY),
+    )
+    return max(0.0, confidence) * decay
 
 
-def score_pair(a: dict[str, Any], b: dict[str, Any], *, now: str) -> float:
+def score_pair(
+    a: dict[str, Any],
+    b: dict[str, Any],
+    *,
+    now: str,
+    config: dict[str, float] | None = None,
+) -> float:
     """Score a candidate finding pair for the memory_filter policy.
 
     Components:
@@ -216,21 +261,29 @@ def score_pair(a: dict[str, Any], b: dict[str, Any], *, now: str) -> float:
       - Cross-project diversity bonus (penalty when both share the same
         source_project; bonus when they don't)
       - Tag overlap bonus (rewards likely-synergistic pairs)
+
+    ``config`` overrides the default constants (half_life_days,
+    cross_project_bonus, same_project_penalty, tag_overlap_bonus,
+    missing_timestamp_decay) per call.
     """
-    base = (score_finding(a, now=now) + score_finding(b, now=now)) * 0.5
+    cfg = config or {}
+    base = (
+        score_finding(a, now=now, config=cfg)
+        + score_finding(b, now=now, config=cfg)
+    ) * 0.5
 
     proj_a = a.get("source_project") or ""
     proj_b = b.get("source_project") or ""
     if proj_a and proj_b and proj_a == proj_b:
-        diversity = _SAME_PROJECT_PENALTY
+        diversity = cfg.get("same_project_penalty", _SAME_PROJECT_PENALTY)
     elif proj_a and proj_b:
-        diversity = _CROSS_PROJECT_BONUS
+        diversity = cfg.get("cross_project_bonus", _CROSS_PROJECT_BONUS)
     else:
         diversity = 0.0
 
     tags_a = set(a.get("tags") or [])
     tags_b = set(b.get("tags") or [])
-    overlap = _TAG_OVERLAP_BONUS if (tags_a & tags_b) else 0.0
+    overlap = cfg.get("tag_overlap_bonus", _TAG_OVERLAP_BONUS) if (tags_a & tags_b) else 0.0
 
     return base + diversity + overlap
 

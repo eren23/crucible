@@ -329,6 +329,56 @@ class TestMemoryFilter:
         b = mine_pairs(findings, k=3, policy="memory_filter", now=self.NOW)
         assert [(p[0]["id"], p[1]["id"]) for p in a] == [(p[0]["id"], p[1]["id"]) for p in b]
 
+    def test_missing_timestamp_defaults_to_no_penalty(self):
+        """Phase 4 review fix: previously _recency_decay returned 0.5
+        when timestamps were unparseable, which actively halved the
+        score of timestamp-less findings. Now defaults to 1.0
+        (treat-as-fresh) so missing metadata doesn't penalize."""
+        from crucible.researcher.synthesis import score_finding
+        f_no_ts = {"id": "f", "confidence": 0.8}  # no created_at
+        f_with_ts = self._finding("g", confidence=0.8, days_old=0)
+        # Without timestamps, score should match a fresh-timestamped
+        # finding at the same confidence (within tolerance).
+        s_no = score_finding(f_no_ts, now=self.NOW)
+        s_with = score_finding(f_with_ts, now=self.NOW)
+        assert abs(s_no - s_with) < 1e-3, (
+            f"missing timestamp should not penalize; "
+            f"got no_ts={s_no:.3f} vs fresh={s_with:.3f}"
+        )
+
+    def test_memory_filter_config_override(self):
+        """Tunable: half_life_days override changes the ranking."""
+        from crucible.researcher.synthesis import score_finding
+        old = self._finding("o", confidence=0.9, days_old=180)
+        # Default half-life = 90d → decay ≈ 0.25 → score ≈ 0.225
+        default_score = score_finding(old, now=self.NOW)
+        # Shorter half-life → faster decay → lower score.
+        short_score = score_finding(
+            old, now=self.NOW, config={"half_life_days": 30.0},
+        )
+        # Longer half-life → slower decay → higher score.
+        long_score = score_finding(
+            old, now=self.NOW, config={"half_life_days": 365.0},
+        )
+        assert short_score < default_score < long_score
+
+    def test_memory_filter_config_propagates_through_mine_pairs(self):
+        """memory_filter_config kwarg on mine_pairs reaches score_pair."""
+        from crucible.researcher.synthesis import mine_pairs
+        findings = [
+            self._finding("a", project="p1", confidence=0.5),
+            self._finding("b", project="p2", confidence=0.5),
+            self._finding("c", project="p1", confidence=0.5),
+        ]
+        # With a huge cross-project bonus, the cross-project pair (a, b)
+        # must come first.
+        pairs = mine_pairs(
+            findings, k=1, policy="memory_filter", now=self.NOW,
+            memory_filter_config={"cross_project_bonus": 10.0},
+        )
+        ids = {pairs[0][0]["id"], pairs[0][1]["id"]}
+        assert ids == {"a", "b"}
+
     def test_memory_filter_respects_tag_filter(self):
         from crucible.researcher.synthesis import mine_pairs
         f1 = self._finding("f1", tags=["jepa"])
