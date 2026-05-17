@@ -107,3 +107,7 @@ videos
 hermes-agent/
 
 CLAUDE.md.*.bak
+
+# fcntl advisory locks (created at runtime by core/file_lock.py)
+*.jsonl.lock
+*.yaml.lock
