@@ -257,7 +257,7 @@ Designs live in `.crucible/designs/` as versioned YAML. Wave specs in `specs/` a
 
 **W&B Best Practice**: Related experiments (e.g., architecture variants) should share one WANDB_PROJECT. Set the same `env_set.WANDB_PROJECT` across related project specs. The variant name (`CRUCIBLE_VARIANT_NAME` / `WANDB_RUN_NAME`) distinguishes individual runs within the project. Don't create separate W&B projects per architecture variant — this fragments the leaderboard.
 
-### MCP Tools (157 total)
+### MCP Tools (~210 total across 19 tiers)
 
 **Tier 1 — Core Experiment Flow** (use these to run experiments):
 `provision_nodes` → `fleet_refresh` → `bootstrap_nodes` → `design_enqueue_batch` → `dispatch_experiments` → `collect_results` → `get_leaderboard`
@@ -320,6 +320,13 @@ Taps are git repos containing plugins with `plugin.yaml` manifests. Install copi
 
 Candidates are stored as Python files under `.crucible/search_trees/{tree}/candidates/{node_id}.py`; domain specs ship as a `domain_specs` tap plugin type. See `docs/harness-optimization.md` and `.crucible/taps/meta-harness/` for the workflow and bundled templates.
 
+**Tier 13 — Eval Watcher (auto-eval daemon, 3 tools):**
+`eval_watch_start(project_name, interval=300)` — start a daemon that polls running pods every `interval` seconds, SCPs new checkpoints to `.crucible/eval_watch_ckpts/`, and runs each script in the project's `eval_suite:` block on each new ckpt.
+`eval_watch_status(recent=10)` — current daemon state + last N evaluation rows.
+`eval_watch_stop()` — halt the daemon.
+
+Each project YAML can declare an `eval_suite:` block listing scripts to run on every checkpoint. Each script must accept `--checkpoint <path>` and `--out <json_path>`. Results land in `.crucible/eval_watch.jsonl` (append-only, SHA-deduplicated). State persists across Crucible restarts. See `docs/eval-watcher.md` for usage, schema, and debugging.
+
 **Tier 14 — HuggingFace Collab Publish (opt-in write side, 5 tools):**
 `hf_push_artifact`, `hf_pull_artifact` — model checkpoints + eval bundles to/from a HF model repo (defaults to `hf_collab.artifacts_repo`; supports `{project}` substitution).
 `hf_publish_leaderboard(top_n, challenge?)` — exports `get_leaderboard()` rows as `leaderboard.jsonl` + `README.md` to a HF Dataset repo. Each row carries a stable `challenge` field (default: project name) for cross-project filtering.
@@ -341,12 +348,31 @@ Backed by `src/crucible/researcher/hf_search.py:fetch_prior_runs` (reads leaderb
 
 `note_post_to_hf_discussions` runs `redact_secrets()` on title + body before posting (catches `HF_TOKEN`, `WANDB_API_KEY`, `sk-ant-*`, `sk-*`, GitHub PATs, AWS keys, bearer tokens, env-style `KEY=value`). A note containing a copy-pasted env dump or stack trace will not leak credentials to a public repo.
 
-**Tier 13 — Eval Watcher (auto-eval daemon, 3 tools):**
-`eval_watch_start(project_name, interval=300)` — start a daemon that polls running pods every `interval` seconds, SCPs new checkpoints to `.crucible/eval_watch_ckpts/`, and runs each script in the project's `eval_suite:` block on each new ckpt.
-`eval_watch_status(recent=10)` — current daemon state + last N evaluation rows.
-`eval_watch_stop()` — halt the daemon.
+**Tier 16 — Autonomous Loop Sessions (Phase 1, persisted-session protocol):**
+Three orchestrator-contract session drivers — start | submit | continue | status | cancel verbs over a persisted yaml + event-log pair under `.crucible/{autonomous,tree_autonomous,harness_autonomous}_sessions/`. Crucible never calls an LLM; the orchestrator drives the LLM round-trips. State-snapshot stale-submit detection (Phase 1.2) and wall-clock × pod-rate budget caps (Phase 1.8) apply across all three.
 
-Each project YAML can declare an `eval_suite:` block listing scripts to run on every checkpoint. Each script must accept `--checkpoint <path>` and `--out <json_path>`. Results land in `.crucible/eval_watch.jsonl` (append-only, SHA-deduplicated). State persists across Crucible restarts. See `docs/eval-watcher.md` for usage, schema, and debugging.
+`autonomous_research_loop(action, ...)` — research loop (hypothesis ↔ reflection stages); `budget_usd` opt-in cap; `with_literature=true` pre-injects HF Papers context.
+`tree_autonomous_loop(action, ...)` — tree-search loop; one expand per iteration via `tree_auto_expand`-style prompt; external_dispatch hint when pending nodes await dispatch+collect.
+`harness_autonomous_loop(action, ...)` — meta-harness optimizer loop; Python code blocks + JSON metadata in proposals; validate + benchmark synchronously.
+
+Plus `tree_auto_expand(action='request_prompt'|'submit')` — Phase 1.3 de-Anthropic refactor: same orchestrator contract for non-session tree expansion.
+
+**Tier 17 — Discoverability (Phase 2, 2 tools):**
+`tool_router(check_orphans=false)` — pure-heuristic state-aware recommender. Inspects nodes / queue / completed / active sessions and returns `{recommended_tool, rationale, alternatives, state}`. ~11-branch decision graph; orphan probe is opt-in (skipped by default to avoid a live RunPod GraphQL round-trip per call).
+`runs_search(where, order_by, direction, limit, source, select, strict_fields)` — SQL-ish predicate filter over the run ledger via Python AST whitelist (no function calls, no arithmetic). Identifiers resolve against row dicts with dotted access; top-level config keys auto-folded. `strict_fields=true` validates predicate identifiers against actual rows (typo detection with difflib suggestion).
+
+**Tier 18 — Ecosystem Ingestion + Plumbing (Phase 3, 11 tools):**
+`research_arxiv_search` — public arXiv Atom-feed API (defusedxml-safe parse). `research_openreview_search` — OpenReview v2 + v1 with `source=forum` filter for paper-only results.
+`evaluator_list` — list registered benchmark evaluator plugins (new family, see "Unified Plugin System" below; builtin: lm_eval_harness).
+`hpo_create_study`, `hpo_ask_trial`, `hpo_tell_result`, `hpo_status` — Optuna-backed tell-and-ask HPO bridge with TPE / random / CMA-ES / BoTorch samplers. Optuna is optional; absent → HPOImportError. In-process cache keyed by (project_root, study_name) under a threading.Lock so concurrent ask calls don't collide.
+`external_mcp_list_servers`, `external_mcp_list_tools`, `external_mcp_call` — spawn user-supplied MCP servers (Spider Chat, Codex, etc.) via stdio. Per-call timeout (default 30s) prevents a hanging server from blocking the worker thread.
+`code_mutation_list` — Phase 3.6 interface stub. Real Phase 5+ impl tracked in `docs/code-mutation-design.md`.
+
+**Tier 19 — Showcase (Phase 4, 2 tools):**
+`note_generate_paper_draft(action='request_prompt'|'submit', track_name)` — orchestrator-contract paper draft generator. Pulls track findings + leaderboard + notes + hypotheses, returns a `{system, user, schema}` envelope; the orchestrator's LLM emits 7 required sections (abstract, introduction, method, results, discussion, limitations, related_work) + optional title/key_findings; the submit action validates section completeness + returns rendered markdown with leading H1/H2 demoted to H3 to keep the document outline intact.
+`research_peer_sync(challenge_id, ...)` — share + pull top findings via shared HF Discussion thread (title convention `crucible-peer-sync:<challenge_id>`). Best-effort: network outage → `{peer_count: 0, peers: []}`. `redact_secrets` applied on both write and read sides.
+
+Plus `design_synthesize_from_findings(policy='memory_filter', ...)` extended in Phase 4.2 with a new policy: rank pairs by `(confidence × recency_decay) + cross_project_diversity + tag_overlap` instead of uniform sampling. Tunable via `memory_filter_config`.
 
 **Important**: `bootstrap_nodes`, `dispatch_experiments`, `collect_results`, and `sync_code` are long-running operations (minutes). The MCP server runs them in background threads via `asyncio.to_thread()` to prevent stdio pipe timeouts.
 
@@ -423,6 +449,8 @@ All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-
 | Augmentations | `models/composer.py` | smear_gate, bigram_hash, trigram_hash |
 | Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
 | Data Sources | `core/data_sources.py` | huggingface, local_files, wandb_artifact |
+| Evaluators | `core/evaluators.py` | lm_eval_harness — benchmark-score plugins parallel to data_sources (Phase 3.3) |
+| Code-Mutation Policies | `researcher/code_mutation.py` | (stub only; full Phase 5+ — see `docs/code-mutation-design.md`) |
 | Domain Specs | `researcher/domain_spec.py` | nlp_classification, agent_scaffold (tap) — YAML contracts for harness optimization |
 
 **Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.

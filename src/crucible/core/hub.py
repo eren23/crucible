@@ -338,6 +338,20 @@ class HubStore:
         path = self._track_yaml_path(name)
         write_yaml(path, data)
 
+    def get_track(self, name: str) -> dict[str, Any] | None:
+        """Public reader for a track's persisted metadata.
+
+        Returns the track yaml dict (``{name, description, projects,
+        tags, created_at, ...}``) or ``None`` if no such track exists.
+        Wraps the private ``_read_track_yaml`` so callers (paper_writer,
+        peer_sync, future tools) don't need to reach into the private
+        surface (Part H.4.B).
+        """
+        try:
+            return self._read_track_yaml(name)
+        except HubError:
+            return None
+
     def create_track(
         self,
         name: str,

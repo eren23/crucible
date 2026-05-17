@@ -299,6 +299,62 @@ class TestContextPushFindingAutoPromote:
         assert ("project", "global") in PROMOTION_RULES
         assert PROMOTION_RULES[("project", "global")]["min_confidence"] >= 0.9
 
+    def test_h13_string_confidence_coerced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """H.1.3 fix: an LLM-supplied "0.85" string used to crash the
+        promotion-rule comparison. Now coerced to float at the entry."""
+        from crucible.mcp.tools import context_push_finding
+
+        _patch_config(monkeypatch, tmp_path)
+        result = context_push_finding({
+            "finding": "string-conf test",
+            "confidence": "0.85",  # string, not float
+        })
+        assert result["status"] == "recorded"
+        assert isinstance(result["entry"]["confidence"], float)
+        assert abs(result["entry"]["confidence"] - 0.85) < 1e-9
+
+    def test_h13_bad_confidence_surfaces_clean_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """H.1.3 fix: an unparseable confidence value surfaces a typed
+        error instead of leaking ValueError."""
+        from crucible.mcp.tools import context_push_finding
+
+        _patch_config(monkeypatch, tmp_path)
+        result = context_push_finding({
+            "finding": "bad-conf",
+            "confidence": "not-a-number",
+        })
+        assert "error" in result
+        assert "confidence" in result["error"]
+        assert "must be a number" in result["error"]
+
+    def test_h13_concurrent_pushes_under_write_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """H.1.3: prior to the write_lock fix, two concurrent
+        context_push_finding calls could lose a finding via the
+        unsynchronized load → add → save sequence. Smoke-test that
+        the locked path accepts back-to-back calls without dropping
+        the count (full multiprocess test would be heavier — this is
+        an in-process invariant check)."""
+        from crucible.mcp.tools import context_push_finding
+        from crucible.researcher.state import ResearchState
+
+        _patch_config(monkeypatch, tmp_path)
+        for i in range(5):
+            context_push_finding({
+                "finding": f"f{i}",
+                "confidence": 0.5,
+            })
+
+        state = ResearchState(tmp_path / "research_state.jsonl")
+        assert len(state.findings) == 5, (
+            f"expected 5 findings persisted; got {len(state.findings)}"
+        )
+
     def test_prune_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_create, tree_prune
         from crucible.researcher.search_tree import SearchTree

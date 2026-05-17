@@ -807,10 +807,15 @@ TOOLS: list[Tool] = [
                 },
                 "policy": {
                     "type": "string",
-                    "enum": ["random", "same_track", "cross_track"],
+                    "enum": ["random", "same_track", "cross_track", "memory_filter"],
                     "description": (
-                        "Pair-mining policy. 'random' samples any pair; 'same_track' "
-                        "draws within one research track; 'cross_track' draws across tracks."
+                        "Pair-mining policy. 'random' samples any pair uniformly; "
+                        "'same_track' draws within one research track; 'cross_track' "
+                        "draws across tracks. 'memory_filter' (Phase 4.2) ranks all "
+                        "eligible pairs by (confidence × recency_decay) + "
+                        "cross_project_diversity + tag_overlap and returns the top-k "
+                        "— useful when the hub has many findings and uniform random "
+                        "sampling washes out the high-confidence synthesis opportunities."
                     ),
                     "default": "random",
                 },
@@ -3537,6 +3542,122 @@ TOOLS: list[Tool] = [
                 },
             },
             "required": ["server", "tool"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="research_peer_sync",
+        description=(
+            "Share + pull top findings with peer agents racing on the same "
+            "challenge_id, via a shared HuggingFace Discussion thread "
+            "(Phase 4.3). Each call posts the agent's current top finding "
+            "and reads peers' previously-posted findings from the same "
+            "thread. Title convention: 'crucible-peer-sync:<challenge_id>'.\n\n"
+            "Best-effort: a network outage or missing HF SDK degrades to "
+            "{peer_count: 0, peers: []} rather than blocking the loop. "
+            "Secret redaction is applied to the posted body so a finding "
+            "containing an env dump won't leak credentials.\n\n"
+            "REQUIRES: challenge_id. Optional: repo_id (default from "
+            "hf_collab.leaderboard_repo), agent_id (default from "
+            "CRUCIBLE_AGENT_ID env or project name), top_finding "
+            "(overrides auto-pick from ResearchState), leaderboard_row.\n"
+            "RETURNS: {challenge_id, agent_id, thread_num, thread_url, "
+            "posted_url, peer_count, peers: [{agent_id, ts, body, ...}]}\n"
+            "NEXT: feed peers into the next iteration's literature_context, "
+            "or reference them in research_request_prompt(stage='hypothesis')."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "challenge_id": {"type": "string"},
+                "repo_id": {"type": "string"},
+                "repo_type": {
+                    "type": "string",
+                    "enum": ["dataset", "model", "space"],
+                    "default": "dataset",
+                },
+                "agent_id": {"type": "string"},
+                "top_finding": {
+                    "type": "object",
+                    "description": (
+                        "Override the auto-picked top finding. Shape: "
+                        "{title, body, category, confidence}."
+                    ),
+                    "additionalProperties": True,
+                },
+                "leaderboard_row": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+                "token": {
+                    "type": "string",
+                    "description": "HF token. Falls back to HF_TOKEN env.",
+                },
+            },
+            "required": ["challenge_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="note_generate_paper_draft",
+        description=(
+            "Generate a structured markdown paper draft from a research track "
+            "(Phase 4.1). Two-call orchestrator-contract: action='request_prompt' "
+            "returns {system, user, schema, sections} composed from track findings + "
+            "leaderboard + notes + hypotheses; orchestrator calls its own LLM with "
+            "the prompt and submits the JSON response back via action='submit', "
+            "which validates section completeness and returns the rendered "
+            "markdown. No LLM keys in Crucible.\n\n"
+            "Required sections: abstract, introduction, method, results, "
+            "discussion, limitations, related_work. Optional: title, key_findings.\n\n"
+            "REQUIRES: track_name; for action='submit' also response.\n"
+            "RETURNS: request_prompt → {system, user, schema, sections, ...}; "
+            "submit → {title, key_findings, markdown, section_counts}.\n"
+            "NEXT: hf_publish_findings to share, or note_post_to_hf_discussions "
+            "to publish the draft to a HF Discussion thread."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["request_prompt", "submit"],
+                    "default": "request_prompt",
+                },
+                "track_name": {"type": "string"},
+                "response": {
+                    "description": (
+                        "Required for action='submit'. Orchestrator's JSON "
+                        "response: either a dict matching the schema, or a "
+                        "JSON-string blob from the LLM."
+                    ),
+                },
+                "max_findings": {"type": "integer", "default": 25},
+                "max_leaderboard": {"type": "integer", "default": 10},
+                "max_notes": {"type": "integer", "default": 10},
+            },
+            "required": ["track_name"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="code_mutation_list",
+        description=(
+            "List registered code-mutation policies (Phase 3.6 interface stub). "
+            "All policies currently stub-only — see docs/code-mutation-design.md "
+            "for the Phase 5+ implementation plan. User policies plug into "
+            ".crucible/plugins/code_mutation/*.py (local) or "
+            "~/.crucible-hub/plugins/code_mutation/*.py (global) and are "
+            "auto-discovered on each list call.\n\n"
+            "REQUIRES: Nothing.\n"
+            "RETURNS: {count, policies: [{name, type, source}], note}\n"
+            "NEXT: This surface is a stub. To wire a real implementation, "
+            "subclass CodeMutationPolicy in researcher/code_mutation.py and "
+            "register via register_code_mutation_policy()."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
             "additionalProperties": False,
         },
     ),

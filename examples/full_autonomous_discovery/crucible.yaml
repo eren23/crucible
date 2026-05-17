@@ -1,0 +1,68 @@
+# Full autonomous-discovery demo — Phase 4.4
+#
+# A self-contained project that exercises every Phase 1+2+3+4 surface
+# end-to-end in ~30 minutes on a single laptop (no fleet, no real
+# GPU). The training script is the same simulated trainer that powers
+# the 5-minute quickstart (examples/basic/train.py); the difference
+# is that THIS project drives the full closed loop via the
+# orchestrator-contract MCP tools — autonomous_research_loop +
+# design_synthesize_from_findings(memory_filter) + tool_router +
+# note_generate_paper_draft.
+#
+# See README.md in this directory for the step-by-step playbook.
+
+name: full-autonomous-discovery
+version: "0.2.1-alpha"
+
+provider:
+  type: ssh
+  ssh_key: ~/.ssh/id_ed25519
+
+training:
+  - backend: torch
+    script: train.py
+
+metrics:
+  primary: val_loss
+  direction: minimize
+
+# Local-friendly defaults — explicitly opt OUT of the
+# production-shaped policies for this demo.
+execution_policy:
+  require_remote: false
+  required_provider: ""
+  allow_local_dev: true
+
+wandb:
+  required: false
+
+# Optional researcher budget for the autonomous loop.
+researcher:
+  budget_hours: 1.0
+  max_iterations: 5
+
+# Phase 3.4 — HPO bridge can drive a small sweep instead of the
+# orchestrator generating one-off configs. Optional; the README shows
+# the loop without it first.
+# external_mcp:
+#   servers:
+#     codex:
+#       command: "codex"
+#       args: ["mcp", "serve"]
+
+presets:
+  smoke:
+    MAX_WALLCLOCK_SECONDS: "30"
+    ITERATIONS: "200"
+    VAL_LOSS_EVERY: "50"
+  proxy:
+    MAX_WALLCLOCK_SECONDS: "120"
+    ITERATIONS: "1000"
+    VAL_LOSS_EVERY: "100"
+
+results_file: experiments.jsonl
+fleet_results_file: experiments_fleet.jsonl
+logs_dir: logs
+store_dir: .crucible
+research_state_file: research_state.jsonl
+nodes_file: nodes.json

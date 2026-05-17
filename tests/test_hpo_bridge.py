@@ -338,6 +338,53 @@ class TestMCPLayerFixes:
         assert "error" in out
         assert "score" in out["error"]
 
+    def test_h14_concurrent_ask_serialized_no_trial_collision(
+        self, tmp_path, monkeypatch
+    ):
+        """H.1.4: two concurrent hpo_ask_trial calls used to both miss
+        the unsynchronized cache, both build a fresh HPOStudy, and the
+        second write would silently discard the first's asked-but-not-
+        told trial. Now serialized via _HPO_STUDY_CACHE_LOCK — each
+        ask returns a distinct trial_id and no in-memory state is
+        lost."""
+        import threading
+        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        _HPO_STUDY_CACHE.clear()
+        monkeypatch.setattr(
+            "crucible.mcp.tools._get_config",
+            lambda: self._fake_config(tmp_path),
+        )
+        TOOL_DISPATCH["hpo_create_study"]({
+            "name": "race",
+            "params": {"LR": {"type": "float", "low": 0, "high": 1}},
+            "sampler": "random", "seed": 1,
+        })
+
+        results: list[dict] = []
+        errors: list[Exception] = []
+
+        def worker():
+            try:
+                out = TOOL_DISPATCH["hpo_ask_trial"]({"name": "race"})
+                results.append(out)
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"concurrent asks raised: {errors}"
+        # Each ask must yield a distinct trial_id — if the cache lock
+        # was missing, two would collide on trial_id=0.
+        trial_ids = [r["trial_id"] for r in results]
+        assert len(set(trial_ids)) == len(trial_ids), (
+            f"duplicate trial_ids under concurrent ask: {trial_ids}"
+        )
+        assert len(results) == 8
+
     def test_hpo_cross_process_resume_via_mcp(self, tmp_path, monkeypatch):
         """End-to-end: create + 3 trials + clear cache + tell continues
         without 'Unknown trial_id'."""

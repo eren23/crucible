@@ -169,7 +169,8 @@ def _find_active_session(config: ProjectConfig) -> dict[str, Any] | None:
     # Session yaml schemas diverge by type:
     #   autonomous → "current_stage"
     #   harness    → "stage"
-    #   tree       → no stage field (single-stage protocol)
+    #   tree       → no stage field (single-stage protocol; signals
+    #                "waiting" via current_node_id == None)
     # Read both keys with explicit fallback so live MCP callers don't
     # see "stage: null" for active autonomous sessions.
     stage = data.get("current_stage") or data.get("stage")
@@ -178,6 +179,10 @@ def _find_active_session(config: ProjectConfig) -> dict[str, Any] | None:
         "session_id": sid,
         "stage": stage,
         "status": data.get("status"),
+        # Tree-specific marker: when current_node_id is None on a
+        # running tree session, the session is waiting for external
+        # dispatch + collect to finish (Part H.1.1 wait-stage fix).
+        "current_node_id": data.get("current_node_id"),
     }
 
 
@@ -306,6 +311,18 @@ def recommend_next_action(
         # If stage is a wait stage, hint status; otherwise hint continue/submit.
         wait_stages = {"benchmark_wait", "external_dispatch", "running"}
         is_wait = active.get("stage") in wait_stages
+        # H.1.1 fix: tree sessions never persist a stage key, so the
+        # wait_stages check above is always False for them. The tree
+        # session's wait signal is current_node_id == None on a running
+        # session — that means apply_response cleared it after expanding
+        # and we're now waiting for external dispatch + collect.
+        if (
+            not is_wait
+            and active.get("kind") == "tree"
+            and active.get("status") == "running"
+            and active.get("current_node_id") is None
+        ):
+            is_wait = True
         primary = (
             loop_tool,
             (

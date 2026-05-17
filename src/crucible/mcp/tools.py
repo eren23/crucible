@@ -1155,21 +1155,47 @@ def context_push_finding(args: dict[str, Any]) -> dict[str, Any]:
     ``auto_promote_scope='global'``) provided the confidence meets the
     promotion-rule threshold. Auto-promote is opt-in per call — the
     default behavior records to ResearchState only.
+
+    H.1.3 fix: coerces ``confidence`` to float (LLMs sometimes return
+    "0.85" as string, which breaks the promotion-rule comparison) and
+    wraps the read-modify-write in ``state.write_lock()`` so two
+    concurrent calls can't lose findings.
     """
     config = _get_config()
     from crucible.researcher.state import ResearchState
 
     state_path = config.project_root / config.research_state_file
-    state = ResearchState(state_path)
 
-    entry = state.add_finding(
-        finding=args["finding"],
-        category=args.get("category", "observation"),
-        source_experiments=args.get("source_experiments", []),
-        confidence=args.get("confidence", 0.7),
-        created_by=args.get("created_by", "mcp-agent"),
-    )
-    state.save()
+    # Confidence coercion: an LLM-supplied "0.85" string would compare
+    # against PROMOTION_RULES['min_confidence'] (a float) via < below
+    # and yield TypeError. Coerce up front; bad values raise a typed
+    # error that the dispatcher converts to {"error": ...}.
+    raw_conf = args.get("confidence", 0.7)
+    try:
+        confidence = float(raw_conf)
+    except (TypeError, ValueError) as exc:
+        return {
+            "error": (
+                f"[CrucibleError] context_push_finding: 'confidence' must "
+                f"be a number, got {raw_conf!r}: {exc}"
+            )
+        }
+
+    state = ResearchState(state_path)
+    # Phase 1.2 contract: read-modify-write on research_state.jsonl
+    # must hold ResearchState.write_lock to avoid concurrent loss.
+    # context_push_finding bypassed the lock until H.1.3. The lock
+    # itself calls _reload_in_place on entry so we see the latest
+    # peer writes before mutating.
+    with state.write_lock():
+        entry = state.add_finding(
+            finding=args["finding"],
+            category=args.get("category", "observation"),
+            source_experiments=args.get("source_experiments", []),
+            confidence=confidence,
+            created_by=args.get("created_by", "mcp-agent"),
+        )
+        state.save()
 
     auto_promote = bool(args.get("auto_promote", False))
     if not auto_promote:
@@ -1604,7 +1630,15 @@ def research_hf_search(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_arxiv_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search arXiv via the public Atom-feed API (no auth)."""
+    """Search arXiv via the public Atom-feed API (no auth).
+
+    REQUIRES: query.
+    RETURNS: {query, count, results: [{arxiv_id, title, summary,
+              authors, categories, published_at, url, source}, ...]}
+    NEXT: research_hf_search for cross-reference, or
+          research_request_prompt(stage='hypothesis') with the results
+          as literature context.
+    """
     from crucible.researcher.arxiv_search import search_arxiv
 
     query = args.get("query", "")
@@ -1638,7 +1672,18 @@ def _hpo_studies_dir() -> Path:
 # state. Keyed by (project_root, study_name). Lost on process restart;
 # operators wanting cross-process persistence should use Optuna's RDB
 # storage directly (out of MVP scope).
+#
+# H.1.4 thread-safety: the MCP server dispatches sync handlers via
+# asyncio.to_thread, so two concurrent `hpo_ask_trial` calls for the
+# same study key can hit _hpo_load_or_create simultaneously. Without
+# the lock, both miss the cache, both build a fresh HPOStudy, and the
+# second write silently discards the first's in-memory Optuna sampler
+# state (asked-but-not-told trials get lost). The lock serializes
+# cache access; cache hits are O(1) so contention is negligible.
+import threading as _threading
+
 _HPO_STUDY_CACHE: dict[tuple[str, str], Any] = {}
+_HPO_STUDY_CACHE_LOCK = _threading.Lock()
 
 
 def _hpo_cache_key(name: str) -> tuple[str, str]:
@@ -1687,8 +1732,9 @@ def hpo_create_study(args: dict[str, Any]) -> dict[str, Any]:
         # trial is asked/told).
         study._persist()
         # Cache in-process so successive ask/tell share the same
-        # Optuna sampler state.
-        _HPO_STUDY_CACHE[cache_key] = study
+        # Optuna sampler state. Lock prevents concurrent overwrites.
+        with _HPO_STUDY_CACHE_LOCK:
+            _HPO_STUDY_CACHE[cache_key] = study
         return {
             "name": study.name,
             "direction": study.direction,
@@ -1782,45 +1828,88 @@ def _hpo_load_or_create(args: dict[str, Any]):
 
     name = args["name"]
     cache_key = _hpo_cache_key(name)
-    cached = _HPO_STUDY_CACHE.get(cache_key)
-    if cached is not None and "params" not in args:
-        return cached
 
-    storage_dir = _hpo_studies_dir()
-    persisted = storage_dir / f"{name}.json"
+    # H.1.4 thread-safety: holding the lock across check + build +
+    # insert serializes concurrent ask/tell calls so two threads
+    # can't both miss the cache and build duplicate HPOStudy objects.
+    with _HPO_STUDY_CACHE_LOCK:
+        cached = _HPO_STUDY_CACHE.get(cache_key)
+        if cached is not None and "params" not in args:
+            return cached
 
-    if "params" in args:
-        # Caller supplied a fresh spec — use it.
-        study = HPOStudy(
+        storage_dir = _hpo_studies_dir()
+        persisted = storage_dir / f"{name}.json"
+
+        if "params" in args:
+            # Caller supplied a fresh spec — use it.
+            study = HPOStudy(
+                name=name,
+                params=args["params"],
+                direction=args.get("direction", "minimize"),
+                sampler=args.get("sampler", "tpe"),
+                seed=args.get("seed"),
+                storage_dir=storage_dir,
+            )
+            _HPO_STUDY_CACHE[cache_key] = study
+            return study
+
+        if not persisted.exists():
+            raise CrucibleError(
+                f"No persisted HPO study {name!r}. Call hpo_create_study first "
+                f"or pass 'params' to recreate."
+            )
+
+        # Use HPOStudy.load which replays trials through Optuna's API
+        # so the sampler's internal trial counter + posterior are
+        # current. Previously this path only repopulated
+        # _trial_records, leaving Optuna's study at trial 0 —
+        # subsequent tell() rejected the legitimate persisted
+        # trial_ids as "unknown".
+        study = HPOStudy.load(
             name=name,
-            params=args["params"],
-            direction=args.get("direction", "minimize"),
+            storage_dir=storage_dir,
             sampler=args.get("sampler", "tpe"),
             seed=args.get("seed"),
-            storage_dir=storage_dir,
         )
         _HPO_STUDY_CACHE[cache_key] = study
         return study
 
-    if not persisted.exists():
-        raise CrucibleError(
-            f"No persisted HPO study {name!r}. Call hpo_create_study first "
-            f"or pass 'params' to recreate."
-        )
 
-    # Use HPOStudy.load which replays trials through Optuna's API so
-    # the sampler's internal trial counter + posterior are current.
-    # Previously this path only repopulated _trial_records, leaving
-    # Optuna's study at trial 0 — subsequent tell() rejected the
-    # legitimate persisted trial_ids as "unknown".
-    study = HPOStudy.load(
-        name=name,
-        storage_dir=storage_dir,
-        sampler=args.get("sampler", "tpe"),
-        seed=args.get("seed"),
-    )
-    _HPO_STUDY_CACHE[cache_key] = study
-    return study
+def code_mutation_list(args: dict[str, Any]) -> dict[str, Any]:
+    """List registered code-mutation policies (Phase 3.6 interface stub).
+
+    Triggers plugin discovery (local + global) before listing so user
+    policies under .crucible/plugins/code_mutation/ are picked up.
+    Returns the builtin ``code_mutation`` stub + any user-registered
+    policies. The stub raises CodeMutationNotImplemented on apply()
+    — see docs/code-mutation-design.md for the Phase 5+ plan.
+    """
+    try:
+        from crucible.researcher.code_mutation import (
+            describe_code_mutation_policy,
+            discover_code_mutation_policies,
+            list_code_mutation_policies,
+        )
+        try:
+            config = _get_config()
+            discover_code_mutation_policies(project_root=config.project_root)
+        except CrucibleError:
+            pass
+        names = list_code_mutation_policies()
+        return {
+            "count": len(names),
+            "policies": [
+                (describe_code_mutation_policy(name) or {"name": name})
+                for name in names
+            ],
+            "note": (
+                "All policies currently stub-only — see "
+                "docs/code-mutation-design.md for the Phase 5+ "
+                "implementation plan."
+            ),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
 def external_mcp_list_servers(args: dict[str, Any]) -> dict[str, Any]:
@@ -1855,12 +1944,235 @@ def external_mcp_call(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
+def research_peer_sync(args: dict[str, Any]) -> dict[str, Any]:
+    """Share + pull top findings via a shared HF Discussion thread (Phase 4.3).
+
+    Per-call:
+      1. Compute our top finding (caller can override via ``top_finding``).
+      2. Find or open the discussion thread for this ``challenge_id``.
+      3. Post our finding as a comment.
+      4. Read peer agents' previous posts in the same thread.
+
+    REQUIRES: challenge_id; optionally top_finding, leaderboard_row,
+              agent_id, repo_id (defaults to hf_collab.leaderboard_repo).
+    RETURNS: {challenge_id, agent_id, thread_num, thread_url,
+              posted_url, peer_count, peers: [...]}
+    NEXT: feed peers into the next iteration's literature_context, or
+          reference them in research_request_prompt(stage='hypothesis').
+    """
+    try:
+        from crucible.researcher.peer_sync import sync_peer_finding
+        from crucible.core.log import utc_now_iso
+
+        challenge_id = args.get("challenge_id", "").strip()
+        if not challenge_id:
+            return {"error": "[CrucibleError] 'challenge_id' is required."}
+
+        config = _get_config()
+        repo_id = args.get("repo_id") or getattr(
+            getattr(config, "hf_collab", None), "leaderboard_repo", "",
+        )
+        if not repo_id:
+            return {
+                "error": (
+                    "[CrucibleError] No repo_id supplied and "
+                    "hf_collab.leaderboard_repo is unset. Provide one or set it "
+                    "in crucible.yaml."
+                )
+            }
+
+        agent_id = args.get("agent_id") or _resolve_agent_id(config)
+
+        top_finding = args.get("top_finding")
+        if not isinstance(top_finding, dict):
+            top_finding = _resolve_top_finding(config)
+        if not top_finding:
+            top_finding = {
+                "title": "(no findings yet)",
+                "body": "Agent has no recorded findings in the current research state.",
+                "category": "observation",
+                "confidence": 0.0,
+            }
+
+        leaderboard_row = args.get("leaderboard_row")
+        if not isinstance(leaderboard_row, dict):
+            leaderboard_row = _resolve_top_leaderboard_row(config)
+
+        return sync_peer_finding(
+            repo_id=repo_id,
+            challenge_id=challenge_id,
+            agent_id=agent_id,
+            top_finding=top_finding,
+            leaderboard_row=leaderboard_row,
+            iso_now=utc_now_iso(),
+            repo_type=args.get("repo_type", "dataset"),
+            token=args.get("token"),
+        )
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _resolve_agent_id(config: Any) -> str:
+    """Pick a stable agent identifier — env var, project name, fallback."""
+    import os
+    return (
+        os.environ.get("CRUCIBLE_AGENT_ID")
+        or getattr(config, "name", "")
+        or "crucible-agent"
+    )
+
+
+def _resolve_top_finding(config: Any) -> dict[str, Any] | None:
+    """Best-effort: find the highest-confidence finding from ResearchState."""
+    try:
+        from crucible.researcher.state import ResearchState
+        state_path = config.project_root / config.research_state_file
+        if not state_path.exists():
+            return None
+        rs = ResearchState(state_path)
+        if not rs.history:
+            return None
+        # Pick the most recent / highest-confidence non-rejected entry.
+        scored = [
+            (float(f.get("confidence", 0.0)), f)
+            for f in (rs.history or [])
+            if isinstance(f, dict) and f.get("category") != "rejected_hypothesis"
+        ]
+        if not scored:
+            return None
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1]
+    except Exception:
+        return None
+
+
+def _resolve_top_leaderboard_row(config: Any) -> dict[str, Any] | None:
+    """Best-effort: fetch the top-1 leaderboard row."""
+    try:
+        from crucible.analysis.leaderboard import leaderboard
+        from crucible.analysis.results import completed_results
+        results = completed_results(config)
+        if not results:
+            return None
+        ranked = leaderboard(results, top_n=1)
+        return ranked[0] if ranked else None
+    except Exception:
+        return None
+
+
+def note_generate_paper_draft(args: dict[str, Any]) -> dict[str, Any]:
+    """Generate a markdown paper draft from a research track.
+
+    Two-call orchestrator-contract:
+      action='request_prompt' → returns {system, user, schema, sections}
+      action='submit'         → validates the orchestrator's JSON
+                                response + returns the rendered markdown
+    """
+    action = args.get("action", "request_prompt")
+    track_name = args.get("track_name", "").strip()
+    if not track_name:
+        return {"error": "[CrucibleError] 'track_name' is required."}
+
+    try:
+        from crucible.researcher.paper_writer import (
+            PaperDraftError,
+            build_paper_draft_prompt,
+            gather_track_context,
+            parse_paper_draft_response,
+        )
+
+        if action == "request_prompt":
+            config = _get_config()
+            hub = _get_hub_store()
+            # Best-effort: pull leaderboard + notes + hypotheses for
+            # the context dump. Each is optional; the prompt builder
+            # tolerates absent sections.
+            leaderboard_rows: list[dict[str, Any]] = []
+            notes: list[dict[str, Any]] = []
+            hypotheses: list[dict[str, Any]] = []
+            try:
+                from crucible.analysis.leaderboard import leaderboard as build_lb
+                from crucible.analysis.results import completed_results
+                results = completed_results(config)
+                if results:
+                    leaderboard_rows = build_lb(
+                        results, top_n=int(args.get("max_leaderboard", 10)),
+                    )
+            # H.2 fix: narrowed from bare Exception to expected failure
+            # modes so a programmer error (e.g. config attribute typo)
+            # propagates instead of silently producing a blank context.
+            except (CrucibleError, OSError, ValueError):
+                leaderboard_rows = []
+            try:
+                from crucible.runner.notes import NoteStore
+                store = NoteStore(config.project_root / config.store_dir)
+                # H.2 fix: NoteStore exposes `search`, not `recent_notes`.
+                # The prior bare-except masked an AttributeError so the
+                # paper drafts always had an empty notes section in
+                # production. Pass empty filters to get the most-recent N.
+                notes = store.search(limit=int(args.get("max_notes", 10)))
+            except (CrucibleError, OSError, ValueError):
+                notes = []
+            try:
+                from crucible.researcher.state import ResearchState
+                state_path = config.project_root / config.research_state_file
+                if state_path.exists():
+                    rs = ResearchState(state_path)
+                    hypotheses = list(rs.hypotheses or [])
+            except (CrucibleError, OSError, ValueError):
+                hypotheses = []
+
+            context = gather_track_context(
+                track_name=track_name,
+                hub_store=hub,
+                leaderboard_rows=leaderboard_rows,
+                notes=notes,
+                hypotheses=hypotheses,
+                max_findings=int(args.get("max_findings", 25)),
+                max_leaderboard=int(args.get("max_leaderboard", 10)),
+                max_notes=int(args.get("max_notes", 10)),
+            )
+            prompt = build_paper_draft_prompt(context)
+            return {
+                "action": "request_prompt",
+                "track_name": track_name,
+                **prompt,
+            }
+
+        if action == "submit":
+            if "response" not in args:
+                return {"error": "[CrucibleError] 'response' is required for action='submit'."}
+            try:
+                rendered = parse_paper_draft_response(args["response"], track_name)
+            except PaperDraftError as exc:
+                return {"error": f"[PaperDraftError] {exc}"}
+            return {
+                "action": "submit",
+                "track_name": track_name,
+                "title": rendered["title"],
+                "key_findings": rendered["key_findings"],
+                "markdown": rendered["markdown"],
+                "section_counts": {
+                    k: len(v) for k, v in rendered["sections"].items()
+                },
+            }
+
+        return {"error": f"[CrucibleError] Unknown action {action!r}. Valid: request_prompt, submit."}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
 def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
-    """List registered evaluator plugins.
+    """List registered evaluator plugins (Phase 3.3 plugin family).
 
     Triggers plugin discovery (local + global) before listing so user
     plugins under ``.crucible/plugins/evaluators/`` are picked up
     without explicit registration.
+
+    REQUIRES: Nothing.
+    RETURNS: {count, evaluators: [{name, type, source}, ...]}
+    NEXT: declare the evaluator under ``eval_suite:`` in crucible.yaml
+          + ``eval_watch_start`` to run it on every new checkpoint.
     """
     from crucible.core.evaluators import (
         describe_evaluator,
@@ -1883,7 +2195,16 @@ def evaluator_list(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def research_openreview_search(args: dict[str, Any]) -> dict[str, Any]:
-    """Search OpenReview via the public /notes/search API."""
+    """Search OpenReview via the public /notes/search API.
+
+    REQUIRES: query. Optional venue / year filters; OPENREVIEW_TOKEN
+              env for restricted venues (public papers need no auth).
+    RETURNS: {query, count, results: [{openreview_id, title, summary,
+              authors, venue, venueid, published_at, url, pdf_url}, ...]}
+    NEXT: research_arxiv_search for preprint cross-reference, or
+          research_request_prompt(stage='hypothesis') as literature
+          context for the autonomous loop.
+    """
     from crucible.researcher.openreview_search import search_openreview
 
     query = args.get("query", "")
@@ -7110,6 +7431,8 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "research_arxiv_search": research_arxiv_search,
     "research_openreview_search": research_openreview_search,
     "evaluator_list": evaluator_list,
+    "note_generate_paper_draft": note_generate_paper_draft,
+    "research_peer_sync": research_peer_sync,
     "hpo_create_study": hpo_create_study,
     "hpo_ask_trial": hpo_ask_trial,
     "hpo_tell_result": hpo_tell_result,
@@ -7117,6 +7440,7 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "external_mcp_list_servers": external_mcp_list_servers,
     "external_mcp_list_tools": external_mcp_list_tools,
     "external_mcp_call": external_mcp_call,
+    "code_mutation_list": code_mutation_list,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,

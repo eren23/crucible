@@ -99,12 +99,25 @@ def compute_session_spend(
     session_started_at: str,
     *,
     now: datetime | None = None,
+    session_pod_filter: set[str] | None = None,
 ) -> dict[str, Any]:
     """Estimate per-session spend so far.
 
     Returns ``{spend_usd, hours_elapsed, hourly_rate, active_pods}``. All
     are best-effort estimates; downstream callers compare ``spend_usd``
     to the session's ``budget_usd`` cap.
+
+    H.4.A attribution flag — ``session_pod_filter`` is an optional set
+    of pod names that the session "owns". When provided, the hourly
+    rate is computed only across pods in that set, so HPO-driven runs
+    or peer-agent activity on the same project don't inflate the
+    session's spend. Default (``None``) keeps the original behavior:
+    spend = wall-clock × total project hourly rate. This is a known
+    over-attribution in shared-fleet projects; opt in to scope it.
+
+    Empty filter set (not None) is treated as "no pods own this
+    session" → hourly_rate=0, useful for sessions that haven't
+    provisioned anything yet.
     """
     started = _parse_iso(session_started_at)
     if started is None:
@@ -117,18 +130,38 @@ def compute_session_spend(
         }
     current = now or datetime.now(timezone.utc)
     hours = max(0.0, (current - started).total_seconds() / 3600.0)
-    rate = active_pod_hourly_rate(config)
-    active_pods = sum(
-        1
-        for n in _load_nodes(config)
+
+    nodes = _load_nodes(config)
+    active_nodes = [
+        n for n in nodes
         if (n.get("state") or "").lower()
         not in {"destroyed", "stopped", "terminated", "failed"}
-    )
+    ]
+    if session_pod_filter is not None:
+        scoped_nodes = [n for n in active_nodes if n.get("name") in session_pod_filter]
+    else:
+        scoped_nodes = active_nodes
+
+    # Re-compute the rate over only the scoped nodes when a filter is
+    # supplied, otherwise fall back to the project-wide helper.
+    if session_pod_filter is not None:
+        rate = 0.0
+        for n in scoped_nodes:
+            try:
+                cost = float(n.get("cost_per_hr") or 0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            if cost <= 0:
+                cost = DEFAULT_FALLBACK_HOURLY_USD
+            rate += cost
+    else:
+        rate = active_pod_hourly_rate(config)
+
     return {
         "spend_usd": round(hours * rate, 4),
         "hours_elapsed": round(hours, 4),
         "hourly_rate": round(rate, 4),
-        "active_pods": active_pods,
+        "active_pods": len(scoped_nodes),
     }
 
 

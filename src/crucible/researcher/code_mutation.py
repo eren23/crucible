@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import CrucibleError
@@ -143,28 +144,53 @@ class StubCodeMutationPolicy(CodeMutationPolicy):
 
 
 # ---------------------------------------------------------------------------
-# Tiny registry (parallel to data_sources / evaluators)
+# Registry (PluginRegistry-backed, parallel to data_sources / evaluators)
 # ---------------------------------------------------------------------------
+#
+# H.2 fix: migrated from a private dict to the project-wide
+# PluginRegistry so the 3-tier builtin < global < local precedence
+# applies (local plugins under .crucible/plugins/code_mutation/ AND
+# global plugins under ~/.crucible-hub/plugins/code_mutation/ are
+# discovered automatically). When a real Phase 5+ policy ships as a
+# tap, it slots in without touching this file.
 
+from crucible.core.plugin_registry import PluginRegistry  # noqa: E402
 
-_POLICY_REGISTRY: dict[str, type[CodeMutationPolicy]] = {}
+_POLICY_REGISTRY = PluginRegistry[CodeMutationPolicy]("code_mutation")
 
 
 def register_code_mutation_policy(
-    name: str, policy_cls: type[CodeMutationPolicy]
+    name: str, policy_cls: type[CodeMutationPolicy], source: str = "builtin"
 ) -> None:
     """Register a CodeMutationPolicy subclass under ``name``.
 
-    Last writer wins, matching the project-wide plugin precedence
-    (local > global > builtin). For Phase 3.6 only the builtin stub
-    is registered; user policies plug in via this function.
+    ``source`` is one of ``"builtin"``, ``"global"`` (loaded from
+    ``~/.crucible-hub/plugins/code_mutation/``), or ``"local"``
+    (loaded from ``<project>/.crucible/plugins/code_mutation/``).
+    Local wins over global wins over builtin when the same name is
+    registered at multiple tiers.
     """
-    _POLICY_REGISTRY[name] = policy_cls
+    _POLICY_REGISTRY.register(name, policy_cls, source=source)
 
 
 def list_code_mutation_policies() -> list[str]:
-    """Return registered policy names."""
-    return sorted(_POLICY_REGISTRY.keys())
+    """Return registered policy names (sorted)."""
+    return sorted(_POLICY_REGISTRY.list_plugins())
+
+
+def describe_code_mutation_policy(name: str) -> dict[str, str] | None:
+    """Return registry metadata for a policy: ``{name, type, source}``."""
+    return _POLICY_REGISTRY.describe_plugin(name)
+
+
+def discover_code_mutation_policies(project_root: Path | None = None) -> None:
+    """Trigger auto-discovery of code-mutation policies on disk.
+
+    Loads ``.crucible/plugins/code_mutation/*.py`` (local) and
+    ``~/.crucible-hub/plugins/code_mutation/*.py`` (global) so user
+    plugins are available without explicit registration.
+    """
+    _POLICY_REGISTRY.discover(project_root=project_root)
 
 
 def get_code_mutation_policy(name: str = "code_mutation") -> CodeMutationPolicy:
