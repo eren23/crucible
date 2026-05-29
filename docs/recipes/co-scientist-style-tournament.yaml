@@ -1,0 +1,157 @@
+recipe:
+  name: co-scientist-style-tournament
+  version: 1
+  description: >
+    Mirror the DeepMind Co-Scientist multi-agent pattern using
+    Crucible's tournament + cluster + meta-review MCP tools.
+    No LLM keys in Crucible — the orchestrator owns the debate judge.
+
+  prerequisites:
+    - judge-separation contract configured in crucible.yaml
+      (reward, eval, and audit judges in three distinct families).
+    - A hypothesis-generation prompt template the orchestrator uses
+      to produce N candidate hypotheses per round.
+    - autonomous_research_loop session already running (or run a
+      single-shot batch — both work).
+
+  environment:
+    - crucible >= phase-5
+    - MCP server connected (Crucible Tier 1)
+
+  steps:
+
+    - id: gather
+      description: Orchestrator collects N candidate hypotheses for this round.
+      action: |
+        Use your own hypothesis-generation prompt — typically
+        `research_request_prompt(stage='hypothesis')` (stateless) or
+        `autonomous_research_loop(action='start', iterations=N, ...)`
+        (persisted-session driver, returns the hypothesis prompt as
+        part of its start payload). Either way you end up with a
+        parsed list of `{id, payload}` dicts the LLM produced.
+
+    - id: dedupe
+      description: Drop near-duplicate hypotheses before the tournament.
+      tool: hypothesis_cluster
+      args:
+        hypotheses: <from step 'gather'>
+        threshold: 0.7      # 0.6-0.8 typical
+        n: 3                # 2 for short summaries
+      outputs:
+        - keepers: list of representative hypothesis ids
+
+    - id: tournament_create
+      description: Create the tournament with the deduplicated hypotheses.
+      tool: hypothesis_tournament_create
+      args:
+        name: round_${ROUND_NUMBER}
+        hypotheses: <hypotheses filtered to step.dedupe.keepers>
+
+    - id: debate_loop
+      description: Loop M debate rounds. Each round = one pair → orchestrator
+                   LLM → submit.
+      loop:
+        rounds: ${DEBATE_ROUNDS_PER_TOURNAMENT}    # 3-10 typical
+        steps:
+          - tool: hypothesis_tournament_pair
+            args:
+              name: round_${ROUND_NUMBER}
+              policy: ${PAIRING_POLICY}           # elo_close | swiss | random
+            outputs:
+              - envelope: {system, user, schema, pair_id, left_id, right_id}
+
+          - action: |
+              Orchestrator runs its debate-judge LLM with envelope.system
+              + envelope.user. The LLM returns JSON matching envelope.schema:
+                  {winner_id, loser_id, rationale, draw?}
+              CRITICAL: judge model family must differ from reward+eval judges.
+
+          - tool: hypothesis_tournament_submit
+            args:
+              name: round_${ROUND_NUMBER}
+              winner_id: <from LLM response>
+              loser_id: <from LLM response>
+              rationale: <from LLM response>
+              draw: <from LLM response, default false>
+
+    - id: rank
+      description: Pull the top-K by Elo for execution.
+      tool: hypothesis_tournament_rank
+      args:
+        name: round_${ROUND_NUMBER}
+        top_k: ${EXEC_TOP_K}                       # 3-8 typical
+      outputs:
+        - winners: ordered list of hypothesis payloads
+
+    - id: meta_review
+      description: Optional — generate a research overview pulling the
+                   tournament ranking + track findings + leaderboard.
+      tool: research_meta_review
+      args:
+        track_name: ${TRACK_NAME}
+        tournament_name: round_${ROUND_NUMBER}
+        top_k: ${EXEC_TOP_K}
+      followup:
+        - action: |
+            Orchestrator runs its LLM on the returned envelope.
+            Response JSON: {synthesis, top_directions, open_questions, suggested_next}
+        - tool: note_add
+          args:
+            title: "Meta-review — round ${ROUND_NUMBER}"
+            body: <synthesis + bulleted top_directions + open_questions>
+
+    - id: execute
+      description: Run the top-K hypotheses as a Crucible experiment batch.
+      tool: design_enqueue_batch
+      args:
+        hypotheses: <step.rank.winners>
+        preset: ${EXEC_PRESET}                     # smoke | screen | proxy
+      followup:
+        - tool: dispatch_experiments
+        - tool: collect_results
+
+    - id: reflect_request
+      description: Get the reflection prompt envelope. Uses the stateless
+                   orchestrator-contract pair (research_request_prompt +
+                   research_submit) — autonomous_research_loop's
+                   start/submit verbs are for the persisted-session
+                   driver, not for one-off reflection rounds.
+      tool: research_request_prompt
+      args:
+        stage: reflection
+
+    - id: reflect_llm
+      action: |
+        Orchestrator runs its reflection-stage LLM with envelope.system
+        + envelope.user, parses per envelope.schema, then submits via
+        research_submit below.
+
+    - id: reflect_submit
+      tool: research_submit
+      args:
+        stage: reflection
+        response: <reflection JSON from reflect_llm>
+
+  gotchas:
+    - Same-family judges: if the tournament debate judge and the
+      reward/eval judges share a model family, you'll hit identical
+      reward-hack failure modes. Crucible's JudgePanel.assert_separated
+      will raise before pod time burns — heed it.
+    - Tournament size: 8-16 hypotheses per round is the sweet spot.
+      Smaller and the Elo signal is noisy; larger and debate rounds
+      explode quadratically.
+    - Round count: 3-10 debate rounds is enough for an 8-hypothesis
+      tournament. More rounds = more conviction but diminishing returns
+      past round 10 in practice.
+    - Threshold tuning: shingle-Jaccard with threshold=0.7 + n=3 catches
+      near-duplicates but not paraphrases. For paraphrase robustness,
+      use backend='kmeans' (requires scikit-learn).
+    - Recipe is round-scoped: each tournament covers one round of
+      hypotheses. Don't reuse the same tournament_name across rounds
+      — keep a clean Elo state per round so the executed top-K is the
+      actual round winners, not a stale roll-up.
+
+  outputs:
+    - .crucible/tournaments/round_N/ — tournament state + events
+    - Executed wave's runs in runs.jsonl with tournament_round tag
+    - Meta-review note in .crucible/notes/
