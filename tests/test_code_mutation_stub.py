@@ -75,18 +75,18 @@ class TestRegistry:
 
 
 class TestStubBehavior:
-    def test_validate_returns_not_implemented_hint(self):
+    def test_validate_points_to_real_policies(self):
         policy = StubCodeMutationPolicy()
         problems = policy.validate(MutationProposal(
             name="x", target_file="y", diff=""
         ))
         assert len(problems) == 1
-        assert "not implemented" in problems[0].lower()
-        assert "design" in problems[0].lower()
+        assert "ast_local_edit" in problems[0]
+        assert "llm_diff" in problems[0]
 
     def test_apply_raises_not_implemented(self):
         policy = StubCodeMutationPolicy()
-        with pytest.raises(CodeMutationNotImplemented, match="Phase 5"):
+        with pytest.raises(CodeMutationNotImplemented, match="ast_local_edit"):
             policy.apply(MutationProposal(
                 name="x", target_file="y", diff=""
             ))

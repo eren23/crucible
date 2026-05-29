@@ -1876,13 +1876,26 @@ def _hpo_load_or_create(args: dict[str, Any]):
 
 
 def code_mutation_list(args: dict[str, Any]) -> dict[str, Any]:
-    """List registered code-mutation policies (Phase 3.6 interface stub).
+    """List registered code-mutation policies (Phase 5.1 real implementation).
 
     Triggers plugin discovery (local + global) before listing so user
     policies under .crucible/plugins/code_mutation/ are picked up.
-    Returns the builtin ``code_mutation`` stub + any user-registered
-    policies. The stub raises CodeMutationNotImplemented on apply()
-    — see docs/code-mutation-design.md for the Phase 5+ plan.
+    Built-in policies as of Phase 5.1:
+
+    - ``ast_local_edit`` — function-level identifier/literal/attribute
+      swap via Python AST. Best for cheap, surgical experiments where
+      the orchestrator already knows what to change.
+    - ``llm_diff`` — orchestrator-contract diff generation. Use
+      ``code_mutation_propose`` to get a prompt envelope, then submit
+      the LLM response via ``code_mutation_apply``.
+    - ``stub`` / ``code_mutation`` — backward-compat no-op that raises
+      ``CodeMutationNotImplemented`` on apply. Kept so Phase 3.6
+      callers don't break.
+
+    REQUIRES: Nothing.
+    RETURNS: {count, policies: [{name, type, source}, ...], note}
+    NEXT: ``code_mutation_propose`` (for llm_diff) or call
+          ``code_mutation_apply`` directly (for ast_local_edit).
     """
     try:
         from crucible.researcher.code_mutation import (
@@ -1903,10 +1916,560 @@ def code_mutation_list(args: dict[str, Any]) -> dict[str, Any]:
                 for name in names
             ],
             "note": (
-                "All policies currently stub-only — see "
-                "docs/code-mutation-design.md for the Phase 5+ "
-                "implementation plan."
+                "Phase 5.1 shipped real ast_local_edit + llm_diff "
+                "policies. See docs/code-mutation-design.md for design "
+                "context; use code_mutation_propose / code_mutation_apply "
+                "to drive a mutation end-to-end."
             ),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def code_mutation_propose(args: dict[str, Any]) -> dict[str, Any]:
+    """Stage one of the llm_diff orchestrator contract — request prompt.
+
+    Returns a ``{system, user, schema}`` envelope the orchestrator runs
+    against its own LLM. The LLM should reply with strict JSON matching
+    the supplied schema: ``{diff, hypothesis, rationale, name?}``. Pass
+    that response back to ``code_mutation_apply``.
+
+    No LLM call happens inside Crucible.
+
+    REQUIRES: ``target_file`` (path relative to project_root),
+              ``intent`` (free-text what to change). Optional
+              ``mutation_scope`` (list of allowed prefixes) and
+              ``extra_context`` (free-text e.g. recent findings).
+    RETURNS: {system, user, schema, target_file, mutation_scope}
+    NEXT: orchestrator runs its LLM → ``code_mutation_apply``.
+    """
+    try:
+        from crucible.researcher.code_mutation import (
+            CodeMutationError,
+            llm_diff_request_prompt,
+        )
+        if "target_file" not in args:
+            return {"error": "[ValueError] target_file is required"}
+        if "intent" not in args:
+            return {"error": "[ValueError] intent is required"}
+        config = _get_config()
+        return llm_diff_request_prompt(
+            target_file=str(args["target_file"]),
+            intent=str(args["intent"]),
+            project_root=config.project_root,
+            mutation_scope=args.get("mutation_scope"),
+            extra_context=str(args.get("extra_context", "")),
+        )
+    except CodeMutationError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def code_mutation_apply(args: dict[str, Any]) -> dict[str, Any]:
+    """Apply + sandbox + score a mutation proposal.
+
+    Two flows:
+
+    - ``policy="llm_diff"`` (default) — pass an ``llm_response`` dict
+      with ``{diff, hypothesis, rationale, name?}`` returned by the
+      orchestrator's LLM in response to ``code_mutation_propose``.
+      ``target_file`` and ``mutation_scope`` from the original
+      ``code_mutation_propose`` call are required here for scope
+      validation.
+    - ``policy="ast_local_edit"`` — pass ``proposal`` with the JSON
+      edit spec embedded in the ``diff`` field
+      (``{"kind": "swap_identifier|swap_literal|swap_attribute", "old", "new"}``).
+
+    The ``scorer`` block describes how to score the mutated workspace:
+    ``{cmd: [...], score_pattern: "regex with one float group",
+    direction: "minimize|maximize"}``. ``cmd`` runs inside the cloned
+    workspace; stdout is parsed by ``score_pattern``.
+
+    REQUIRES: ``policy``, ``scorer.cmd``, plus either
+              ``llm_response`` + ``target_file`` (for llm_diff) OR
+              ``proposal`` (for ast_local_edit).
+              Optional ``sandbox_timeout`` (seconds, default 1800),
+              ``allow_network`` (default False),
+              ``mutation_scope``.
+    RETURNS: MutationResult shape: ``{proposal_name, success, score,
+             error, artifacts: {diff, targets, stdout_tail,
+             stderr_tail, returncode, scorer_cmd, scorer_pattern,
+             scorer_direction}}``.
+    NEXT: feed score into ``tree_sync_results`` if this is a tree
+          node, or ``context_push_finding`` if the mutation is a
+          standalone hypothesis.
+    """
+    try:
+        from crucible.researcher.code_mutation import (
+            CodeMutationError,
+            MutationProposal,
+            ScorerConfig,
+            SandboxConfig,
+            build_code_mutation_policy,
+            llm_diff_parse_response,
+        )
+        policy_name = str(args.get("policy", "llm_diff"))
+        scorer_block = args.get("scorer")
+        if not isinstance(scorer_block, dict) or "cmd" not in scorer_block:
+            return {"error": "[ValueError] scorer.cmd is required"}
+        scorer = ScorerConfig(
+            cmd=list(scorer_block["cmd"]),
+            score_pattern=str(scorer_block.get("score_pattern", r"val_bpb:([0-9]+\.?[0-9]*)")),
+            direction=str(scorer_block.get("direction", "minimize")),
+        )
+        sandbox_config = SandboxConfig(
+            timeout_seconds=int(args.get("sandbox_timeout", 1800)),
+            allow_network=bool(args.get("allow_network", False)),
+        )
+        config = _get_config()
+
+        if policy_name == "llm_diff":
+            llm_response = args.get("llm_response")
+            if not isinstance(llm_response, dict):
+                return {"error": "[ValueError] llm_diff requires llm_response dict"}
+            target_file = args.get("target_file")
+            if not target_file:
+                return {"error": "[ValueError] llm_diff requires target_file"}
+            try:
+                proposal = llm_diff_parse_response(
+                    llm_response,
+                    target_file=str(target_file),
+                    mutation_scope=args.get("mutation_scope"),
+                )
+            except CodeMutationError as exc:
+                return {"error": f"[{type(exc).__name__}] {exc}"}
+        else:
+            proposal_block = args.get("proposal")
+            if not isinstance(proposal_block, dict):
+                return {"error": f"[ValueError] {policy_name} requires proposal dict"}
+            for required in ("name", "target_file", "diff"):
+                if required not in proposal_block:
+                    return {"error": f"[ValueError] proposal.{required} is required"}
+            proposal = MutationProposal(
+                name=str(proposal_block["name"]),
+                target_file=str(proposal_block["target_file"]),
+                diff=str(proposal_block["diff"]),
+                hypothesis=str(proposal_block.get("hypothesis", "")),
+                rationale=str(proposal_block.get("rationale", "")),
+                parent_node_id=proposal_block.get("parent_node_id"),
+                mutation_scope=proposal_block.get("mutation_scope") or args.get("mutation_scope"),
+            )
+
+        policy = build_code_mutation_policy(
+            policy_name,
+            project_root=config.project_root,
+            scorer=scorer,
+            sandbox_config=sandbox_config,
+        )
+        result = policy.apply(proposal)
+        return {
+            "proposal_name": result.proposal_name,
+            "success": result.success,
+            "score": result.score,
+            "error": result.error,
+            "artifacts": result.artifacts,
+        }
+    except CodeMutationError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def _tournament_dir(config, name: str) -> Path:
+    """Resolve the on-disk path for a named tournament.
+
+    Name validation (M9 hardening): rejects ``/``, ``\\``, ``..``,
+    null bytes, leading dots (``.git``-style), and empty strings.
+    Null bytes specifically would otherwise propagate as a raw
+    ``ValueError`` from the OS layer, bypassing ``except CrucibleError``
+    handlers in the calling MCP tools.
+    """
+    safe_name = name.strip()
+    if (
+        not safe_name
+        or "/" in safe_name
+        or "\\" in safe_name
+        or ".." in safe_name
+        or "\0" in safe_name
+        or safe_name.startswith(".")
+    ):
+        raise CrucibleError(f"invalid tournament name: {name!r}")
+    return config.project_root / ".crucible" / "tournaments" / safe_name
+
+
+def hypothesis_tournament_create(args: dict[str, Any]) -> dict[str, Any]:
+    """Create a new hypothesis tournament under .crucible/tournaments/{name}/.
+
+    Each ``hypotheses[i]`` is a free-form dict; only ``id`` is special
+    (auto-generated if absent). The rest becomes the payload the
+    debate-judge prompt shows. Honors the project's judge-separation
+    contract (see ``docs/judge-separation.md``) — the debate judge
+    runs in a separate family from the reward/eval judges.
+
+    REQUIRES: ``name``, ``hypotheses`` (list of dicts).
+    OPTIONAL: ``description``, ``initial_rating`` (default 1500),
+              ``k_factor`` (default 32), ``seed``.
+    RETURNS: {ok, name, hypothesis_count, dir}
+    NEXT: ``hypothesis_tournament_pair`` to get the first matchup.
+    """
+    try:
+        from crucible.researcher.tournament import Tournament, TournamentError
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return {"error": "[ValueError] name is required"}
+        hypotheses = args.get("hypotheses")
+        if not isinstance(hypotheses, list) or not hypotheses:
+            return {"error": "[ValueError] hypotheses must be a non-empty list"}
+        config = _get_config()
+        path = _tournament_dir(config, name)
+        try:
+            t = Tournament.create(
+                path,
+                name,
+                hypotheses,
+                description=str(args.get("description", "")),
+                initial_rating=float(args.get("initial_rating", 1500.0)),
+                k_factor=float(args.get("k_factor", 32.0)),
+                seed=args.get("seed"),
+            )
+        except TournamentError as exc:
+            return {"error": f"[TournamentError] {exc}"}
+        return {
+            "ok": True,
+            "name": name,
+            "hypothesis_count": len(t.hypotheses()),
+            "dir": str(path),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hypothesis_tournament_pair(args: dict[str, Any]) -> dict[str, Any]:
+    """Return the next debate-judge prompt envelope for an existing tournament.
+
+    The orchestrator runs its own LLM with ``{system, user, schema}``
+    from this envelope, then submits via
+    ``hypothesis_tournament_submit``. No LLM call happens inside
+    Crucible.
+
+    REQUIRES: ``name``.
+    OPTIONAL: ``policy`` (random|swiss|elo_close, default elo_close),
+              ``context`` (free-text appended to the judge prompt),
+              ``no_repeat_within`` (default 3),
+              ``rng_seed`` (deterministic pairing).
+    RETURNS: {system, user, schema, pair_id, round_number, left_id,
+              right_id, policy}
+    NEXT: orchestrator runs LLM → ``hypothesis_tournament_submit``.
+    """
+    try:
+        from crucible.researcher.tournament import (
+            Tournament,
+            TournamentError,
+            judge_request_prompt,
+        )
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return {"error": "[ValueError] name is required"}
+        config = _get_config()
+        path = _tournament_dir(config, name)
+        if not path.exists():
+            return {"error": f"[TournamentError] no tournament at {path}"}
+        t = Tournament(path)
+        try:
+            pair = t.pair(
+                policy=str(args.get("policy", "elo_close")),
+                no_repeat_within=int(args.get("no_repeat_within", 3)),
+                rng_seed=args.get("rng_seed"),
+            )
+        except TournamentError as exc:
+            return {"error": f"[TournamentError] {exc}"}
+        envelope = judge_request_prompt(pair, context=str(args.get("context", "")))
+        envelope.update({
+            "round_number": pair.round_number,
+            "left_id": pair.left.id,
+            "right_id": pair.right.id,
+            "policy": pair.policy,
+        })
+        return envelope
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hypothesis_tournament_submit(args: dict[str, Any]) -> dict[str, Any]:
+    """Record a debate-judge outcome and update Elo ratings.
+
+    REQUIRES: ``name``, ``winner_id``, ``loser_id``.
+    OPTIONAL: ``rationale``, ``draw`` (default False — when True,
+              winner_id / loser_id are still required but ordering
+              is ignored and both get a 0.5 score),
+              ``pair_id`` (M5 integrity gate: when provided, must
+              match a previously issued pair_id from
+              ``hypothesis_tournament_pair`` AND name the same two
+              hypotheses; stale or fabricated pair_ids are rejected).
+    RETURNS: {winner_id, loser_id, draw, winner_new_rating,
+              loser_new_rating, rationale}
+    NEXT: ``hypothesis_tournament_pair`` for the next round, or
+          ``hypothesis_tournament_rank`` to inspect the leaderboard.
+    """
+    try:
+        from crucible.researcher.tournament import Tournament, TournamentError
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return {"error": "[ValueError] name is required"}
+        for key in ("winner_id", "loser_id"):
+            if not args.get(key):
+                return {"error": f"[ValueError] {key} is required"}
+        config = _get_config()
+        path = _tournament_dir(config, name)
+        if not path.exists():
+            return {"error": f"[TournamentError] no tournament at {path}"}
+        t = Tournament(path)
+        try:
+            return t.submit(
+                winner_id=str(args["winner_id"]),
+                loser_id=str(args["loser_id"]),
+                rationale=str(args.get("rationale", "")),
+                draw=bool(args.get("draw", False)),
+                pair_id=args.get("pair_id"),
+            )
+        except TournamentError as exc:
+            return {"error": f"[TournamentError] {exc}"}
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hypothesis_tournament_rank(args: dict[str, Any]) -> dict[str, Any]:
+    """Rank tournament hypotheses by Elo (descending).
+
+    REQUIRES: ``name``.
+    OPTIONAL: ``top_k``.
+    RETURNS: {count, ranking: [{id, rating, wins, losses, draws,
+              payload}, ...]}
+    NEXT: feed the top-K into ``design_enqueue_batch`` as the next
+          execution wave, or ``context_push_finding`` to promote the
+          tournament winner as a track finding.
+    """
+    try:
+        from crucible.researcher.tournament import Tournament, TournamentError
+        name = str(args.get("name", "")).strip()
+        if not name:
+            return {"error": "[ValueError] name is required"}
+        config = _get_config()
+        path = _tournament_dir(config, name)
+        if not path.exists():
+            return {"error": f"[TournamentError] no tournament at {path}"}
+        t = Tournament(path)
+        try:
+            ranks = t.rank(top_k=args.get("top_k"))
+        except TournamentError as exc:
+            return {"error": f"[TournamentError] {exc}"}
+        return {
+            "count": len(ranks),
+            "ranking": [
+                {
+                    "id": r.id,
+                    "rating": r.rating,
+                    "wins": r.wins,
+                    "losses": r.losses,
+                    "draws": r.draws,
+                    "payload": r.payload,
+                }
+                for r in ranks
+            ],
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def hypothesis_cluster(args: dict[str, Any]) -> dict[str, Any]:
+    """Cluster near-duplicate hypotheses (Proximity-agent surface).
+
+    Mirrors Co-Scientist's Proximity agent — useful before piping a
+    big hypothesis batch into a tournament so debate rounds aren't
+    wasted on essentially-identical pairs.
+
+    REQUIRES: ``hypotheses`` (list of {id, payload}-shaped dicts).
+    OPTIONAL: ``threshold`` (default 0.7),
+              ``backend`` (shingle|kmeans; default shingle),
+              ``n`` (n-gram size; default 3).
+    RETURNS: {count, clusters: [{members, representative, similarity}],
+              keepers: [id, ...]}
+    NEXT: filter your hypothesis list to ``keepers`` and call
+          ``hypothesis_tournament_create``.
+    """
+    try:
+        from crucible.researcher.proximity import (
+            ProximityError,
+            cluster,
+            suggest_keepers,
+        )
+        hypotheses = args.get("hypotheses")
+        if not isinstance(hypotheses, list):
+            return {"error": "[ValueError] hypotheses must be a list"}
+        try:
+            clusters = cluster(
+                hypotheses,
+                threshold=float(args.get("threshold", 0.7)),
+                backend=str(args.get("backend", "shingle")),
+                n=int(args.get("n", 3)),
+            )
+        except ProximityError as exc:
+            return {"error": f"[ProximityError] {exc}"}
+        return {
+            "count": len(clusters),
+            "clusters": [
+                {
+                    "members": c.members,
+                    "representative": c.representative,
+                    "similarity": c.similarity,
+                }
+                for c in clusters
+            ],
+            "keepers": suggest_keepers(clusters),
+        }
+    except CrucibleError as exc:
+        return {"error": f"[{type(exc).__name__}] {exc}"}
+
+
+def research_meta_review(args: dict[str, Any]) -> dict[str, Any]:
+    """Build a Co-Scientist-style meta-review prompt envelope.
+
+    Pulls accepted hypotheses, top-K leaderboard rows, recent notes,
+    and (when a tournament is named) the current Elo ranking — then
+    returns a ``{system, user, schema}`` prompt envelope. The
+    orchestrator runs its own LLM to produce a structured research
+    overview JSON:
+
+        {synthesis, top_directions, open_questions, suggested_next}
+
+    No LLM call happens inside Crucible.
+
+    REQUIRES: ``track_name``.
+    OPTIONAL: ``tournament_name`` (if provided, top-K Elo ranking is
+              appended to the user prompt), ``top_k`` (default 10),
+              ``max_findings`` (default 25),
+              ``max_leaderboard`` (default 10).
+    RETURNS: {system, user, schema, track_name, sources_used}
+    NEXT: orchestrator runs LLM → ``note_add`` to record the meta-review.
+    """
+    try:
+        from crucible.researcher.tournament import Tournament
+        track_name = str(args.get("track_name", "")).strip()
+        if not track_name:
+            return {"error": "[ValueError] track_name is required"}
+        config = _get_config()
+        max_findings = int(args.get("max_findings", 25))
+        max_lb = int(args.get("max_leaderboard", 10))
+        top_k = int(args.get("top_k", 10))
+
+        # Source 1: track findings (scope='track' is the canonical scope key).
+        findings: list[dict[str, Any]] = []
+        try:
+            hub = _get_hub_store()
+            findings = hub.list_findings(scope="track", track=track_name)[:max_findings]
+        except (AttributeError, CrucibleError):
+            findings = []
+
+        # Source 2: leaderboard.
+        leaderboard_rows: list[dict[str, Any]] = []
+        try:
+            from crucible.analysis.leaderboard import leaderboard as build_lb
+            from crucible.analysis.results import completed_results
+            results = completed_results(config)
+            if results:
+                leaderboard_rows = build_lb(results, top_n=max_lb)
+        except (CrucibleError, OSError, ValueError, AttributeError):
+            leaderboard_rows = []
+
+        # Source 3: tournament ranking (optional).
+        ranking: list[dict[str, Any]] = []
+        tournament_name = str(args.get("tournament_name", "")).strip()
+        if tournament_name:
+            path = _tournament_dir(config, tournament_name)
+            if path.exists():
+                try:
+                    ranks = Tournament(path).rank(top_k=top_k)
+                    ranking = [
+                        {
+                            "id": r.id,
+                            "rating": r.rating,
+                            "wins": r.wins,
+                            "losses": r.losses,
+                            "draws": r.draws,
+                            "payload": r.payload,
+                        }
+                        for r in ranks
+                    ]
+                except CrucibleError:
+                    ranking = []
+
+        system = (
+            "You are the meta-review agent for an autonomous research "
+            "track. Synthesize the supplied findings, leaderboard, and "
+            "tournament ranking into a tight research overview. Output "
+            "strict JSON matching the supplied schema — no markdown "
+            "fences, no prose preamble. Be specific; cite finding ids "
+            "and run names verbatim. Honor the project's judge-separation "
+            "contract — your model family must differ from the reward "
+            "and eval judges used in this loop."
+        )
+        user_parts: list[str] = [f"# Track: {track_name}\n"]
+        if findings:
+            user_parts.append("## Findings\n")
+            for f in findings[:max_findings]:
+                user_parts.append(
+                    f"- ({f.get('finding_id', '?')}, conf {f.get('confidence', '?')}) "
+                    f"{f.get('summary', '')}"
+                )
+        if leaderboard_rows:
+            user_parts.append("\n## Leaderboard (top by primary metric)")
+            for row in leaderboard_rows[:max_lb]:
+                user_parts.append(f"- {row}")
+        if ranking:
+            user_parts.append("\n## Tournament ranking (top by Elo)")
+            for entry in ranking:
+                user_parts.append(
+                    f"- {entry['id']} rating={entry['rating']:.1f} "
+                    f"W/L/D={entry['wins']}/{entry['losses']}/{entry['draws']}"
+                )
+        user = "\n".join(user_parts)
+
+        schema = {
+            "type": "object",
+            "required": ["synthesis", "top_directions", "open_questions", "suggested_next"],
+            "properties": {
+                "synthesis": {
+                    "type": "string",
+                    "description": "1-3 paragraph synthesis grounding next-step choices in the evidence above.",
+                },
+                "top_directions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Most promising research directions (cite finding ids when possible).",
+                },
+                "open_questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Questions the evidence cannot yet answer.",
+                },
+                "suggested_next": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Concrete next experiments or hypotheses to prioritise.",
+                },
+            },
+        }
+        return {
+            "system": system,
+            "user": user,
+            "schema": schema,
+            "track_name": track_name,
+            "sources_used": {
+                "findings": len(findings),
+                "leaderboard_rows": len(leaderboard_rows),
+                "tournament_entries": len(ranking),
+            },
         }
     except CrucibleError as exc:
         return {"error": f"[{type(exc).__name__}] {exc}"}
@@ -7441,6 +8004,15 @@ TOOL_DISPATCH: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "external_mcp_list_tools": external_mcp_list_tools,
     "external_mcp_call": external_mcp_call,
     "code_mutation_list": code_mutation_list,
+    "code_mutation_propose": code_mutation_propose,
+    "code_mutation_apply": code_mutation_apply,
+    # Hypothesis tournament (Thrust B — Co-Scientist-style)
+    "hypothesis_tournament_create": hypothesis_tournament_create,
+    "hypothesis_tournament_pair": hypothesis_tournament_pair,
+    "hypothesis_tournament_submit": hypothesis_tournament_submit,
+    "hypothesis_tournament_rank": hypothesis_tournament_rank,
+    "hypothesis_cluster": hypothesis_cluster,
+    "research_meta_review": research_meta_review,
     # GitHub search
     "research_github_code": research_github_code,
     "research_github_list_repos": research_github_list_repos,
