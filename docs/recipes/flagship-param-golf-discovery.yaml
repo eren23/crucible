@@ -1,0 +1,198 @@
+recipe:
+  name: flagship-param-golf-discovery
+  version: 1
+  description: >
+    Crucible flagship showcase — autonomous discovery on the
+    Parameter Golf benchmark using every surface shipped through
+    Phase 5.1. Reproducible on $50 of RunPod spot in 4-6 hours.
+
+  prerequisites:
+    - RunPod, HF, WandB credentials in .env / .env.runpod.local
+    - Judges configured (reward + eval + audit in 3 distinct families)
+    - hf_collab.enabled=true in crucible.yaml
+    - Empty .crucible/ — or accept that prior tournaments / search trees
+      will be appended to
+
+  budget:
+    compute_usd: 50
+    wall_clock_hours: 4-6
+    orchestrator_llm_usd: 5-10
+
+  steps:
+
+    - id: sanity
+      tool: code_mutation_list
+      expect: contains 'ast_local_edit' and 'llm_diff'
+
+    - id: literature
+      tool: research_literature_search
+      args:
+        query: low parameter count language modelling efficient attention
+        limit: 8
+
+    - id: start_loop
+      tool: autonomous_research_loop
+      args:
+        action: start
+        iterations: 5
+        tier: screen
+        budget_usd: 50
+        with_literature: true
+        literature_k: 8
+      outputs:
+        - session_id           # capture for subsequent submit calls
+        - first_hypothesis_envelope  # start returns the round-1 hypothesis prompt
+
+    # Rounds 1-5 — orchestrator drives, calls below per round.
+
+    - id: per_round
+      loop:
+        rounds: 5
+        steps:
+          # Round 1 uses the envelope from `start_loop`; rounds 2-5 use
+          # the stateless `research_request_prompt`. Both API paths are
+          # documented; pick one and stay consistent.
+          - id: hyp_request
+            tool: research_request_prompt
+            args: {stage: hypothesis}
+
+          - id: hyp_dedupe
+            tool: hypothesis_cluster
+            args: {hypotheses: $orchestrator.round_hypotheses, threshold: 0.7, n: 3}
+
+          - id: tournament_create
+            tool: hypothesis_tournament_create
+            args:
+              name: round_${ROUND_NUMBER}
+              hypotheses: $step.hyp_dedupe.keepers_with_payloads
+
+          - id: tournament_debate
+            loop:
+              rounds: 5
+              steps:
+                - tool: hypothesis_tournament_pair
+                  args: {name: round_${ROUND_NUMBER}, policy: elo_close}
+                - action: orchestrator debate-judge LLM (audit family)
+                - tool: hypothesis_tournament_submit
+                  args:
+                    name: round_${ROUND_NUMBER}
+                    winner_id: $orchestrator.winner
+                    loser_id: $orchestrator.loser
+                    rationale: $orchestrator.rationale
+
+          - id: tournament_rank
+            tool: hypothesis_tournament_rank
+            args: {name: round_${ROUND_NUMBER}, top_k: 4}
+
+          - id: maybe_provision
+            condition: first round only
+            tool: provision_nodes
+            args: {count: 4}
+            followup:
+              - tool: bootstrap_nodes
+
+          - id: execute_wave
+            tool: design_enqueue_batch
+            args:
+              hypotheses: $step.tournament_rank.winners
+              preset: screen
+            followup:
+              - tool: dispatch_experiments
+              - tool: collect_results
+
+          - id: leaderboard
+            tool: get_leaderboard
+
+          - id: reflect_request
+            tool: research_request_prompt
+            args: {stage: reflection}
+          - id: reflect_llm
+            action: orchestrator reflection LLM → JSON
+          - id: reflect_submit
+            tool: research_submit
+            args:
+              stage: reflection
+              response: $orchestrator.reflection_json
+          # If the persisted-session driver was used (start_loop above),
+          # also acknowledge the round into the session so its budget /
+          # state_snapshot stays consistent — pass session_id from
+          # start_loop and the same reflection_json.
+          - id: session_submit
+            optional: true
+            tool: autonomous_research_loop
+            args:
+              action: submit
+              session_id: $step.start_loop.session_id
+              response: $orchestrator.reflection_json
+
+          - id: maybe_code_mutation
+            condition: rounds 4-5 only
+            tool: code_mutation_propose
+            args:
+              target_file: src/crucible/models/architectures/baseline.py
+              intent: $orchestrator.mutation_intent
+              mutation_scope: [src/crucible/models/]
+            followup:
+              - action: orchestrator code-mutation LLM
+              - tool: code_mutation_apply
+                args:
+                  policy: llm_diff
+                  target_file: src/crucible/models/architectures/baseline.py
+                  mutation_scope: [src/crucible/models/]
+                  llm_response: $orchestrator.llm_diff_response
+                  scorer:
+                    cmd: [python3, train_gpt.py, --preset, smoke]
+                    score_pattern: 'val_bpb:([0-9.]+)'
+
+          - id: maybe_synthesis
+            condition: round 5 only
+            tool: design_synthesize_from_findings
+            args: {policy: memory_filter, k: 3}
+
+    - id: meta_review
+      tool: research_meta_review
+      args:
+        track_name: param-golf-flagship
+        tournament_name: round_5
+        top_k: 5
+      followup:
+        - action: orchestrator LLM
+        - tool: note_add
+          args: {title: Meta-review — flagship, body: $orchestrator.synthesis_md}
+
+    - id: paper_draft
+      tool: note_generate_paper_draft
+      args: {action: request_prompt, track_name: param-golf-flagship}
+      followup:
+        - action: orchestrator LLM produces the draft JSON
+        - tool: note_generate_paper_draft
+          args:
+            action: submit
+            track_name: param-golf-flagship
+            response: $orchestrator.paper_draft_json
+
+    - id: publish
+      tool: hf_publish_leaderboard
+      args: {top_n: 50, challenge: param-golf}
+      followup:
+        - tool: hf_publish_findings
+        - tool: hf_publish_recipes
+
+  gotchas:
+    - Same-family judges → JudgePanel.assert_separated raises before
+      pod time burns. Configure three distinct families.
+    - Code mutation in rounds 4-5 only: doing it earlier wastes pod
+      time on noisy hypotheses; config-tweak rounds 1-3 ground the
+      mutations in actual evidence.
+    - Tournament dedupe threshold matters: 0.7 + n=3 is robust default;
+      lower threshold collapses too aggressively, higher misses
+      paraphrases.
+    - Peer sync is optional; skip if hf_collab.enabled=false.
+
+  outputs:
+    - $project_root/.crucible/notes/                 # meta-review + paper draft
+    - $project_root/.crucible/tournaments/round_*/   # Elo history
+    - $project_root/.crucible/search_trees/          # if code mutation ran
+    - $project_root/runs.jsonl                       # full experiment ledger
+    - W&B project                                    # every training run
+    - hf_collab.leaderboard_repo on HuggingFace      # leaderboard + findings + recipes

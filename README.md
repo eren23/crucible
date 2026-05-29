@@ -26,6 +26,12 @@ Crucible is the only stack that connects all of these concerns: **hypothesize â†
 
 See [`docs/positioning.md`](docs/positioning.md) for the full landscape map and what Crucible explicitly is NOT.
 
+## Validated results
+
+End-to-end runs of the [`flagship-param-golf-discovery`](examples/flagship_param_golf/) recipe live in [`docs/flagship-results.md`](docs/flagship-results.md). Each row links to a HuggingFace reproducibility bundle (leaderboard + findings + recipes + paper draft) â€” the point isn't the raw numbers, it's the closed-loop reproducibility on $50 of commodity-GPU spot.
+
+For a no-GPU end-to-end demo (~30 min on a laptop), see [`examples/full_autonomous_discovery/`](examples/full_autonomous_discovery/). For an ERA-style code-mutation demo (~1 sec per mutation, no GPU), see [`examples/code_mutation_era_replica/`](examples/code_mutation_era_replica/).
+
 ## Quick Start
 
 **New here?** The [5-minute quickstart](docs/quickstart-5-minutes.md) takes you from `git clone` to a leaderboard + tool-router next-action recommendation in five commands, no GPU required.
