@@ -165,15 +165,26 @@ def instantiate_evaluator(
     return cls(name=name, config=dict(config or {}))
 
 
-def discover_evaluator_plugins(project_root: Path | None = None) -> None:
+def discover_evaluator_plugins(project_root: Path | None = None) -> list[str]:
     """Trigger auto-discovery of evaluator plugins on disk.
 
-    Loads ``.crucible/plugins/evaluators/*.py`` (local) and
-    ``~/.crucible-hub/plugins/evaluators/*.py`` (global) so user
-    plugins are available without explicit registration. Matches the
-    pattern used by data_sources / optimizers / etc.
+    Loads ``~/.crucible-hub/plugins/evaluators/*.py`` (global) and
+    ``<project>/.crucible/plugins/evaluators/*.py`` (local) so user
+    plugins are available without explicit registration. Mirrors
+    :func:`crucible.researcher.code_mutation.discover_code_mutation_policies`.
+
+    Missing directories are silently skipped — discovery is best-effort.
+    Returns the list of loaded plugin stems.
     """
-    _EVALUATOR_REGISTRY.discover(project_root=project_root)
+    loaded: list[str] = []
+    global_dir = Path.home() / ".crucible-hub" / "plugins" / "evaluators"
+    if global_dir.is_dir():
+        loaded.extend(_EVALUATOR_REGISTRY.load_plugins(global_dir, source="global"))
+    if project_root is not None:
+        local_dir = Path(project_root) / ".crucible" / "plugins" / "evaluators"
+        if local_dir.is_dir():
+            loaded.extend(_EVALUATOR_REGISTRY.load_plugins(local_dir, source="local"))
+    return loaded
 
 
 # Trigger builtin registration on import. Each builtin module

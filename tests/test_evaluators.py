@@ -239,3 +239,44 @@ def test_evaluator_list_via_mcp(monkeypatch):
     assert out["count"] >= 1
     names = [e.get("name") for e in out["evaluators"]]
     assert "lm_eval_harness" in names
+
+
+# ---------------------------------------------------------------------------
+# Discovery
+# ---------------------------------------------------------------------------
+
+
+class TestDiscovery:
+    def test_no_project_returns_list_without_error(self):
+        result = discover_evaluator_plugins(project_root=None)
+        assert isinstance(result, list)
+
+    def test_finds_local_plugin(self, tmp_path):
+        plugin_dir = tmp_path / ".crucible" / "plugins" / "evaluators"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "probe_discovered_eval.py").write_text(
+            "from crucible.core.evaluators import (\n"
+            "    EvalResult, EvalValidationResult, EvaluatorPlugin, register_evaluator,\n"
+            ")\n"
+            "class ProbeEvaluator(EvaluatorPlugin):\n"
+            "    def validate(self):\n"
+            "        return EvalValidationResult(valid=True)\n"
+            "    def evaluate(self, checkpoint_path):\n"
+            "        return EvalResult(scores={'probe.score': 1.0})\n"
+            "register_evaluator('_probe_discovered_eval', ProbeEvaluator)\n",
+            encoding="utf-8",
+        )
+        import sys
+        from crucible.core.evaluators import _EVALUATOR_REGISTRY
+        try:
+            loaded = discover_evaluator_plugins(project_root=tmp_path)
+            assert "probe_discovered_eval" in loaded
+            assert "_probe_discovered_eval" in list_evaluators()
+            ev = instantiate_evaluator("_probe_discovered_eval", {})
+            assert ev.evaluate(tmp_path / "x").scores == {"probe.score": 1.0}
+        finally:
+            _EVALUATOR_REGISTRY._registry.pop("_probe_discovered_eval", None)
+            _EVALUATOR_REGISTRY._meta.pop("_probe_discovered_eval", None)
+            sys.modules.pop(
+                "_crucible_plugin_evaluator_local_probe_discovered_eval", None
+            )

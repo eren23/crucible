@@ -122,3 +122,41 @@ def test_run_one_eval_failed_evaluator_returns_failure_row(tmp_path):
     finally:
         _evals._EVALUATOR_REGISTRY._registry.pop("_test_fail", None)
         _evals._EVALUATOR_REGISTRY._meta.pop("_test_fail", None)
+
+
+def test_run_one_eval_discovers_local_evaluator_plugin(tmp_path, monkeypatch):
+    import sys
+    from crucible.core import evaluators as _evals
+    from crucible.runner.eval_watcher import EvalSpec, _run_one_eval as run_one
+
+    plugin_dir = tmp_path / ".crucible" / "plugins" / "evaluators"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "probe_ew_eval.py").write_text(
+        "from crucible.core.evaluators import (\n"
+        "    EvalResult, EvalValidationResult, EvaluatorPlugin, register_evaluator,\n"
+        ")\n"
+        "class ProbeEW(EvaluatorPlugin):\n"
+        "    def validate(self):\n"
+        "        return EvalValidationResult(valid=True)\n"
+        "    def evaluate(self, checkpoint_path):\n"
+        "        return EvalResult(scores={'ew.score': 0.9})\n"
+        "register_evaluator('_probe_ew_eval', ProbeEW)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "crucible.runner.eval_watcher._project_root", lambda: tmp_path,
+    )
+    try:
+        ckpt = tmp_path / "ckpt.bin"
+        ckpt.write_bytes(b"")
+        row = run_one(
+            ckpt_path=ckpt, ckpt_sha="abc", label="proxy",
+            spec=EvalSpec(evaluator="_probe_ew_eval", config={}),
+            env={},
+        )
+        assert row["ok"] is True
+        assert row["result"] == {"ew.score": 0.9}
+    finally:
+        _evals._EVALUATOR_REGISTRY._registry.pop("_probe_ew_eval", None)
+        _evals._EVALUATOR_REGISTRY._meta.pop("_probe_ew_eval", None)
+        sys.modules.pop("_crucible_plugin_evaluator_local_probe_ew_eval", None)
