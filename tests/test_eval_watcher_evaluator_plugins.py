@@ -160,3 +160,40 @@ def test_run_one_eval_discovers_local_evaluator_plugin(tmp_path, monkeypatch):
         _evals._EVALUATOR_REGISTRY._registry.pop("_probe_ew_eval", None)
         _evals._EVALUATOR_REGISTRY._meta.pop("_probe_ew_eval", None)
         sys.modules.pop("_crucible_plugin_evaluator_local_probe_ew_eval", None)
+
+
+def test_run_one_eval_logs_when_discovery_fails(tmp_path, monkeypatch):
+    from crucible.core import evaluators as _evals
+    from crucible.runner.eval_watcher import EvalSpec, _run_one_eval as run_one
+
+    class _Stub(_evals.EvaluatorPlugin):
+        def validate(self):
+            return _evals.EvalValidationResult(valid=True)
+        def evaluate(self, checkpoint_path):
+            return _evals.EvalResult(scores={"a.acc": 0.5})
+
+    _evals.register_evaluator("_test_stub_warn", _Stub)
+
+    def _boom(project_root=None):
+        raise RuntimeError("discovery exploded")
+    monkeypatch.setattr(
+        "crucible.core.evaluators.discover_evaluator_plugins", _boom,
+    )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "crucible.runner.eval_watcher.log_warn",
+        lambda msg: warnings.append(msg),
+    )
+    try:
+        ckpt = tmp_path / "ckpt.bin"
+        ckpt.write_bytes(b"")
+        row = run_one(
+            ckpt_path=ckpt, ckpt_sha="abc", label="proxy",
+            spec=EvalSpec(evaluator="_test_stub_warn", config={}),
+            env={},
+        )
+        assert row["ok"] is True  # graceful despite discovery failure
+        assert any("discovery" in w.lower() for w in warnings)
+    finally:
+        _evals._EVALUATOR_REGISTRY._registry.pop("_test_stub_warn", None)
+        _evals._EVALUATOR_REGISTRY._meta.pop("_test_stub_warn", None)

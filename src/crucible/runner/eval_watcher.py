@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import CrucibleError
 from crucible.core.io import atomic_write_json
-from crucible.core.log import utc_now_iso
+from crucible.core.log import log_warn, utc_now_iso
 
 if TYPE_CHECKING:
     from crucible.core.types import NodeRecord
@@ -389,8 +389,8 @@ def _run_one_evaluator_plugin(
 
     try:
         _evals.discover_evaluator_plugins(project_root=_project_root())
-    except Exception:  # pragma: no cover — best-effort discovery
-        pass
+    except Exception as exc:  # best-effort discovery — never block eval
+        log_warn(f"evaluator plugin discovery failed: {exc}")
 
     t0 = time.time()
     plugin_name = spec.evaluator
