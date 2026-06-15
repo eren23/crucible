@@ -147,7 +147,52 @@ class SkyPilotProvider(FleetProvider):
 
     def provision(self, *, count: int, name_prefix: str, start_index: int = 1,
                   replacement: bool = False, **kwargs: Any) -> list[NodeRecord]:
-        raise NotImplementedError
+        self._require_sky()
+        created: list[NodeRecord] = []
+        for i in range(count):
+            cluster = self.build_cluster_name(name_prefix, start_index + i)
+            proc = _sky(self._build_launch_cmd(cluster))
+            if proc.returncode != 0:
+                if created:
+                    log_warn(
+                        f"sky launch failed after creating "
+                        f"{[n['name'] for n in created]} — run `sky down` to clean up."
+                    )
+                raise FleetError(
+                    f"sky launch failed for {cluster!r}: {proc.stderr[-500:]}"
+                )
+            created.append(self._node_record_for(cluster, replacement=replacement))
+            log_info(f"provisioned skypilot cluster {cluster}")
+        return created
+
+    def _node_record_for(self, cluster: str, *, replacement: bool) -> NodeRecord:
+        ip = _status_ip(cluster)
+        if not ip:
+            raise FleetError(
+                f"sky launch succeeded but no IP for cluster {cluster!r}"
+            )
+        cfg = _parse_ssh_config(cluster, _read_ssh_config_text())
+        rec: NodeRecord = {
+            "name": cluster,
+            "node_id": cluster,
+            "provider": "skypilot",
+            "ssh_host": cfg.get("hostname", ip),
+            "ssh_port": 22,
+            "user": cfg.get("user", "gcpuser"),
+            "ssh_key": cfg.get("identity_file", self.ssh_key),
+            "state": "new",
+            "interruptible": self.interruptible,
+            "gpu_count": self.gpu_count,
+            "workspace_path": str(self.defaults.get("workspace_path", "/workspace/project")),
+            "python_bin": str(self.defaults.get("python_bin", "python3")),
+            "env_source": str(self.defaults.get("env_source", ".env.local")),
+            "replacement": replacement,
+            "last_seen_at": utc_now_iso(),
+        }
+        accel = self._accelerators()
+        if accel:
+            rec["gpu"] = accel
+        return rec
 
     def refresh(self, nodes: list[NodeRecord]) -> list[NodeRecord]:
         raise NotImplementedError

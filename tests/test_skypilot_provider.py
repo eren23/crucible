@@ -100,3 +100,50 @@ class TestParseSshConfig:
 
     def test_missing_host_returns_empty(self):
         assert _parse_ssh_config("nope", "Host x\n  User y\n") == {}
+
+
+import subprocess as _sp
+from crucible.fleet.providers import skypilot as _sky_mod
+
+
+def _ok_proc(stdout="", stderr="", rc=0):
+    return _sp.CompletedProcess(args=["sky"], returncode=rc, stdout=stdout, stderr=stderr)
+
+
+class TestProvision:
+    def test_success_builds_node_record(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: "/usr/bin/sky")
+        monkeypatch.setattr(_sky_mod, "_sky", lambda args, **kw: _ok_proc())
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: "1.2.3.4")
+        monkeypatch.setattr(
+            _sky_mod, "_read_ssh_config_text",
+            lambda: ("Host crucible-demo-day-1\n  HostName 1.2.3.4\n"
+                     "  User gcpuser\n  IdentityFile ~/.sky/k\n"),
+        )
+        p = SkyPilotProvider(project_name="demo", gpu_type_ids=["L4"], gpu_count=1,
+                             defaults={"workspace_path": "/ws"})
+        nodes = p.provision(count=1, name_prefix="day")
+        assert len(nodes) == 1
+        n = nodes[0]
+        assert n["name"] == "crucible-demo-day-1"
+        assert n["node_id"] == "crucible-demo-day-1"
+        assert n["provider"] == "skypilot"
+        assert n["ssh_host"] == "1.2.3.4"
+        assert n["ssh_port"] == 22
+        assert n["user"] == "gcpuser"
+        assert n["ssh_key"] == "~/.sky/k"
+        assert n["workspace_path"] == "/ws"
+        assert n["state"] == "new"
+
+    def test_launch_failure_raises(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: "/usr/bin/sky")
+        monkeypatch.setattr(_sky_mod, "_sky", lambda args, **kw: _ok_proc(stderr="boom", rc=1))
+        p = SkyPilotProvider(project_name="demo", gpu_type_ids=["L4"])
+        with pytest.raises(FleetError, match="sky launch failed"):
+            p.provision(count=1, name_prefix="day")
+
+    def test_missing_sky_binary_raises(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: None)
+        p = SkyPilotProvider()
+        with pytest.raises(FleetError, match="sky CLI not found"):
+            p.provision(count=1, name_prefix="day")
