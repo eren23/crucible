@@ -135,6 +135,22 @@ class TestProvision:
         assert n["workspace_path"] == "/ws"
         assert n["state"] == "new"
 
+    def test_ssh_host_uses_sky_ip_over_config_hostname(self, monkeypatch):
+        # I2: provision and refresh must agree on the IP source. refresh uses
+        # `sky status --ip`, so provision must too — not the ssh-config HostName.
+        monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: "/usr/bin/sky")
+        monkeypatch.setattr(_sky_mod, "_sky", lambda args, **kw: _ok_proc())
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: "10.0.0.5")
+        monkeypatch.setattr(
+            _sky_mod, "_read_ssh_config_text",
+            lambda: ("Host crucible-demo-day-1\n  HostName bastion.example\n"
+                     "  User u\n  IdentityFile ~/.sky/k\n"),
+        )
+        p = SkyPilotProvider(project_name="demo", gpu_type_ids=["L4"])
+        n = p.provision(count=1, name_prefix="day")[0]
+        assert n["ssh_host"] == "10.0.0.5"
+        assert n["user"] == "u"
+
     def test_launch_failure_raises(self, monkeypatch):
         monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: "/usr/bin/sky")
         monkeypatch.setattr(_sky_mod, "_sky", lambda args, **kw: _ok_proc(stderr="boom", rc=1))
@@ -166,11 +182,21 @@ class TestRefresh:
         out = p.refresh([{"name": "c", "node_id": "c", "state": "ready"}])
         assert out[0]["state"] == "unreachable"
 
-    def test_no_ip_becomes_lost(self, monkeypatch):
+    def test_no_ip_becomes_unreachable(self, monkeypatch):
+        # I1: a transient `sky status` failure must NOT mark a live cluster
+        # "lost" (which is a BAD_API_STATE -> eligible for eviction). Use the
+        # recoverable "unreachable" instead.
         monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: None)
         p = SkyPilotProvider()
         out = p.refresh([{"name": "c", "node_id": "c", "state": "ready"}])
-        assert out[0]["state"] == "lost"
+        assert out[0]["state"] == "unreachable"
+
+    def test_refresh_node_without_id_or_name_no_keyerror(self, monkeypatch):
+        # M1: refresh must not KeyError on a hand-edited node missing both keys.
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: None)
+        p = SkyPilotProvider()
+        out = p.refresh([{"state": "ready"}])
+        assert out[0]["state"] == "unreachable"
 
 
 from crucible.core.errors import SshAuthError, SshNotReadyError

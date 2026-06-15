@@ -202,7 +202,9 @@ class SkyPilotProvider(FleetProvider):
             "name": cluster,
             "node_id": cluster,
             "provider": "skypilot",
-            "ssh_host": cfg.get("hostname", ip),
+            # I2: use the `sky status --ip` value so provision and refresh
+            # agree on ssh_host (refresh re-derives it from the same source).
+            "ssh_host": ip,
             "ssh_port": 22,
             "user": cfg.get("user", "gcpuser"),
             "ssh_key": cfg.get("identity_file", self.ssh_key),
@@ -224,10 +226,15 @@ class SkyPilotProvider(FleetProvider):
         refreshed: list[NodeRecord] = []
         for node in nodes:
             updated: NodeRecord = dict(node)  # type: ignore[assignment]
-            cluster = node.get("node_id") or node["name"]
+            cluster = node.get("node_id") or node.get("name", "")
             ip = _status_ip(cluster)
             if not ip:
-                updated["state"] = "lost"
+                # I1: a failed `sky status` is ambiguous (transient CLI/API
+                # error vs. genuinely gone). Use the recoverable "unreachable"
+                # — never the BAD_API_STATE "lost", which would auto-evict a
+                # live cluster. (Follow-up: positively detect absence -> "lost"
+                # once the GCP spike pins `sky status` output.)
+                updated["state"] = "unreachable"
             else:
                 updated["ssh_host"] = ip
                 if ssh_ok(updated):
