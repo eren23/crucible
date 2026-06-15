@@ -11,13 +11,14 @@ SkyPilot generates its own key and writes a ``Host <cluster>`` block to
 """
 from __future__ import annotations
 
+import ipaddress
 import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from crucible.core.errors import FleetError
+from crucible.core.errors import FleetError, PartialProvisionError
 from crucible.core.log import log_info, log_warn, utc_now_iso
 from crucible.core.types import NodeRecord
 from crucible.fleet.provider import FleetProvider
@@ -38,13 +39,31 @@ def _sky(args: list[str], *, timeout: int = 1800) -> subprocess.CompletedProcess
     )
 
 
+def _is_ip(token: str) -> bool:
+    try:
+        ipaddress.ip_address(token)
+        return True
+    except ValueError:
+        return False
+
+
 def _status_ip(cluster: str) -> str | None:
-    """Return the head-node IP for *cluster*, or None if unavailable."""
+    """Return the head-node IP for *cluster*, or None if unavailable.
+
+    ``sky status --ip`` prints just the IP on success, but may emit
+    deprecation banners or ``not found`` text. We return the last
+    *address-shaped* line so a banner never masquerades as an IP; a
+    non-zero exit or no address line yields ``None`` (surfaced loudly
+    upstream rather than written to ``ssh_host``).
+    """
     proc = _sky(["status", "--ip", cluster], timeout=120)
     if proc.returncode != 0:
         return None
-    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-    return lines[-1] if lines else None
+    for ln in reversed(proc.stdout.splitlines()):
+        tok = ln.strip()
+        if _is_ip(tok):
+            return tok
+    return None
 
 
 def _read_ssh_config_text() -> str:
@@ -53,25 +72,32 @@ def _read_ssh_config_text() -> str:
 
 
 def _parse_ssh_config(cluster: str, text: str) -> dict[str, str]:
-    """Parse the ``Host <cluster>`` block -> {user, identity_file, hostname}."""
+    """Parse the ``Host <cluster>`` block -> {user, identity_file, hostname}.
+
+    Handles OpenSSH syntax variants: ``Key Value`` and ``Key=Value``,
+    tab or space indentation, multi-pattern ``Host a b`` lines, and
+    surrounding quotes on values (e.g. a quoted ``IdentityFile``).
+    """
     out: dict[str, str] = {}
     in_block = False
     for line in text.splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
             continue
-        if s.lower().startswith("host "):
-            in_block = s.split(None, 1)[1].strip() == cluster
+        parts = re.split(r"[ \t=]+", s, maxsplit=1)
+        if len(parts) != 2:
+            continue
+        key, val = parts[0].lower(), parts[1].strip().strip('"')
+        if key == "host":
+            in_block = cluster in val.split()
             continue
         if in_block:
-            key, _, val = s.partition(" ")
-            k, v = key.strip().lower(), val.strip()
-            if k == "user":
-                out["user"] = v
-            elif k == "identityfile":
-                out["identity_file"] = v
-            elif k == "hostname":
-                out["hostname"] = v
+            if key == "user":
+                out["user"] = val
+            elif key == "identityfile":
+                out["identity_file"] = val
+            elif key == "hostname":
+                out["hostname"] = val
     return out
 
 

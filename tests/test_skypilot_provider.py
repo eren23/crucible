@@ -249,3 +249,46 @@ class TestRegistry:
         assert isinstance(p, SkyPilotProvider)
         assert p.project_name == "demo"
         assert p.gpu_type_ids == ["L4"]
+
+
+class TestStatusIp:
+    def test_returns_ip_ignoring_banner(self, monkeypatch):
+        monkeypatch.setattr(
+            _sky_mod, "_sky",
+            lambda args, **kw: _ok_proc(stdout="W: deprecation banner\n34.56.78.90\n"),
+        )
+        assert _sky_mod._status_ip("c") == "34.56.78.90"
+
+    def test_returns_none_when_no_ip_line(self, monkeypatch):
+        monkeypatch.setattr(
+            _sky_mod, "_sky",
+            lambda args, **kw: _ok_proc(stdout="Cluster 'c' not found.\n"),
+        )
+        assert _sky_mod._status_ip("c") is None
+
+    def test_returns_none_on_nonzero(self, monkeypatch):
+        monkeypatch.setattr(
+            _sky_mod, "_sky", lambda args, **kw: _ok_proc(stderr="boom", rc=1),
+        )
+        assert _sky_mod._status_ip("c") is None
+
+
+class TestParseSshConfigRobustness:
+    def test_equals_form_and_quoted_identity(self):
+        text = ('Host crucible-x\n'
+                '  HostName=1.2.3.4\n'
+                '  User=gcpuser\n'
+                '  IdentityFile "~/.sky/k"\n')
+        assert _parse_ssh_config("crucible-x", text) == {
+            "hostname": "1.2.3.4", "user": "gcpuser", "identity_file": "~/.sky/k"}
+
+    def test_multi_pattern_host_line(self):
+        text = ('Host crucible-x crucible-x-worker\n'
+                '  HostName 9.9.9.9\n  User u\n')
+        got = _parse_ssh_config("crucible-x", text)
+        assert got.get("hostname") == "9.9.9.9"
+        assert got.get("user") == "u"
+
+    def test_tabs_indentation(self):
+        text = "Host crucible-x\n\tUser\tgcpuser\n"
+        assert _parse_ssh_config("crucible-x", text).get("user") == "gcpuser"
