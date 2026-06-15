@@ -164,6 +164,26 @@ class TestProvision:
         with pytest.raises(FleetError, match="sky CLI not found"):
             p.provision(count=1, name_prefix="day")
 
+    def test_partial_failure_carries_created(self, monkeypatch):
+        # I5: a mid-loop launch failure must surface the already-created
+        # (billing) clusters so the manager can persist + later destroy them.
+        from crucible.core.errors import PartialProvisionError
+        monkeypatch.setattr(_sky_mod.shutil, "which", lambda _n: "/usr/bin/sky")
+        calls = {"n": 0}
+
+        def fake_sky(args, **kw):
+            calls["n"] += 1
+            return _ok_proc() if calls["n"] == 1 else _ok_proc(stderr="boom", rc=1)
+
+        monkeypatch.setattr(_sky_mod, "_sky", fake_sky)
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: "1.2.3.4")
+        monkeypatch.setattr(_sky_mod, "_read_ssh_config_text", lambda: "")
+        p = SkyPilotProvider(project_name="demo", gpu_type_ids=["L4"])
+        with pytest.raises(PartialProvisionError) as ei:
+            p.provision(count=2, name_prefix="day")
+        assert [c["name"] for c in ei.value.created] == ["crucible-demo-day-1"]
+        assert ei.value.failed[0]["name"] == "crucible-demo-day-2"
+
 
 class TestRefresh:
     def test_ip_and_ssh_ok_becomes_ready(self, monkeypatch):

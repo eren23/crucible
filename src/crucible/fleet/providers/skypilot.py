@@ -179,13 +179,14 @@ class SkyPilotProvider(FleetProvider):
             cluster = self.build_cluster_name(name_prefix, start_index + i)
             proc = _sky(self._build_launch_cmd(cluster))
             if proc.returncode != 0:
-                if created:
-                    log_warn(
-                        f"sky launch failed after creating "
-                        f"{[n['name'] for n in created]} — run `sky down` to clean up."
-                    )
-                raise FleetError(
-                    f"sky launch failed for {cluster!r}: {proc.stderr[-500:]}"
+                # I5: carry the already-created (billing) clusters so
+                # FleetManager.provision persists them to inventory before
+                # re-raising — otherwise they're orphaned and `destroy` can't
+                # find them.
+                raise PartialProvisionError(
+                    f"sky launch failed for {cluster!r}: {proc.stderr[-500:]}",
+                    created=created,
+                    failed=[{"name": cluster, "error": proc.stderr[-500:]}],
                 )
             created.append(self._node_record_for(cluster, replacement=replacement))
             log_info(f"provisioned skypilot cluster {cluster}")
