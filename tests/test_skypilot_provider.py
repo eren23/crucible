@@ -1,9 +1,12 @@
 """Tests for the SkyPilot fleet provider (CLI-wrapping, mocked)."""
 from __future__ import annotations
 
+import subprocess as _sp
+
 import pytest
 
-from crucible.core.errors import FleetError
+from crucible.core.errors import FleetError, SshAuthError, SshNotReadyError
+from crucible.fleet.providers import skypilot as _sky_mod
 from crucible.fleet.providers.skypilot import (
     SkyPilotProvider,
     _parse_ssh_config,
@@ -100,10 +103,6 @@ class TestParseSshConfig:
 
     def test_missing_host_returns_empty(self):
         assert _parse_ssh_config("nope", "Host x\n  User y\n") == {}
-
-
-import subprocess as _sp
-from crucible.fleet.providers import skypilot as _sky_mod
 
 
 def _ok_proc(stdout="", stderr="", rc=0):
@@ -217,9 +216,6 @@ class TestRefresh:
         p = SkyPilotProvider()
         out = p.refresh([{"state": "ready"}])
         assert out[0]["state"] == "unreachable"
-
-
-from crucible.core.errors import SshAuthError, SshNotReadyError
 
 
 class TestWaitReady:
