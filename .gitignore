@@ -103,6 +103,10 @@ videos
 .gsd/
 .bg-shell/
 
+# Superpowers / agent planning artifacts — brainstorm specs + implementation
+# plans are local working docs (like .claude/), not part of the published repo
+docs/superpowers/
+
 # External clones (not part of Crucible)
 hermes-agent/
 
