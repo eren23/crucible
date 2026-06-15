@@ -215,8 +215,53 @@ class SkyPilotProvider(FleetProvider):
     def wait_ready(self, nodes: list[NodeRecord], *, timeout_seconds: int = 900,
                    poll_seconds: int = 15, stalled_seconds: int | None = None,
                    ) -> list[NodeRecord]:
-        raise NotImplementedError
+        from crucible.core.errors import (
+            SshAuthError,
+            SshNotReadyError,
+            SshTimeoutError,
+        )
+
+        max_attempts = int(self.initial_connect.get("max_attempts", 6))
+        backoff_base = int(self.initial_connect.get("backoff_base", 5))
+        max_wait = int(self.initial_connect.get("max_wait", timeout_seconds))
+
+        current: list[NodeRecord] = []
+        ready_count = 0
+        for node in nodes:
+            updated: NodeRecord = dict(node)  # type: ignore[assignment]
+            try:
+                wait_for_ssh_ready(
+                    node,
+                    max_attempts=max_attempts,
+                    backoff_base=backoff_base,
+                    max_wait=max_wait,
+                )
+                updated["state"] = "ready"
+                updated["last_seen_at"] = utc_now_iso()
+                ready_count += 1
+            except SshAuthError:
+                raise
+            except (SshNotReadyError, SshTimeoutError) as exc:
+                log_warn(f"{node['name']}: {exc}")
+                updated["state"] = "unreachable"
+            current.append(updated)
+
+        log_info(f"SSH ready {ready_count}/{len(current)}")
+        if stalled_seconds is not None and ready_count < len(current):
+            pending = [n["name"] for n in current if n.get("state") != "ready"]
+            raise TimeoutError(f"SSH readiness stalled: {', '.join(pending)}")
+        return current
 
     def destroy(self, nodes: list[NodeRecord], *,
                 selected_names: set[str] | None = None) -> list[NodeRecord]:
-        raise NotImplementedError
+        survivors: list[NodeRecord] = []
+        for node in nodes:
+            name = node["name"]
+            if selected_names is not None and name not in selected_names:
+                survivors.append(node)
+                continue
+            cluster = node.get("node_id") or name
+            proc = _sky(["down", "-y", cluster], timeout=600)
+            if proc.returncode != 0:
+                log_warn(f"sky down failed for {cluster!r}: {proc.stderr[-300:]}")
+        return survivors

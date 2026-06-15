@@ -171,3 +171,60 @@ class TestRefresh:
         p = SkyPilotProvider()
         out = p.refresh([{"name": "c", "node_id": "c", "state": "ready"}])
         assert out[0]["state"] == "lost"
+
+
+from crucible.core.errors import SshAuthError, SshNotReadyError
+
+
+class TestWaitReady:
+    def test_all_ready(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod, "wait_for_ssh_ready", lambda node, **kw: None)
+        p = SkyPilotProvider()
+        out = p.wait_ready([{"name": "a", "ssh_host": "1.2.3.4"}],
+                           timeout_seconds=5, poll_seconds=1)
+        assert out[0]["state"] == "ready"
+        assert "last_seen_at" in out[0]
+
+    def test_auth_error_is_fatal(self, monkeypatch):
+        def boom(node, **kw):
+            raise SshAuthError("bad key")
+        monkeypatch.setattr(_sky_mod, "wait_for_ssh_ready", boom)
+        p = SkyPilotProvider()
+        with pytest.raises(SshAuthError):
+            p.wait_ready([{"name": "a", "ssh_host": "1.2.3.4"}],
+                         timeout_seconds=5, poll_seconds=1)
+
+    def test_transient_marks_unreachable(self, monkeypatch):
+        def boom(node, **kw):
+            raise SshNotReadyError("not yet")
+        monkeypatch.setattr(_sky_mod, "wait_for_ssh_ready", boom)
+        p = SkyPilotProvider()
+        out = p.wait_ready([{"name": "a", "ssh_host": "1.2.3.4"}],
+                           timeout_seconds=5, poll_seconds=1)
+        assert out[0]["state"] == "unreachable"
+
+
+class TestDestroy:
+    def test_selected_names_downs_only_those(self, monkeypatch):
+        downed: list[str] = []
+        monkeypatch.setattr(_sky_mod, "_sky",
+                            lambda args, **kw: (downed.append(args[-1]) or _ok_proc()))
+        p = SkyPilotProvider()
+        nodes = [
+            {"name": "a", "node_id": "a"},
+            {"name": "b", "node_id": "b"},
+            {"name": "c", "node_id": "c"},
+        ]
+        survivors = p.destroy(nodes, selected_names={"b"})
+        assert [n["name"] for n in survivors] == ["a", "c"]
+        assert downed == ["b"]
+
+    def test_no_names_downs_all(self, monkeypatch):
+        downed: list[str] = []
+        monkeypatch.setattr(_sky_mod, "_sky",
+                            lambda args, **kw: (downed.append(args[-1]) or _ok_proc()))
+        p = SkyPilotProvider()
+        survivors = p.destroy([{"name": "a", "node_id": "a"},
+                               {"name": "b", "node_id": "b"}])
+        assert survivors == []
+        assert sorted(downed) == ["a", "b"]
