@@ -1,5 +1,11 @@
 # SkyPilot Fleet Provider
 
+> ⚠️ **Status: experimental — NOT yet validated against live GCP.** The provider is fully
+> unit-tested (mocked `sky` CLI) and has passed in-depth code review, but `sky launch` /
+> `sky status --ip` / `~/.ssh/config` parsing has **not** yet been exercised against a real
+> cluster. Run the spike (Task 1 in `docs/superpowers/plans/2026-06-15-skypilot-fleet-provider.md`)
+> and capture the real `sky` output as test fixtures before relying on it in production.
+
 The `skypilot` provider runs Crucible's fleet on any cloud SkyPilot supports —
 GCP first — by wrapping the [`sky` CLI](https://docs.skypilot.co). It's the
 "bridge, don't reinvent multi-cloud" path: rather than a bespoke GCP integration,
