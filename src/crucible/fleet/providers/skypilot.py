@@ -195,7 +195,22 @@ class SkyPilotProvider(FleetProvider):
         return rec
 
     def refresh(self, nodes: list[NodeRecord]) -> list[NodeRecord]:
-        raise NotImplementedError
+        refreshed: list[NodeRecord] = []
+        for node in nodes:
+            updated: NodeRecord = dict(node)  # type: ignore[assignment]
+            cluster = node.get("node_id") or node["name"]
+            ip = _status_ip(cluster)
+            if not ip:
+                updated["state"] = "lost"
+            else:
+                updated["ssh_host"] = ip
+                if ssh_ok(updated):
+                    updated["state"] = "ready"
+                    updated["last_seen_at"] = utc_now_iso()
+                else:
+                    updated["state"] = "unreachable"
+            refreshed.append(updated)
+        return refreshed
 
     def wait_ready(self, nodes: list[NodeRecord], *, timeout_seconds: int = 900,
                    poll_seconds: int = 15, stalled_seconds: int | None = None,

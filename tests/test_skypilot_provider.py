@@ -147,3 +147,27 @@ class TestProvision:
         p = SkyPilotProvider()
         with pytest.raises(FleetError, match="sky CLI not found"):
             p.provision(count=1, name_prefix="day")
+
+
+class TestRefresh:
+    def test_ip_and_ssh_ok_becomes_ready(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: "5.6.7.8")
+        monkeypatch.setattr(_sky_mod, "ssh_ok", lambda node: True)
+        p = SkyPilotProvider()
+        out = p.refresh([{"name": "c", "node_id": "c", "state": "new"}])
+        assert out[0]["ssh_host"] == "5.6.7.8"
+        assert out[0]["state"] == "ready"
+        assert "last_seen_at" in out[0]
+
+    def test_ip_but_ssh_fails_becomes_unreachable(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: "5.6.7.8")
+        monkeypatch.setattr(_sky_mod, "ssh_ok", lambda node: False)
+        p = SkyPilotProvider()
+        out = p.refresh([{"name": "c", "node_id": "c", "state": "ready"}])
+        assert out[0]["state"] == "unreachable"
+
+    def test_no_ip_becomes_lost(self, monkeypatch):
+        monkeypatch.setattr(_sky_mod, "_status_ip", lambda c: None)
+        p = SkyPilotProvider()
+        out = p.refresh([{"name": "c", "node_id": "c", "state": "ready"}])
+        assert out[0]["state"] == "lost"
