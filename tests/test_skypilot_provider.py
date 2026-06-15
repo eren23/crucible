@@ -228,3 +228,24 @@ class TestDestroy:
                                {"name": "b", "node_id": "b"}])
         assert survivors == []
         assert sorted(downed) == ["a", "b"]
+
+
+class TestRegistry:
+    def test_build_provider_returns_skypilot(self):
+        from crucible.fleet.provider_registry import build_provider, list_providers
+        assert "skypilot" in list_providers()
+        p = build_provider(
+            "skypilot",
+            ssh_key="~/.ssh/id",
+            gpu_type_ids=["L4"],
+            gpu_count=1,
+            interruptible=True,
+            defaults={"cloud": "gcp"},
+            project_name="demo",
+            image_name="ignored",
+            network_volume_id="ignored",
+            template_id="ignored",
+        )
+        assert isinstance(p, SkyPilotProvider)
+        assert p.project_name == "demo"
+        assert p.gpu_type_ids == ["L4"]

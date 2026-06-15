@@ -107,9 +107,30 @@ def _ssh_factory(
     )
 
 
+def _skypilot_factory(
+    *,
+    ssh_key: str = "",
+    gpu_type_ids: list[str] | None = None,
+    defaults: JsonDict | None = None,
+    gpu_count: int = 1,
+    project_name: str = "",
+    **kwargs: Any,
+) -> FleetProvider:
+    from crucible.fleet.providers.skypilot import SkyPilotProvider
+    return SkyPilotProvider(
+        ssh_key=ssh_key,
+        defaults=defaults or {},
+        project_name=project_name,
+        interruptible=bool(kwargs.get("interruptible", True)),
+        gpu_type_ids=gpu_type_ids,
+        gpu_count=gpu_count,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Register built-ins
 # ---------------------------------------------------------------------------
 
 register_provider("runpod", _runpod_factory)
 register_provider("ssh", _ssh_factory)
+register_provider("skypilot", _skypilot_factory)
