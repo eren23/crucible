@@ -43,9 +43,9 @@ def build_hypothesis_prompt(
 ) -> tuple[str, str]:
     """Assemble system + user prompts for hypothesis generation.
 
-    Pure — no LLM call, no state mutation. Used by both the autonomous
-    researcher loop (``generate_hypotheses``) and the orchestrator-driven
-    MCP path (``orchestrator_api.request_prompt("hypothesis")``).
+    Pure — no LLM call, no state mutation. Used by both the
+    ``generate_hypotheses`` helper and the orchestrator-driven MCP path
+    (``orchestrator_api.request_prompt("hypothesis")``).
 
     Returns ``(system_prompt, user_prompt)``.
     """

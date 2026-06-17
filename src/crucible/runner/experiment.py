@@ -33,6 +33,17 @@ from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import log_warn
 from crucible.core.naming import normalize_project_name
 from crucible.core.types import ExperimentResult
+from crucible.runner.output_parser import (
+    OutputParser,
+    classify_failure,
+    tail,
+)
+from crucible.runner.output_parser import (
+    steps_seen as _steps_seen_default,
+)
+from crucible.runner.presets import get_preset
+from crucible.runner.tracker import RunTracker
+from crucible.runner.wandb_logger import WandbLogger
 
 
 def derive_wandb_run_name(
@@ -49,7 +60,7 @@ def derive_wandb_run_name(
     1. ``explicit`` (caller already set ``WANDB_RUN_NAME``) — pass through unchanged.
     2. ``{project}-{variant}`` when both are non-empty.
     3. ``{project}-{exp_id}`` when project is set but variant is empty.
-    4. ``exp_id`` alone (legacy single-project default).
+    4. ``exp_id`` alone (single-project default).
 
     Project name and variant are run through ``normalize_project_name`` so
     a yaml ``name: "Foo Bar/v2"`` produces a clean W&B identifier rather
@@ -65,17 +76,6 @@ def derive_wandb_run_name(
     if p:
         return f"{p}-{exp_id}"
     return exp_id
-from crucible.runner.output_parser import (
-    OutputParser,
-    classify_failure,
-    tail,
-)
-from crucible.runner.output_parser import (
-    steps_seen as _steps_seen_default,
-)
-from crucible.runner.presets import get_preset
-from crucible.runner.tracker import RunTracker
-from crucible.runner.wandb_logger import WandbLogger
 
 # ---------------------------------------------------------------------------
 # Helpers

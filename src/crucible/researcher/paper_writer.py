@@ -276,13 +276,11 @@ def parse_paper_draft_response(
 
 
 def _read_track(hub_store: Any, track_name: str) -> dict[str, Any] | None:
-    """Load a track yaml from the hub via the public ``get_track`` API.
+    """Load a track yaml from the hub.
 
-    H.4.B fix: previously reached into the private ``_read_track_yaml``
-    via getattr + bare except. Now uses the public ``HubStore.get_track``
-    which returns ``None`` for missing tracks without raising. Falls
-    back to the legacy private reader for hub-store stubs (tests) that
-    don't expose the public method yet.
+    Prefers the public ``HubStore.get_track`` (returns ``None`` for a missing
+    track without raising). Falls back to the private ``_read_track_yaml`` for
+    hub-store stubs (e.g. test fixtures) that don't expose the public method.
     """
     getter = getattr(hub_store, "get_track", None)
     if callable(getter):
@@ -290,8 +288,8 @@ def _read_track(hub_store: Any, track_name: str) -> dict[str, Any] | None:
             return getter(track_name)
         except (CrucibleError, OSError, ValueError):
             return None
-    # Legacy fallback for hub_store stubs that pre-date H.4.B
-    # (e.g., test fixtures that only stub `_read_track_yaml`).
+    # Fallback for hub-store stubs that only expose the private reader
+    # (e.g. test fixtures).
     reader = getattr(hub_store, "_read_track_yaml", None)
     if callable(reader):
         try:
