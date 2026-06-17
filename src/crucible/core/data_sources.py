@@ -119,6 +119,11 @@ class DataSourcePlugin(ABC):
         """
         return []
 
+    @staticmethod
+    def _sanitize_path(value: str) -> str:
+        """Make *value* safe as a path segment (drop ``..``, slashes, colons)."""
+        return value.replace("..", "").replace("/", "--").replace(":", "--")
+
 
 # Plugin registry for data sources
 _DATA_SOURCE_REGISTRY = PluginRegistry[DataSourcePlugin]("data_source")

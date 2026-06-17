@@ -13,6 +13,7 @@ from typing import Any
 
 from crucible.core.config import DataConfig
 from crucible.core.log import log_info, log_step
+from crucible.data._hf import lazy_hf_hub_download
 
 # ---------------------------------------------------------------------------
 # Manifest I/O
@@ -33,7 +34,7 @@ def fetch_manifest(data_cfg: DataConfig, data_root: Path) -> Path:
         return local
 
     log_step(f"Downloading manifest from {data_cfg.repo_id}")
-    hf_hub_download = _lazy_hf_hub_download()
+    hf_hub_download = lazy_hf_hub_download()
 
     remote_path = f"{data_cfg.remote_prefix}/{data_cfg.manifest}" if data_cfg.remote_prefix else data_cfg.manifest
     rp = Path(remote_path)
@@ -194,18 +195,6 @@ def resolve_shard_paths(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _lazy_hf_hub_download():
-    """Import huggingface_hub lazily so it remains an optional dependency."""
-    try:
-        from huggingface_hub import hf_hub_download  # type: ignore[import-untyped]
-    except ImportError as exc:
-        raise ImportError(
-            "huggingface_hub is required for dataset downloads.  "
-            "Install it with: pip install huggingface-hub"
-        ) from exc
-    return hf_hub_download
-
 
 def _link_or_copy(src: Path, dst: Path) -> None:
     """Hard-link *src* to *dst*, falling back to copy if cross-device."""

@@ -31,9 +31,6 @@ class HuggingFaceDataSource(DataSourcePlugin):
         self.local_root = Path(config.get("local_root", "./data"))
         self.token = config.get("token") or os.environ.get("HF_TOKEN")
 
-    def _sanitize_path(self, s: str) -> str:
-        return s.replace("..", "").replace("/", "--").replace(":", "--")
-
     def _get_manifest_local_path(self) -> Path:
         safe_repo = self._sanitize_path(self.repo_id)
         return self.local_root / safe_repo / self.manifest_path

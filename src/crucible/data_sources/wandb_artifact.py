@@ -31,12 +31,15 @@ class WandBArtifactSource(DataSourcePlugin):
         self.local_root = Path(config.get("local_root", "./data"))
         self.api_key = config.get("api_key") or os.environ.get("WANDB_API_KEY")
 
-    def _sanitize_path(self, s: str) -> str:
-        return s.replace("..", "").replace("/", "--").replace(":", "--")
-
     def _get_local_artifact_path(self) -> Path:
         safe_name = self.artifact.replace(":", "--").replace("/", "--")
-        return self.local_root / "wandb" / self._sanitize_path(self.entity) / self._sanitize_path(self.project) / safe_name
+        return (
+            self.local_root
+            / "wandb"
+            / self._sanitize_path(self.entity)
+            / self._sanitize_path(self.project)
+            / safe_name
+        )
 
     def status(self) -> DataStatusResult:
         artifact_path = self._get_local_artifact_path()

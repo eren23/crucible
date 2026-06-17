@@ -12,6 +12,7 @@ from typing import Any
 
 from crucible.core.config import DataConfig, ProjectConfig
 from crucible.core.log import log_info, log_step, log_success, log_warn
+from crucible.data._hf import lazy_hf_hub_download
 from crucible.data.manifest import (
     find_dataset,
     find_tokenizer,
@@ -256,7 +257,7 @@ class DataManager:
         if destination.is_symlink():
             destination.unlink()
 
-        hf_hub_download = _lazy_hf_hub_download()
+        hf_hub_download = lazy_hf_hub_download()
 
         remote = Path(relative_path)
         log_info(f"Fetching {relative_path}")
@@ -278,19 +279,3 @@ class DataManager:
             shutil.copy2(cached_source, destination)
 
         return True
-
-
-# ---------------------------------------------------------------------------
-# Lazy import
-# ---------------------------------------------------------------------------
-
-def _lazy_hf_hub_download():
-    """Import huggingface_hub lazily so it remains an optional dependency."""
-    try:
-        from huggingface_hub import hf_hub_download  # type: ignore[import-untyped]
-    except ImportError as exc:
-        raise ImportError(
-            "huggingface_hub is required for dataset downloads.  "
-            "Install it with: pip install huggingface-hub"
-        ) from exc
-    return hf_hub_download
