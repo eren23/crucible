@@ -203,10 +203,15 @@ def _cluster_kmeans(
     raw_k = max(1, int(round(n_h * threshold)))
     k = max(1, min(raw_k, max(1, n_h // 2)))
 
-    vec = TfidfVectorizer(ngram_range=(1, n), min_df=1)
-    matrix = vec.fit_transform(texts)
-    km = KMeans(n_clusters=k, n_init=10, random_state=0)
-    labels = km.fit_predict(matrix)
+    try:
+        vec = TfidfVectorizer(ngram_range=(1, n), min_df=1)
+        matrix = vec.fit_transform(texts)
+        km = KMeans(n_clusters=k, n_init=10, random_state=0)
+        labels = km.fit_predict(matrix)
+    except ValueError as exc:
+        raise ProximityError(
+            f"kmeans clustering failed (degenerate input?): {exc}"
+        ) from exc
 
     grouped: dict[int, list[int]] = {}
     for idx, label in enumerate(labels):

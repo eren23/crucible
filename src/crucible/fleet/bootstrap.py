@@ -119,8 +119,9 @@ def _resolve_step_timeout(label: str, explicit: int | None) -> int | None:
     try:
         cfg = load_config()
         timeouts = cfg.fleet.ssh.step_timeouts
-    except (OSError, AttributeError, KeyError, ValueError):
-        # Config missing, unreadable, or missing fleet.ssh — fall back to hard-coded default
+    except Exception:
+        # Best-effort: any config-load failure (missing / unreadable / malformed
+        # yaml / missing fleet.ssh) falls back to the safe hard-coded default.
         return None
     if label in timeouts:
         return int(timeouts[label])

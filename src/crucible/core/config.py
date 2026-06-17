@@ -731,7 +731,7 @@ def list_project_specs(project_root: Path | None = None) -> list[dict[str, Any]]
                 "train": raw.get("train", ""),
                 "metrics_primary": raw.get("metrics", {}).get("primary", "val_loss"),
             })
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
             from crucible.core.log import log_warn
             log_warn(f"Failed to parse project spec {p.name}: {exc}")
             continue
