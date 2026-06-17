@@ -127,7 +127,7 @@ def fake_int6_quant(w: Tensor) -> Tensor:
 # ---------------------------------------------------------------------------
 
 
-def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
+def quantize_state_dict_int8(state_dict: dict[str, Tensor]) -> tuple[dict[str, object], dict[str, int]]:
     # Single supported clean-script export format:
     # - per-row int8 for 2D float tensors
     # - per-tensor int8 for other float tensors
@@ -220,7 +220,7 @@ def dequantize_state_dict_int8(obj: dict[str, object]) -> dict[str, Tensor]:
     return out
 
 
-def quantize_state_dict_int6(state_dict: dict[str, Tensor], mlp_max_range: int = INT6_RANGE):
+def quantize_state_dict_int6(state_dict: dict[str, Tensor], mlp_max_range: int = INT6_RANGE) -> tuple[dict[str, object], dict[str, int]]:
     """Low-bit variant -- int6 for large tensors, optionally int5 for MLP tensors when mlp_max_range differs."""
     quantized: dict[str, Tensor] = {}
     scales: dict[str, Tensor] = {}
@@ -278,7 +278,7 @@ def quantize_state_dict_int6(state_dict: dict[str, Tensor], mlp_max_range: int =
     return obj, stats
 
 
-def quantize_state_dict(state_dict: dict[str, Tensor], mode: str = "int8"):
+def quantize_state_dict(state_dict: dict[str, Tensor], mode: str = "int8") -> tuple[dict[str, object], dict[str, int]]:
     """Dispatch to int8, int6, or int5_int6 quantizer based on mode."""
     if mode == "int5_int6":
         return quantize_state_dict_int6(state_dict, mlp_max_range=INT5_RANGE)

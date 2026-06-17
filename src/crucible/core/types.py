@@ -303,7 +303,7 @@ class SearchTreeNode(TypedDict, total=False):
     config: dict[str, str]
     status: str                    # pending | queued | running | completed | failed | pruned
     result_metric: float | None
-    result: dict | None
+    result: dict[str, Any] | None
     hypothesis: str
     rationale: str
     generation_method: str
@@ -323,8 +323,8 @@ class SearchTreeMeta(TypedDict, total=False):
     root_node_ids: list[str]
     expansion_policy: str
     pruning_policy: str
-    expansion_config: dict
-    pruning_config: dict
+    expansion_config: dict[str, Any]
+    pruning_config: dict[str, Any]
     primary_metric: str
     metric_direction: str
     max_depth: int

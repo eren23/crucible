@@ -8,6 +8,7 @@ from __future__ import annotations
 import glob
 import math
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -32,7 +33,7 @@ def _find_docs(all_tokens: Tensor) -> list[tuple[int, int]]:
     return docs
 
 
-def _chunk_window(ci: int, pred_len: int, num_chunks: int, chunk_size: int, seq_len: int):
+def _chunk_window(ci: int, pred_len: int, num_chunks: int, chunk_size: int, seq_len: int) -> tuple[int, int, int, int]:
     chunk_start = ci * chunk_size
     chunk_end = pred_len if ci == num_chunks - 1 else (ci + 1) * chunk_size
     win_start = max(0, chunk_end - seq_len)
@@ -40,7 +41,7 @@ def _chunk_window(ci: int, pred_len: int, num_chunks: int, chunk_size: int, seq_
 
 
 def ttt_lora_evaluate(
-    args, base_model: nn.Module, rank: int, world_size: int,
+    args: Any, base_model: nn.Module, rank: int, world_size: int,
     device: torch.device, base_bytes_lut: Tensor, has_leading_space_lut: Tensor,
     is_boundary_token_lut: Tensor,
 ) -> tuple[float, float]:

@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
@@ -125,7 +126,7 @@ def get_default_registry() -> LintCheckRegistry:
 _SKIP_DIRS = {".git", ".venv", "venv", "node_modules", ".pytest_cache", ".mypy_cache"}
 
 
-def _walk_plugin_dirs(tap_root: Path):
+def _walk_plugin_dirs(tap_root: Path) -> Iterator[tuple[str, Path]]:
     """Yield (plugin_type, plugin_dir) for every plugin folder under *tap_root*.
 
     A plugin folder is any directory under a recognized plugin_type whose

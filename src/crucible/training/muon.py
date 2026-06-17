@@ -5,6 +5,8 @@ Background on Muon: https://kellerjordan.github.io/posts/muon/
 """
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.distributed as dist
 from torch import Tensor
@@ -27,7 +29,7 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -
 
 
 class Muon(torch.optim.Optimizer):
-    def __init__(self, params, lr: float, momentum: float, backend_steps: int, nesterov: bool = True, weight_decay: float = 0.0):
+    def __init__(self, params: Any, lr: float, momentum: float, backend_steps: int, nesterov: bool = True, weight_decay: float = 0.0) -> None:
         super().__init__(
             params,
             dict(lr=lr, momentum=momentum, backend_steps=backend_steps, nesterov=nesterov, weight_decay=weight_decay),

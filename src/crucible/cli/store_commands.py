@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import TYPE_CHECKING
 
 from crucible.core.config import load_config
+
+if TYPE_CHECKING:
+    from crucible.core.store import VersionStore
 
 
 def handle_store(args: argparse.Namespace) -> None:
@@ -34,7 +38,7 @@ def handle_store(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _cmd_list(args: argparse.Namespace, store) -> None:
+def _cmd_list(args: argparse.Namespace, store: VersionStore) -> None:
     """List resources of a given type."""
     resource_type = args.resource_type
     type_map = {"designs": "experiment_design", "context": "research_context"}
@@ -53,7 +57,7 @@ def _cmd_list(args: argparse.Namespace, store) -> None:
         print(f"  {name} (v{ver})  {created}  {summary}")
 
 
-def _cmd_show(args: argparse.Namespace, store) -> None:
+def _cmd_show(args: argparse.Namespace, store: VersionStore) -> None:
     """Show the current version of a resource."""
     path = args.resource_path
     if "/" not in path:
@@ -78,7 +82,7 @@ def _cmd_show(args: argparse.Namespace, store) -> None:
     print(yaml.dump(content, default_flow_style=False, sort_keys=False))
 
 
-def _cmd_history(args: argparse.Namespace, store) -> None:
+def _cmd_history(args: argparse.Namespace, store: VersionStore) -> None:
     """Show version history for a resource."""
     path = args.resource_path
     if "/" not in path:
@@ -103,7 +107,7 @@ def _cmd_history(args: argparse.Namespace, store) -> None:
         print(f"  v{ver}  {created}  by:{by}  {summary}{git}")
 
 
-def _cmd_commit(args: argparse.Namespace, store) -> None:
+def _cmd_commit(args: argparse.Namespace, store: VersionStore) -> None:
     """Git commit all uncommitted versions."""
     committed = 0
     for versions in store._index.values():

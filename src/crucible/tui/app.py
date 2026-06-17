@@ -258,7 +258,7 @@ class HelpScreen(ModalScreen[None]):
 # Main App
 # ---------------------------------------------------------------------------
 
-class CrucibleApp(App):
+class CrucibleApp(App[None]):
     TITLE = "Crucible \u2014 Cockpit"
 
     CSS = """

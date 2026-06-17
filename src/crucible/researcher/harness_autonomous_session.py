@@ -25,7 +25,7 @@ mis-separated judge panels fail before any pod time is consumed.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError
@@ -36,6 +36,9 @@ from crucible.researcher.session_base import (
 from crucible.researcher.session_base import (
     fingerprint_prompt as _fingerprint,
 )
+
+if TYPE_CHECKING:
+    from crucible.researcher.harness_optimizer import HarnessOptimizer
 
 _SESSIONS_DIRNAME = "harness_autonomous_sessions"
 
@@ -55,7 +58,7 @@ def _make_optimizer(
     tree_name: str,
     n_candidates: int,
     dry_run: bool = False,
-):
+) -> HarnessOptimizer:
     """Construct a HarnessOptimizer with the supplied params."""
     from crucible.researcher.harness_optimizer import HarnessOptimizer
 
@@ -164,7 +167,7 @@ class HarnessAutonomousSession(SessionBase):
     # doom-loop helpers inherited from SessionBase)
     # ------------------------------------------------------------------
 
-    def _build_optimizer(self):
+    def _build_optimizer(self) -> HarnessOptimizer:
         return _make_optimizer(
             self.config,
             domain_spec=self.state_data["domain_spec"],

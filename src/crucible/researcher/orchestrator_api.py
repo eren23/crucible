@@ -303,7 +303,7 @@ def _extract_hypotheses(response: Any) -> Any:
     return []
 
 
-def _extract_reflection(response: Any) -> dict[str, list] | None:
+def _extract_reflection(response: Any) -> dict[str, list[Any]] | None:
     if isinstance(response, dict):
         return {
             "beliefs": response.get("beliefs", []) or [],

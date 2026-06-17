@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Label, Markdown
 
@@ -39,7 +40,7 @@ class BriefingPane(Vertical):
         super().__init__()
         self._config = config
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         yield Label("Loading briefing…", id="briefing-summary")
         with VerticalScroll(id="briefing-scroll"):
             yield Markdown("", id="briefing-md")

@@ -65,7 +65,7 @@ def _search_via_hub(query: str, limit: int) -> list[dict[str, Any]] | None:
 
         api = HfApi()
         results = api.list_papers(query=query)
-        papers = []
+        papers: list[dict[str, Any]] = []
         for p in results:
             if len(papers) >= limit:
                 break
@@ -87,7 +87,7 @@ def _search_via_api(query: str, limit: int) -> list[dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read())
         items = data if isinstance(data, list) else data.get("papers", data.get("results", []))
-        papers = []
+        papers: list[dict[str, Any]] = []
         for item in items:
             if len(papers) >= limit:
                 break

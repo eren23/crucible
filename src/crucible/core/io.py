@@ -103,7 +103,7 @@ def atomic_write_jsonl(path: Path, records: list[JsonDict]) -> None:
             os.unlink(tmp_name)
 
 
-def read_yaml(path: Path) -> dict | list | None:
+def read_yaml(path: Path) -> dict[str, Any] | list[Any] | None:
     """Read a YAML file, returning its parsed content.
 
     Returns ``None`` if the file does not exist.  Unlike

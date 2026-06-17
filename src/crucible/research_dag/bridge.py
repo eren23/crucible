@@ -429,7 +429,7 @@ class ResearchDAGBridge:
     # Spider Chat HTTP API (private, best-effort)
     # ------------------------------------------------------------------
 
-    def _http_request(self, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
+    def _http_request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make HTTP request to Spider Chat backend. Raises on failure."""
         import urllib.error
         import urllib.parse

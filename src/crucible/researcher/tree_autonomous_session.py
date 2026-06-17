@@ -244,7 +244,7 @@ class TreeAutonomousSession(SessionBase):
             "iterations_completed": self.state_data["iterations_completed"],
         }
 
-    def apply_response(self, response: Any, submitted_snapshot: dict | None) -> dict[str, Any]:
+    def apply_response(self, response: Any, submitted_snapshot: dict[str, Any] | None) -> dict[str, Any]:
         """Apply orchestrator response under per-session + tree locks."""
         with self._file_lock(self.lock_path):
             self.load()
@@ -357,7 +357,7 @@ def action_submit(
     *,
     session_id: str,
     response: Any,
-    tree_snapshot: dict | None = None,
+    tree_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply orchestrator response, advance, return next prompt or done."""
     session = TreeAutonomousSession(config, session_id).load()

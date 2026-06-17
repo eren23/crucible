@@ -1,6 +1,8 @@
 """Post-experiment reflection: compare predictions to outcomes, update beliefs."""
 from __future__ import annotations
 
+from typing import Any
+
 from crucible.researcher.llm_client import LLMClient, parse_json_from_text
 from crucible.researcher.state import ResearchState
 
@@ -68,7 +70,7 @@ def build_reflection_prompt(
     return REFLECTION_SYSTEM_PROMPT, "\n".join(context_lines)
 
 
-def parse_reflection(text: str) -> dict[str, list] | None:
+def parse_reflection(text: str) -> dict[str, list[Any]] | None:
     """Parse a reflection LLM response into ``{beliefs, surprises, promote, kill}``.
 
     Returns ``None`` if the response is not a valid object. Missing keys
@@ -85,7 +87,7 @@ def parse_reflection(text: str) -> dict[str, list] | None:
     }
 
 
-def apply_reflection(state: ResearchState, parsed: dict[str, list]) -> dict[str, int]:
+def apply_reflection(state: ResearchState, parsed: dict[str, list[Any]]) -> dict[str, int]:
     """Apply a parsed reflection to ``state``. Returns counts summary."""
     beliefs = list(parsed.get("beliefs", []))
     if beliefs:

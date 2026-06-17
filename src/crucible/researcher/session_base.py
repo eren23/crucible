@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
@@ -169,7 +170,7 @@ class SessionBase:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _file_lock(cls, path: Path, *, timeout: float = _DEFAULT_LOCK_TIMEOUT):
+    def _file_lock(cls, path: Path, *, timeout: float = _DEFAULT_LOCK_TIMEOUT) -> AbstractContextManager[None]:
         """Wrap :func:`crucible.core.file_lock.file_lock` with the
         subclass's domain-specific timeout exception.
 

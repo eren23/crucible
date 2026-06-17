@@ -202,7 +202,7 @@ class HPOStudy:
             )
         return study
 
-    def _optuna_distributions(self):
+    def _optuna_distributions(self) -> dict[str, Any]:
         """Build the Optuna distribution objects matching ``self.params``."""
         import optuna.distributions as od
 
@@ -366,7 +366,7 @@ class HPOStudy:
                 f"direction must be 'minimize' or 'maximize', got {self.direction!r}"
             )
 
-    def _build_optuna_study(self, *, sampler: str, seed: int | None):
+    def _build_optuna_study(self, *, sampler: str, seed: int | None) -> Any:
         try:
             import optuna
         except ImportError as exc:
@@ -405,7 +405,7 @@ class HPOStudy:
             sampler=sampler_inst,
         )
 
-    def _sample_from_trial(self, trial) -> dict[str, Any]:
+    def _sample_from_trial(self, trial: Any) -> dict[str, Any]:
         """Walk the spec, call trial.suggest_* per param type."""
         sampled: dict[str, Any] = {}
         for name, spec in self.params.items():

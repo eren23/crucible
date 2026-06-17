@@ -17,8 +17,11 @@ from crucible.core.errors import CrucibleError, StaleSubmitError
 if TYPE_CHECKING:
     from crucible.core.config import ProjectSpec
     from crucible.core.hub import HubStore
+    from crucible.core.plan import PlanStore
     from crucible.core.tap import TapManager
+    from crucible.fleet.manager import FleetManager
     from crucible.research_dag.bridge import ResearchDAGBridge
+    from crucible.runner.notes import NoteStore
 from crucible.core.experiment_contract import (
     contract_metadata,
     resolve_wandb_settings,
@@ -44,7 +47,7 @@ def _get_hub_store() -> HubStore:
     return HubStore(hub_dir=hub_dir)
 
 
-def _get_fleet_manager(config: ProjectConfig | None = None):
+def _get_fleet_manager(config: ProjectConfig | None = None) -> FleetManager:
     """Return a FleetManager for the current project config.
 
     Lazy-imports FleetManager to avoid loading fleet code at module level.
@@ -958,7 +961,7 @@ def design_compare_experiments(args: dict[str, Any]) -> dict[str, Any]:
     experiments = [by_name[n] for n in names]
 
     # Config diffs: find keys that differ
-    all_keys = set()
+    all_keys: set[str] = set()
     for exp in experiments:
         all_keys.update(exp.get("config", {}).keys())
 
@@ -1520,7 +1523,7 @@ def version_link_result(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_note_store():
+def _get_note_store() -> NoteStore:
     """Lazy-load a NoteStore from project config."""
     from crucible.runner.notes import NoteStore
 
@@ -1572,7 +1575,7 @@ def note_search(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_plan_store():
+def _get_plan_store() -> PlanStore:
     from crucible.core.plan import PlanStore
 
     config = _get_config()
@@ -2076,7 +2079,7 @@ def code_mutation_apply(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"[{type(exc).__name__}] {exc}"}
 
 
-def _tournament_dir(config, name: str) -> Path:
+def _tournament_dir(config: ProjectConfig, name: str) -> Path:
     """Resolve the on-disk path for a named tournament.
 
     Name validation (M9 hardening): rejects ``/``, ``\\``, ``..``,
@@ -3146,7 +3149,7 @@ def wandb_log_image(args: dict[str, Any]) -> dict[str, Any]:
             return {"error": f"No W&B URL found for run {run_id}"}
 
         try:
-            import wandb  # type: ignore
+            import wandb
         except ImportError:
             return {"error": "wandb not installed"}
 
@@ -3210,7 +3213,7 @@ def wandb_annotate(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_hub():
+def _get_hub() -> HubStore | None:
     """Lazy-load a HubStore, returning None if not initialized."""
     from crucible.core.hub import HubStore
 
@@ -3968,7 +3971,7 @@ def model_import_architecture(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _load_spec_dict(family: str) -> dict | None:
+def _load_spec_dict(family: str) -> dict[str, Any] | None:
     """Try to load a YAML spec dict for *family* from specs/ or .crucible/architectures/.
 
     Returns the parsed dict or None if no spec file exists.
@@ -4009,7 +4012,7 @@ def _scan_spec_vars(
             _scan_spec_vars(item, var_pattern, config, missing)
 
 
-def _deep_merge(base: dict, overrides: dict) -> dict:
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *overrides* into a copy of *base*."""
     import copy
     result = copy.deepcopy(base)
@@ -4735,7 +4738,7 @@ def get_architecture_guide(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _get_tree_dir(config, name: str):
+def _get_tree_dir(config: ProjectConfig, name: str) -> Path:
     """Resolve the directory for a named search tree."""
     store_dir = config.project_root / config.store_dir
     return store_dir / "search_trees" / name
@@ -7556,7 +7559,7 @@ def research_dag_status(args: dict[str, Any]) -> dict[str, Any]:
 _HARNESS_OPTIMIZERS: dict[str, Any] = {}
 
 
-def _get_harness_optimizer(tree_name: str):
+def _get_harness_optimizer(tree_name: str) -> Any:
     """Return a cached HarnessOptimizer for *tree_name*, or None if missing."""
     return _HARNESS_OPTIMIZERS.get(tree_name)
 

@@ -29,7 +29,7 @@ TrainingState = dict[str, Any]
 # may be torch.Tensor before calling .item().
 MetricsDict = dict[str, float | Any]
 
-CALLBACK_REGISTRY = PluginRegistry("callback")
+CALLBACK_REGISTRY: PluginRegistry[type[TrainingCallback]] = PluginRegistry("callback")
 
 
 # ---------------------------------------------------------------------------

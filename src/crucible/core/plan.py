@@ -44,7 +44,7 @@ class PlanItem:
         return cls(
             id=str(raw.get("id") or _new_id()),
             description=str(raw.get("description", "")).strip(),
-            status=status,  # type: ignore[arg-type]
+            status=status,
             created_at=str(raw.get("created_at") or utc_now_iso()),
             updated_at=str(raw.get("updated_at") or utc_now_iso()),
         )

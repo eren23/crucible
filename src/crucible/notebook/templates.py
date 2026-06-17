@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shlex
 from dataclasses import dataclass
+from typing import Any
 
 from crucible.core.config import ProjectSpec
 from crucible.notebook.runtimes import RuntimeProfile
@@ -25,7 +26,7 @@ class RenderContext:
     """All the inputs `build_*_cell` needs, collected once."""
 
     spec: ProjectSpec
-    raw_spec: dict                      # raw YAML dict — carries eval_suite + description
+    raw_spec: dict[str, Any]            # raw YAML dict — carries eval_suite + description
     runtime: RuntimeProfile
     preset: str
     variant: str | None

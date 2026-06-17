@@ -72,7 +72,7 @@ def _validate_hypotheses(hypotheses: Any, iteration: int) -> list[dict[str, Any]
     """Shared validation for both LLM-response and orchestrator-submitted hypotheses."""
     if not isinstance(hypotheses, list):
         return []
-    valid = []
+    valid: list[dict[str, Any]] = []
     for h in hypotheses:
         if not isinstance(h, dict):
             continue

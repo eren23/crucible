@@ -36,11 +36,17 @@ import atexit
 import os
 import shlex
 import threading
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
+
+if TYPE_CHECKING:
+    from mcp import ClientSession
+
+_T = TypeVar("_T")
 
 # H.4.E: track active sub-MCP calls. atexit hook below warns if the
 # parent exits while subprocesses are still in flight — on SIGKILL
@@ -99,7 +105,7 @@ class ExternalMCPConfigError(CrucibleError):
 
 
 @asynccontextmanager
-async def _connect(server_spec: dict[str, Any]):
+async def _connect(server_spec: dict[str, Any]) -> AsyncIterator[ClientSession]:
     """Open a stdio MCP client to the configured server.
 
     Returns a connected ``ClientSession``. Caller is responsible for
@@ -194,7 +200,7 @@ async def _call_tool_async(
         _track_active_call(-1)
 
 
-def _run_async(coro):
+def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
     """Bridge: run an async coroutine from a sync MCP tool dispatcher.
 
     Safe because the parent MCP server routes sync handlers through

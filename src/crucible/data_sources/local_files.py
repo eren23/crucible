@@ -81,7 +81,7 @@ class LocalFilesSource(DataSourcePlugin):
     def validate(self) -> DataValidationResult:
         """Validate local files."""
         errors = []
-        warnings = []
+        warnings: list[str] = []
 
         if not self.path.exists():
             return DataValidationResult(

@@ -442,7 +442,7 @@ class SearchTree:
             pending.sort(key=lambda nd: nd.get("priority_score", 0), reverse=True)
             return [nd["node_id"] for nd in pending[:n]]
 
-    def _select_ucb1(self, candidates: list[dict], n: int) -> list[str]:
+    def _select_ucb1(self, candidates: list[dict[str, Any]], n: int) -> list[str]:
         """UCB1: score = mean_metric + C * sqrt(ln(total_visits) / visits)."""
         ec = self.meta.get("expansion_config", {})
         c_param = float(ec.get("ucb_c", 1.41))
@@ -474,11 +474,11 @@ class SearchTree:
         scored.sort(reverse=True)
         return [nid for _, nid in scored[:n]]
 
-    def _select_greedy(self, candidates: list[dict], n: int) -> list[str]:
+    def _select_greedy(self, candidates: list[dict[str, Any]], n: int) -> list[str]:
         """Select by best parent metric or priority score."""
         minimize = self.meta["metric_direction"] == "minimize"
 
-        def sort_key(nd: dict) -> float:
+        def sort_key(nd: dict[str, Any]) -> float:
             parent_metric = self._get_parent_metric(nd)
             if parent_metric is not None:
                 return -parent_metric if minimize else parent_metric
@@ -487,7 +487,7 @@ class SearchTree:
         candidates.sort(key=sort_key, reverse=True)
         return [nd["node_id"] for nd in candidates[:n]]
 
-    def _select_epsilon_greedy(self, candidates: list[dict], n: int) -> list[str]:
+    def _select_epsilon_greedy(self, candidates: list[dict[str, Any]], n: int) -> list[str]:
         """Epsilon-greedy: epsilon fraction random, else greedy."""
         ec = self.meta.get("expansion_config", {})
         epsilon = float(ec.get("epsilon", 0.1))
@@ -504,7 +504,7 @@ class SearchTree:
                 # Greedy pick
                 minimize = self.meta["metric_direction"] == "minimize"
 
-                def sort_key(nd: dict) -> float:
+                def sort_key(nd: dict[str, Any]) -> float:
                     parent_metric = self._get_parent_metric(nd)
                     if parent_metric is not None:
                         return -parent_metric if minimize else parent_metric
@@ -518,7 +518,7 @@ class SearchTree:
 
         return selected
 
-    def _get_parent_metric(self, node: dict) -> float | None:
+    def _get_parent_metric(self, node: dict[str, Any]) -> float | None:
         """Get the result metric of a node's parent, if available."""
         parent_id = node.get("parent_node_id")
         if parent_id is None:
@@ -528,7 +528,7 @@ class SearchTree:
             return None
         return parent.get("result_metric")
 
-    def _select_pareto(self, candidates: list[dict], n: int) -> list[str]:
+    def _select_pareto(self, candidates: list[dict[str, Any]], n: int) -> list[str]:
         """Prefer pending children whose completed parent is on the Pareto frontier.
 
         Unvisited candidates with frontier ancestry bubble to the top. Ties

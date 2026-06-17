@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DataTable, Label
 
@@ -34,7 +35,7 @@ class LeaderboardPane(Vertical):
         self._top_n = top_n
         self._columns_built = False
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         yield Label("Loading leaderboard…", id="lb-summary")
         yield DataTable(id="lb-table", zebra_stripes=True)
 

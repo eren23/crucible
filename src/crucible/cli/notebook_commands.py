@@ -78,7 +78,7 @@ def _cmd_runtimes(args: argparse.Namespace) -> None:
         print(f"  {row['name']:16} {row['gpu']:24} {row['description']}")
 
 
-def add_parser(subparsers: argparse._SubParsersAction) -> None:
+def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Register the notebook subcommand group on the top-level CLI parser."""
     notebook_parser = subparsers.add_parser(
         "notebook", help="Notebook export (Colab/Jupyter)"

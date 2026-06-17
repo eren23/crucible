@@ -8,10 +8,15 @@ Or directly:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from crucible import __version__
 
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
-def create_app():
+
+def create_app() -> FastAPI:
     """Create FastAPI app. Lazy-imports fastapi."""
     from fastapi import FastAPI
 

@@ -33,7 +33,7 @@ from crucible.core.types import JsonDict
 # or occasionally string tags.
 MetricsPayload = dict[str, float | int | str]
 
-LOGGER_REGISTRY = PluginRegistry("logger")
+LOGGER_REGISTRY: PluginRegistry[type[TrainingLogger]] = PluginRegistry("logger")
 
 
 # ---------------------------------------------------------------------------

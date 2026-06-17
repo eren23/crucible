@@ -12,6 +12,7 @@ from __future__ import annotations
 import glob
 import math
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import sentencepiece as spm
@@ -61,7 +62,7 @@ def load_validation_tokens(pattern: str, seq_len: int) -> Tensor:
 
 
 def validate_model(
-    args,
+    args: Any,
     model: nn.Module,
     rank: int,
     world_size: int,

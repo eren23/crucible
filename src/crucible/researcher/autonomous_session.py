@@ -239,7 +239,7 @@ class AutonomousSession(SessionBase):
         self,
         state: ResearchState,
         response: Any,
-        submitted_snapshot: dict | None,
+        submitted_snapshot: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Apply an orchestrator-supplied response, advance stage.
 
@@ -260,7 +260,7 @@ class AutonomousSession(SessionBase):
         self,
         state: ResearchState,
         response: Any,
-        submitted_snapshot: dict | None,
+        submitted_snapshot: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if self.is_terminal():
             raise AutonomousSessionError(
@@ -384,7 +384,7 @@ def action_submit(
     *,
     session_id: str,
     response: Any,
-    state_snapshot: dict | None = None,
+    state_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply an orchestrator-supplied response and advance the session.
 

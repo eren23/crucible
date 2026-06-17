@@ -35,7 +35,7 @@ import yaml
 from crucible.core.errors import TapError
 
 
-def _yaml_str_double_quoted_representer(dumper, data):
+def _yaml_str_double_quoted_representer(dumper: Any, data: str) -> Any:
     """Render strings with double quotes — keeps version strings unambiguous."""
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
 

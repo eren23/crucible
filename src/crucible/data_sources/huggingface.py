@@ -182,7 +182,7 @@ class HuggingFaceDataSource(DataSourcePlugin):
             return DataValidationResult(valid=False, errors=["Manifest not found"], warnings=[])
 
         errors = []
-        warnings = []
+        warnings: list[str] = []
 
         try:
             manifest = json.loads(manifest_local.read_text(encoding="utf-8"))

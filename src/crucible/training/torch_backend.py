@@ -20,6 +20,8 @@ import random
 import signal
 import subprocess
 import time
+from types import FrameType
+from typing import Any
 
 import numpy as np
 import sentencepiece as spm
@@ -124,7 +126,7 @@ def main() -> None:
         dist.barrier()
     master_process = rank == 0
     _graceful_shutdown = False
-    def _handle_signal(signum, frame):
+    def _handle_signal(signum: int, frame: FrameType | None) -> None:
         nonlocal _graceful_shutdown
         _graceful_shutdown = True
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -242,7 +244,7 @@ def main() -> None:
     restore_low_dim_params_to_fp32(base_model)
 
     # Int6 QAT: register forward pre-hooks that fake-quantize weight matrices.
-    _qat_hooks: list = []
+    _qat_hooks: list[Any] = []
     if args.int6_qat:
         def _make_qat_hook(module: nn.Module):
             def hook(mod, inputs):
@@ -792,7 +794,7 @@ def main() -> None:
         wandb.finish(0)
 
     if tracker is not None:
-        result_dict: dict = {
+        result_dict: dict[str, Any] = {
             "val_loss": q_val_loss,
             "val_bpb": q_val_bpb,
             "steps_completed": step,

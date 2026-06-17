@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from crucible.core.types import NodeRecord
+
 
 class CrucibleError(Exception):
     """Base error for all Crucible operations."""
@@ -22,7 +27,7 @@ class PartialProvisionError(FleetError):
       that could not be created after exhausting cloud-type fallbacks
     """
 
-    def __init__(self, message: str, created: list | None = None, failed: list | None = None):
+    def __init__(self, message: str, created: list[NodeRecord] | None = None, failed: list[dict[str, Any]] | None = None):
         super().__init__(message)
         self.created = created or []
         self.failed = failed or []

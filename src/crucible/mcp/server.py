@@ -217,7 +217,7 @@ async def _run_with_keepalive(
     tool_name: str,
     session: object,  # mcp.server.Session — typed as object to avoid coupling to MCP internals
     request_id: object,  # MCP request identifier — opaque to Crucible
-) -> tuple[list[TextContent], bool, BaseException | None]:  # type: ignore[type-arg]
+) -> tuple[list[TextContent], bool, BaseException | None]:
     """Run a tool handler in a thread while sending periodic log messages.
 
     Long-running MCP tool calls can cause the stdio client to time out
@@ -280,7 +280,7 @@ async def _run_with_keepalive(
     if isinstance(raw_result, tuple) and len(raw_result) == 3:
         return raw_result
     # Fallback: treat as raw TextContent list (should not happen)
-    return (raw_result, False, None)  # type: ignore[return-value]
+    return (raw_result, False, None)
 
 
 # ---------------------------------------------------------------------------

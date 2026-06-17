@@ -25,6 +25,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -215,7 +216,7 @@ def _resolve_extends_text(raw: str, _depth: int = 0) -> str:
     return yaml.safe_dump(merged, sort_keys=False, default_flow_style=False)
 
 
-def _merge_dicts(parent: dict, child: dict) -> dict:
+def _merge_dicts(parent: dict[str, Any], child: dict[str, Any]) -> dict[str, Any]:
     """Shallow-merge *child* into *parent*. Child wins on conflicts.
 
     Nested dicts are recursively merged. Lists are replaced (not concatenated),
