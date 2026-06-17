@@ -140,17 +140,17 @@ And if you suspect leaked pods on the provider side:
 
 ## 6. Go autonomous (optional)
 
-Once you have a few experiments on the leaderboard, you can hand the loop to Claude:
+Once you have a few experiments on the leaderboard, hand the loop to an orchestrator (Claude Code via MCP, or your own agent). Crucible never calls an LLM itself — it hands you prompts and applies your responses:
 
 ```bash
-# Dry run first — prints what it would do without running anything
-crucible research start --budget-hours 10 --tier proxy --dry-run
+# Start a session; prints the first hypothesis prompt + schema to stdout
+crucible research run start --iterations 5 --tier proxy
 
-# Real run
-crucible research start --budget-hours 10 --tier proxy
+# Feed the prompt to your LLM, then submit the parsed response
+crucible research run submit --session-id <id> --response-file resp.json
 ```
 
-The researcher analyzes existing results, generates hypotheses, designs batches, dispatches them, and reflects on the outcomes — all within your compute budget.
+The session analyzes existing results, generates hypotheses, designs batches, dispatches them, and reflects on the outcomes — with the LLM round-trips driven by your orchestrator, not baked into Crucible.
 
 ## What's next
 

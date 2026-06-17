@@ -23,7 +23,7 @@ data:
 
 training:
   - backend: torch
-    script: train_gpt.py
+    script: src/crucible/training/torch_backend.py
   - backend: mlx
     script: train_gpt_mlx.py
 

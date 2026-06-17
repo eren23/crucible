@@ -118,14 +118,6 @@ Crucible.** The only creds it consumes are infrastructure creds
 project state (no schema, no submit needed). Useful as a periodic
 sanity check.
 
-### Legacy autonomous mode (opt-in)
-
-The pre-existing `AutonomousResearcher` (`crucible research start`)
-still runs a closed-loop agent with an internal Anthropic SDK call. It
-requires `ANTHROPIC_API_KEY`. It is **NOT the default** — it exists for
-users who explicitly want it. New work should use the orchestrator
-contract above.
-
 ## Reference docs (read BEFORE debugging config / fleet issues)
 
 - **`docs/crucible-config-hierarchy.md`** — definitive map of which config layer wins for `provision_project` / `bootstrap_project` / `run_project`. Documents the full precedence table (ranks 0–12), the `nodes.json` interruptible echo bug, the correct playbook for running a project variant (pass `variant_name` to `run_project` or inline env via `overrides`), and 10 common gotchas. **If you are about to edit a project spec yaml or debug a RunPod pod that "looks stuck", read §3 and §4 of that doc first.**
@@ -366,7 +358,7 @@ Plus `tree_auto_expand(action='request_prompt'|'submit')` — Phase 1.3 de-Anthr
 `evaluator_list` — list registered benchmark evaluator plugins (new family, see "Unified Plugin System" below; builtin: lm_eval_harness).
 `hpo_create_study`, `hpo_ask_trial`, `hpo_tell_result`, `hpo_status` — Optuna-backed tell-and-ask HPO bridge with TPE / random / CMA-ES / BoTorch samplers. Optuna is optional; absent → HPOImportError. In-process cache keyed by (project_root, study_name) under a threading.Lock so concurrent ask calls don't collide.
 `external_mcp_list_servers`, `external_mcp_list_tools`, `external_mcp_call` — spawn user-supplied MCP servers (Spider Chat, Codex, etc.) via stdio. Per-call timeout (default 30s) prevents a hanging server from blocking the worker thread.
-`code_mutation_list` — Phase 3.6 interface stub. Real Phase 5+ impl tracked in `docs/code-mutation-design.md`.
+`code_mutation_list` — list registered code-mutation policies (builtins: stub, ast_local_edit, llm_diff). See `docs/code-mutation-design.md`.
 
 **Tier 19 — Showcase (Phase 4, 2 tools):**
 `note_generate_paper_draft(action='request_prompt'|'submit', track_name)` — orchestrator-contract paper draft generator. Pulls track findings + leaderboard + notes + hypotheses, returns a `{system, user, schema}` envelope; the orchestrator's LLM emits 7 required sections (abstract, introduction, method, results, discussion, limitations, related_work) + optional title/key_findings; the submit action validates section completeness + returns rendered markdown with leading H1/H2 demoted to H3 to keep the document outline intact.
@@ -450,7 +442,7 @@ All extension points use `PluginRegistry` from `core/plugin_registry.py` with 3-
 | Activations | `models/components/mlp.py` | relu_sq, gelu_sq, mish_sq, etc. |
 | Data Sources | `core/data_sources.py` | huggingface, local_files, wandb_artifact |
 | Evaluators | `core/evaluators.py` | lm_eval_harness — benchmark-score plugins parallel to data_sources (Phase 3.3) |
-| Code-Mutation Policies | `researcher/code_mutation.py` | (stub only; full Phase 5+ — see `docs/code-mutation-design.md`) |
+| Code-Mutation Policies | `researcher/code_mutation.py` | stub, ast_local_edit, llm_diff — see `docs/code-mutation-design.md` |
 | Domain Specs | `researcher/domain_spec.py` | nlp_classification, agent_scaffold (tap) — YAML contracts for harness optimization |
 
 **Env vars** select plugins at runtime: `OPTIMIZER=lion`, `LR_SCHEDULE=cosine`, `EMBED_OPTIMIZER=adam`, `MATRIX_OPTIMIZER=muon`, `SCALAR_OPTIMIZER=adamw`, `LOGGING_BACKEND=wandb,console`, `CALLBACKS=grad_clip,nan_detector`.
@@ -511,7 +503,6 @@ my-tap/
 ### Known Limitations
 
 - Only RunPod provider is fully tested (SSH provider is pass-through for manual hosts)
-- `train_gpt.py` is a compatibility wrapper — actual training is in `src/crucible/training/`
 - Hub features require explicit initialization (`crucible hub init`)
 - W&B integration requires `wandb` package and `WANDB_API_KEY`
 

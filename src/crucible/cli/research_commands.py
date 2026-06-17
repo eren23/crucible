@@ -21,20 +21,7 @@ def _handle_research(args: argparse.Namespace) -> None:
     config = load_config()
     cmd = getattr(args, "research_command", None)
 
-    if cmd == "start":
-        from crucible.researcher.loop import AutonomousResearcher
-
-        researcher = AutonomousResearcher(
-            config=config,
-            budget_hours=getattr(args, "budget_hours", 10.0),
-            max_iterations=getattr(args, "max_iterations", 20),
-            tier=getattr(args, "tier", "proxy"),
-            backend=getattr(args, "backend", "torch"),
-            dry_run=getattr(args, "dry_run", False),
-        )
-        researcher.run()
-
-    elif cmd == "run":
+    if cmd == "run":
         # Orchestrator-contract autonomous loop: start a session, print the
         # first prompt to stdout, and exit. The orchestrator (Claude Code,
         # human, etc.) drives submits via MCP `autonomous_research_loop`.
@@ -97,7 +84,7 @@ def _handle_research(args: argparse.Namespace) -> None:
 
         state_path = config.project_root / "research_state.jsonl"
         if not state_path.exists():
-            print("No research state found. Run 'crucible research start' first.")
+            print("No research state found. Run 'crucible research run start' first.")
             return
         state = ResearchState(state_path)
         print(f"Budget remaining: {state.budget_remaining:.2f} compute-hours")
@@ -143,4 +130,4 @@ def _handle_research(args: argparse.Namespace) -> None:
         )
 
     else:
-        print("Usage: crucible research {start|run|status|import}", file=sys.stderr)
+        print("Usage: crucible research {run|status|import}", file=sys.stderr)

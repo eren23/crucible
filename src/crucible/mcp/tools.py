@@ -4955,9 +4955,6 @@ TREE_AUTO_EXPAND_SYSTEM_PROMPT = (
 )
 
 
-_LEGACY_TREE_AUTO_EXPAND_ENV_VAR = "CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND"
-
-
 def _tree_auto_expand_build_user_prompt(
     tree: Any, node_id: str, n_children: int, extra_context: str
 ) -> str:
@@ -5124,107 +5121,16 @@ def _tree_auto_expand_submit(args: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _tree_auto_expand_legacy(args: dict[str, Any]) -> dict[str, Any]:
-    """Deprecated in-Crucible Anthropic call. Gated by env var; emits warning."""
-    import warnings
-
-    if os.environ.get(_LEGACY_TREE_AUTO_EXPAND_ENV_VAR) != "1":
-        raise CrucibleError(
-            "tree_auto_expand: the legacy in-Crucible Anthropic call is deprecated. "
-            "Use the orchestrator-contract pattern instead: call with "
-            "action='request_prompt' to get the prompt + schema + tree_snapshot, "
-            "feed them to your LLM, then call again with action='submit', the "
-            "response, and the tree_snapshot. To temporarily restore the legacy "
-            f"behavior (one release only), set {_LEGACY_TREE_AUTO_EXPAND_ENV_VAR}=1."
-        )
-
-    warnings.warn(
-        "tree_auto_expand legacy mode (in-Crucible Anthropic call) is deprecated "
-        "and will be removed in a future release. Migrate to "
-        "action='request_prompt' + action='submit' which carries no LLM keys.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    from crucible.researcher.search_tree import SearchTree
-
-    config = _get_config()
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"error": "ANTHROPIC_API_KEY not set. Required for legacy auto-expansion."}
-
-    name = args["name"]
-    tree_dir = _get_tree_dir(config, name)
-    tree = SearchTree.load(tree_dir)
-
-    node_id = args["node_id"]
-    node = tree.get_node(node_id)
-    if node is None:
-        return {"error": f"Node '{node_id}' not found"}
-
-    n_children = int(args.get("n_children", 3))
-    extra_context = args.get("extra_context", "")
-    user_prompt = _tree_auto_expand_build_user_prompt(tree, node_id, n_children, extra_context)
-
-    try:
-        import anthropic
-    except ImportError:
-        return {"error": "anthropic package not installed. Run: pip install anthropic"}
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=TREE_AUTO_EXPAND_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        response_text = response.content[0].text.strip()
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
-        children_specs = json.loads(response_text)
-        if not isinstance(children_specs, list):
-            return {"error": "LLM response was not a JSON array"}
-    except json.JSONDecodeError as exc:
-        return {"error": f"Failed to parse LLM response as JSON: {exc}"}
-
-    for spec in children_specs:
-        spec["generation_method"] = "llm_auto_expand_legacy"
-
-    new_ids = tree.expand_node(node_id, children_specs)
-    return {
-        "action": "legacy",
-        "status": "auto_expanded",
-        "node_id": node_id,
-        "new_node_ids": new_ids,
-        "children": [
-            {
-                "node_id": nid,
-                "name": tree.get_node(nid)["experiment_name"],
-                "hypothesis": tree.get_node(nid).get("hypothesis", ""),
-            }
-            for nid in new_ids
-        ],
-        "total_nodes": tree.meta["total_nodes"],
-    }
-
-
 def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
-    """LLM-generated child expansion for a tree node.
+    """LLM-generated child expansion for a tree node (orchestrator contract).
 
-    Two-call contract (preferred — no API keys inside Crucible):
+    Two-call, no API keys inside Crucible:
       1. ``action="request_prompt"`` returns ``{system, user, schema, tree_snapshot}``.
          The orchestrator calls its own LLM with the prompts and parses
          per schema.
       2. ``action="submit"`` accepts the orchestrator's response plus the
          ``tree_snapshot`` from step 1. Applies the children to the tree
          or raises :class:`StaleSubmitError` if the tree advanced.
-
-    Legacy single-call (deprecated): calling without ``action`` runs the
-    original in-Crucible ``anthropic.Anthropic`` flow. Disabled by
-    default — set ``CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND=1`` to
-    temporarily enable. Emits :class:`DeprecationWarning` when used.
     """
     action = args.get("action")
     try:
@@ -5233,10 +5139,14 @@ def tree_auto_expand(args: dict[str, Any]) -> dict[str, Any]:
         if action == "submit":
             return _tree_auto_expand_submit(args)
         if action is None:
-            return _tree_auto_expand_legacy(args)
+            raise CrucibleError(
+                "tree_auto_expand: 'action' is required. Use "
+                "action='request_prompt' to get the prompt + schema, then "
+                "action='submit' with your LLM's response."
+            )
         raise CrucibleError(
             f"tree_auto_expand: unknown action {action!r}. "
-            f"Valid: 'request_prompt', 'submit', or omit for deprecated legacy mode."
+            f"Valid actions: 'request_prompt', 'submit'."
         )
     except StaleSubmitError:
         raise

@@ -158,10 +158,6 @@ When Crucible is running as an MCP server (`crucible mcp serve`), an MCP-capable
 
 The schema is in each tool's MCP descriptor. The state_snapshot is plumbed through the tool args — the orchestrator must hand it back on submit if it wants the stale-submit guard active.
 
-## Legacy autonomous mode (opt-in)
-
-The pre-existing `AutonomousResearcher` (`crucible research start`) closes the loop with an internal Anthropic SDK call. It requires `ANTHROPIC_API_KEY`. It is **NOT the default**; it exists for users who explicitly want an in-process agent. New work should use the orchestrator-contract path.
-
 The legacy mode lives at `src/crucible/researcher/loop.py` and `src/crucible/researcher/llm_client.py`. It's preserved because the original Parameter Golf competition workflow used it; it doesn't share code with the orchestrator-contract path.
 
 ## What Crucible never does

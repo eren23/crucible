@@ -24,10 +24,8 @@ Stages:
 - ``"briefing"`` — human-readable markdown summary of current project
   state (no schema, no submit counterpart — a read-only status probe).
 
-The existing autonomous mode (``AutonomousResearcher`` + legacy
-``generate_hypotheses`` / ``reflect_and_update``) is untouched; both
-paths share the same prompt-builder / parser / applier helpers in
-:mod:`crucible.researcher.hypothesis` and
+The hypothesis and reflection stages share the same prompt-builder /
+parser / applier helpers in :mod:`crucible.researcher.hypothesis` and
 :mod:`crucible.researcher.reflection`.
 """
 from __future__ import annotations

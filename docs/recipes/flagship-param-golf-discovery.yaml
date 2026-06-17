@@ -141,7 +141,7 @@ recipe:
                   mutation_scope: [src/crucible/models/]
                   llm_response: $orchestrator.llm_diff_response
                   scorer:
-                    cmd: [python3, train_gpt.py, --preset, smoke]
+                    cmd: [python3, -m, crucible.training.torch_backend, --preset, smoke]
                     score_pattern: 'val_bpb:([0-9.]+)'
 
           - id: maybe_synthesis

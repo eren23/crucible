@@ -1,8 +1,7 @@
 """Standalone analysis builder for experiment results.
 
-Extracted from AutonomousResearcher.analyze() so that MCP tools and
-other consumers can build the same rich analysis context without
-instantiating the full researcher loop.
+Builds the rich analysis context (leaderboard, sensitivity, beliefs) that
+MCP tools and other consumers surface, independent of any research loop.
 """
 from __future__ import annotations
 

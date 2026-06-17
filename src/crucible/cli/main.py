@@ -108,13 +108,6 @@ def _main() -> None:
     research_parser = subparsers.add_parser("research", help="Autonomous research loop")
     research_sub = research_parser.add_subparsers(dest="research_command")
 
-    start = research_sub.add_parser("start", help="Launch autonomous researcher")
-    start.add_argument("--budget-hours", type=float, default=10.0, help="Total compute-hours budget")
-    start.add_argument("--max-iterations", type=int, default=20, help="Max research iterations")
-    start.add_argument("--tier", type=str, default="proxy", help="Experiment tier")
-    start.add_argument("--backend", type=str, default="torch", help="Training backend")
-    start.add_argument("--dry-run", action="store_true", help="Print without executing")
-
     research_sub.add_parser("status", help="Show research state")
 
     # ── research run (orchestrator-contract autonomous loop) ──

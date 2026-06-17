@@ -259,7 +259,6 @@ The check is per-stage (a hypothesis prompt repeating five times trips; alternat
 
 - **One-shot tool calls.** If you only want one hypothesis batch and one reflection pass, call `research_request_prompt` + `research_submit` directly. The driver overhead is for *loops*.
 - **Pure-fleet workflows.** If hypotheses come from a notebook and you just want to run them, skip the driver and use `design_batch_from_hypotheses` + `design_enqueue_batch` directly.
-- **Legacy autonomous mode.** `crucible research start` still works for the in-process Anthropic-keyed agent. Use it if you don't want to write an orchestrator and you're OK with `ANTHROPIC_API_KEY` inside Crucible.
 
 ## See also
 

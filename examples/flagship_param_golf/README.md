@@ -184,7 +184,7 @@ crucible mcp call code_mutation_apply --args '{
   "target_file": "src/crucible/models/architectures/baseline.py",
   "mutation_scope": ["src/crucible/models/"],
   "llm_response": <json>,
-  "scorer": {"cmd": ["python3", "train_gpt.py", "--preset", "smoke"], "score_pattern": "val_bpb:([0-9.]+)"}
+  "scorer": {"cmd": ["python3", "-m", "crucible.training.torch_backend", "--preset", "smoke"], "score_pattern": "val_bpb:([0-9.]+)"}
 }'
 ```
 

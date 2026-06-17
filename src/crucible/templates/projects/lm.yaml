@@ -33,7 +33,7 @@ install:
   - "huggingface_hub"
 
 train: >-
-  python train_gpt.py
+  python -m crucible.training.torch_backend
   --preset ${PRESET:screen}
   --model-family ${MODEL_FAMILY:baseline}
 

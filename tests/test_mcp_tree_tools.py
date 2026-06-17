@@ -799,33 +799,18 @@ class TestTreeAutoExpandSubmit:
         assert "status" not in out
 
 
-class TestTreeAutoExpandLegacy:
-    def test_legacy_raises_without_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Default: legacy single-call (no action) is disabled."""
+class TestTreeAutoExpandDispatch:
+    def test_missing_action_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """No action is an error pointing at the request_prompt/submit contract."""
         from crucible.mcp.tools import tree_auto_expand
 
         _patch_config(monkeypatch, tmp_path)
         name, root_id = _make_expandable_tree(tmp_path)
-        monkeypatch.delenv("CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND", raising=False)
 
         out = tree_auto_expand({"name": name, "node_id": root_id})
         assert "error" in out
-        assert "deprecated" in out["error"].lower()
+        assert "action" in out["error"].lower()
         assert "request_prompt" in out["error"]
-
-    def test_legacy_emits_deprecation_when_enabled(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """With env var set, legacy runs but emits DeprecationWarning."""
-        from crucible.mcp.tools import tree_auto_expand
-
-        _patch_config(monkeypatch, tmp_path)
-        name, root_id = _make_expandable_tree(tmp_path)
-        monkeypatch.setenv("CRUCIBLE_ALLOW_LEGACY_TREE_AUTO_EXPAND", "1")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # ensure clean fail path
-
-        with pytest.warns(DeprecationWarning, match="legacy mode"):
-            out = tree_auto_expand({"name": name, "node_id": root_id})
-        # No ANTHROPIC_API_KEY → legacy returns error after warning
-        assert "ANTHROPIC_API_KEY" in out.get("error", "")
 
     def test_unknown_action_returns_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from crucible.mcp.tools import tree_auto_expand
