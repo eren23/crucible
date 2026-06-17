@@ -70,7 +70,14 @@ class TestSyncRepo:
     @patch("crucible.fleet.sync._run")
     def test_includes_excludes(self, mock_run, tmp_path: Path):
         node = _make_node()
-        sync_repo(node, project_root=tmp_path, sync_excludes=[".git", ".venv", "__pycache__"])
+        # tmp_path is not a git repo; this test asserts rsync command construction,
+        # not the clean-tree guard, so disable enforcement.
+        sync_repo(
+            node,
+            project_root=tmp_path,
+            sync_excludes=[".git", ".venv", "__pycache__"],
+            enforce_clean=False,
+        )
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         # Verify each exclude is present
@@ -85,7 +92,14 @@ class TestSyncRepo:
     @patch("crucible.fleet.sync._run")
     def test_destination_includes_workspace(self, mock_run, tmp_path: Path):
         node = _make_node(workspace_path="/custom/workspace")
-        sync_repo(node, project_root=tmp_path, sync_excludes=[])
+        # tmp_path is not a git repo; asserting the rsync destination, not the
+        # clean-tree guard, so disable enforcement.
+        sync_repo(
+            node,
+            project_root=tmp_path,
+            sync_excludes=[],
+            enforce_clean=False,
+        )
         cmd = mock_run.call_args[0][0]
         assert any("/custom/workspace/" in str(arg) for arg in cmd)
 

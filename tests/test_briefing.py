@@ -109,8 +109,13 @@ class TestBriefingNoExperiments:
         assert briefing["project"]["primary_metric"] == "val_loss"
         assert briefing["project"]["direction"] == "minimize"
 
-    def test_empty_lists_when_no_data(self, tmp_path: Path) -> None:
+    def test_empty_lists_when_no_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         config = _setup_project(tmp_path)
+        # Isolate the hub from the developer's real ~/.crucible-hub so
+        # hub_findings is genuinely empty (no initialized hub at this path).
+        monkeypatch.setenv("CRUCIBLE_HUB_DIR", str(tmp_path / "empty-hub"))
         briefing = build_briefing(config)
 
         assert briefing["recent_experiments"] == []

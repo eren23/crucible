@@ -67,7 +67,10 @@ class TestLaunchProject:
         mock_exec.return_value = MagicMock(returncode=0, stdout="111\n", stderr="")
         launch_project(_make_node(), _make_spec(env_set={}), "run_envless")
         cmd = mock_exec.call_args[0][1]
-        assert "if [ -f /workspace/test/.env ]; then source /workspace/test/.env; fi" in cmd
+        assert (
+            "if [ -f /workspace/test/.env ]; then set -a; "
+            "source /workspace/test/.env; set +a; fi"
+        ) in cmd
         assert "python -c" in cmd
         assert "start_new_session=True" in cmd
 

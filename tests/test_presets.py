@@ -20,7 +20,7 @@ class TestGetPreset:
     def test_builtin_smoke(self):
         cfg = ProjectConfig()  # empty presets
         preset = get_preset("smoke", project_config=cfg)
-        assert preset["MAX_WALLCLOCK_SECONDS"] == "60"
+        assert preset["MAX_WALLCLOCK_SECONDS"] == "180"
         assert preset["ITERATIONS"] == "400"
 
     def test_builtin_proxy(self):

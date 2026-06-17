@@ -144,8 +144,10 @@ class TestPodEnvInjection:
 
         def fake_graphql(query, variables=None, timeout=None):
             captured["input"] = variables["input"] if variables else {}
+            # interruptible=True → source reads the response under the renamed
+            # podRentInterruptable mutation field (PodRentInterruptableInput).
             return {
-                "podFindAndDeployInterruptable": {
+                "podRentInterruptable": {
                     "id": "pod-1",
                     "name": variables["input"]["name"],
                     "desiredStatus": "RUNNING",
@@ -181,8 +183,10 @@ class TestPodEnvInjection:
 
         def fake_graphql(query, variables=None, timeout=None):
             captured["input"] = variables["input"] if variables else {}
+            # interruptible=True → source reads the response under the renamed
+            # podRentInterruptable mutation field (PodRentInterruptableInput).
             return {
-                "podFindAndDeployInterruptable": {
+                "podRentInterruptable": {
                     "id": "pod-1",
                     "name": variables["input"]["name"],
                     "desiredStatus": "RUNNING",

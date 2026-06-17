@@ -149,9 +149,13 @@ class TestBouncingBallAdapter:
         assert BouncingBallAdapter.modality() == "world_model"
 
     def test_registration(self):
+        from crucible.core.errors import PluginError
         from examples.world_model.data_adapter import register
 
-        register()
+        try:
+            register()
+        except PluginError:
+            pass  # Already registered via examples.world_model package import
         from crucible.training.data_adapters import DATA_ADAPTER_REGISTRY
 
         assert "bouncing_balls" in DATA_ADAPTER_REGISTRY

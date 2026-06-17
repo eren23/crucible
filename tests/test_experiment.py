@@ -82,6 +82,13 @@ class TestRunExperiment:
         mock_proc.poll.return_value = 0
         mock_proc.returncode = 0
         mock_proc.pid = 12345
+        # Patching experiment.subprocess.Popen patches the global subprocess.Popen,
+        # so subprocess.run() in safe_git_sha (called by write_manifest before launch)
+        # also routes through this mock. subprocess.run uses `with Popen(...) as p`,
+        # so the context-managed proc must be mock_proc and communicate() must return
+        # a real 2-tuple; "" stdout → safe_git_sha returns None.
+        mock_proc.communicate.return_value = ("", "")
+        mock_proc.__enter__.return_value = mock_proc
         mock_popen.return_value = mock_proc
 
         # Mock wandb

@@ -152,7 +152,7 @@ class TestProvisionProject:
             count=1,
             name_prefix="lewm",
             start_index=5,
-            gpu_type_id="NVIDIA GeForce RTX 4090",
+            gpu_type_ids="NVIDIA GeForce RTX 4090",
             container_disk_gb=40,
             volume_gb=80,
             interruptible=False,

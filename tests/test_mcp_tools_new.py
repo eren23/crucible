@@ -387,7 +387,9 @@ class TestFleetStatusMetrics:
 
         monkeypatch.setattr("crucible.mcp.tools._get_config", lambda: FakeConfig())
 
-        result = get_fleet_status({})
+        # include_orphans defaults True, which builds a FleetManager and hits the
+        # provider; this test only covers node/metrics rendering, so skip the probe.
+        result = get_fleet_status({"include_orphans": False})
         assert "nodes" in result
         assert "metrics" not in result
 
@@ -413,7 +415,7 @@ class TestFleetStatusMetrics:
             lambda node: {"node": node["name"], "gpu_utilization_pct": 85},
         )
 
-        result = get_fleet_status({"include_metrics": True})
+        result = get_fleet_status({"include_metrics": True, "include_orphans": False})
         assert "metrics" in result
         assert len(result["metrics"]) == 1
         assert result["metrics"][0]["gpu_utilization_pct"] == 85
