@@ -132,10 +132,6 @@ def generate_hypotheses(
     return hypotheses
 
 
-# Backwards-compat shim — a few tests / external callers may import the old name.
-_parse_hypotheses = parse_hypotheses
-
-
 # ---------------------------------------------------------------------------
 # Tree-aware hypothesis generation
 # ---------------------------------------------------------------------------

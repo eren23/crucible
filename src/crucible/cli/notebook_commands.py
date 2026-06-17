@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 
 def handle_notebook(args: argparse.Namespace) -> None:
@@ -114,7 +113,3 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
     notebook_sub.add_parser("runtimes", help="List available runtime profiles")
-
-
-def _default_out_path(project: str) -> Path:
-    return Path(f"{project}.ipynb")

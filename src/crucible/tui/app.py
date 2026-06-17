@@ -68,11 +68,6 @@ SEPARATOR = "[dim]" + "\u2500" * 44 + "[/dim]"
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_store() -> VersionStore:
-    config = load_config()
-    return VersionStore(config.project_root / config.store_dir)
-
-
 def _load_designs(store: VersionStore) -> list[dict[str, Any]]:
     designs = []
     for meta in store.list_resources("experiment_design"):

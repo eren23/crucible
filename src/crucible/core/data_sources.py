@@ -62,10 +62,6 @@ class DataValidationResult:
     warnings: list[str] = field(default_factory=list)
 
 
-#: Backward-compatible alias -- external code may still import the old name.
-ValidationResult = DataValidationResult
-
-
 @dataclass
 class SearchResult:
     """Result of searching for available data sources."""

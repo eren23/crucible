@@ -132,11 +132,6 @@ def _extract_tool_signatures(
     return triples
 
 
-def _extract_tool_calls(history: list[MessageDict]) -> list[tuple[str, str]]:
-    """Backward-compat shim: return (name, args_hash) pairs."""
-    return [(name, ah) for name, ah, _ in _extract_tool_signatures(history)]
-
-
 def detect(
     history: list[MessageDict],
     window: int = 10,

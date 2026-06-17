@@ -95,10 +95,6 @@ class ManifestValidationResult:
         return [i for i in self.issues if i.severity == "warning"]
 
 
-#: Backward-compatible alias -- external code may still import the old name.
-ValidationResult = ManifestValidationResult
-
-
 def validate_manifest_dict(data: dict[str, Any]) -> list[ValidationIssue]:
     """Validate an already-loaded plugin.yaml dict.
 

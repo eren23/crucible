@@ -40,10 +40,6 @@ class CandidateValidationResult:
         }
 
 
-#: Backward-compatible alias -- external code may still import the old name.
-ValidationResult = CandidateValidationResult
-
-
 def _hash_code(code: str) -> str:
     """SHA-256 of the candidate source, normalized on line endings."""
     normalized = code.replace("\r\n", "\n").encode("utf-8")

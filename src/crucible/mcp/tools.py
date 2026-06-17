@@ -5580,20 +5580,6 @@ def _make_node_run_id(launch_id: str, node_name: str, *, total_nodes: int) -> st
     return f"{launch_id}_{_sanitize_node_token(node_name)}"
 
 
-def _status_event_name(status: str, *, collected: bool = False) -> str:
-    if collected:
-        return "result_collected"
-    if status in {"launching", "launched"}:
-        return f"status_{status}"
-    if status == "running":
-        return "probe_running"
-    if status == "interrupted":
-        return "node_unreachable"
-    if status in _PROJECT_TERMINAL_STATUSES:
-        return "probe_terminal"
-    return "status_observed"
-
-
 def _persist_project_observation(
     run_id: str,
     updates: dict[str, Any],
@@ -6688,17 +6674,6 @@ def _hf_resolve_repo(config: ProjectConfig, kind: str, override: str = "") -> st
         "artifacts": cfg.artifacts_repo,
     }
     return _format_repo_template(table.get(kind, ""), config)
-
-
-def _hf_remote(config: ProjectConfig, repo_type: str = "dataset"):
-    """Build the configured ``hf_dataset`` hub_remote with project defaults."""
-    from crucible.core.hub_remotes import build_hub_remote
-
-    return build_hub_remote(
-        "hf_dataset",
-        repo_type=repo_type,
-        private=config.hf_collab.private,
-    )
 
 
 def hf_push_artifact(args: dict[str, Any]) -> dict[str, Any]:
