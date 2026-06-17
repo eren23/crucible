@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from crucible.core.config import JudgeConfig, JudgePanel, ProjectConfig
-from crucible.core.errors import ConfigError
 from crucible.researcher.search_tree import SearchTree
 
 

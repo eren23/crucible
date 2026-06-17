@@ -123,7 +123,7 @@ class HPOStudy:
         storage_dir: Path,
         sampler: str = "tpe",
         seed: int | None = None,
-    ) -> "HPOStudy":
+    ) -> HPOStudy:
         """Reconstruct an HPOStudy from its persisted JSON.
 
         Replays completed trials into the underlying Optuna study via

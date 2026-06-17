@@ -1,13 +1,8 @@
 """Tests for crucible.runner.design — design-to-config bridge."""
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from crucible.core.store import VersionStore
 from crucible.runner.design import design_to_experiment_config, link_result_to_design
-
 
 SAMPLE_DESIGN = {
     "name": "looped_wider",

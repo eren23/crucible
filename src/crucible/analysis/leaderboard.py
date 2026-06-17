@@ -4,11 +4,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from crucible.analysis.results import completed_results
 from crucible.core.config import ProjectConfig
 from crucible.core.log import log_info, log_warn
 from crucible.core.types import ExperimentResult
-
-from crucible.analysis.results import completed_results
 
 # ---------------------------------------------------------------------------
 # Internal helpers

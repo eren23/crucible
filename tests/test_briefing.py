@@ -11,14 +11,13 @@ from crucible import __version__ as CRUCIBLE_VERSION
 from crucible.core.config import ProjectConfig
 from crucible.researcher.briefing import build_briefing
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-SAMPLE_YAML = """\
+SAMPLE_YAML = f"""\
 name: briefing-test
-version: "{version}"
+version: "{CRUCIBLE_VERSION}"
 
 metrics:
   primary: val_loss
@@ -33,7 +32,7 @@ fleet_results_file: experiments_fleet.jsonl
 logs_dir: logs
 store_dir: .crucible
 research_state_file: research_state.jsonl
-""".format(version=CRUCIBLE_VERSION)
+"""
 
 
 def _make_result(
@@ -290,7 +289,7 @@ class TestBriefingWithNotes:
 class TestBriefingWithHub:
     """build_briefing with hub findings (uses temp hub dir)."""
 
-    def _populate_hub(self, tmp_path: Path) -> "tuple[Any, str]":
+    def _populate_hub(self, tmp_path: Path) -> tuple[Any, str]:
         from crucible.core.hub import HubStore
 
         hub_dir = tmp_path / "test-hub"

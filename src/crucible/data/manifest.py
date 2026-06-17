@@ -14,7 +14,6 @@ from typing import Any
 from crucible.core.config import DataConfig
 from crucible.core.log import log_info, log_step
 
-
 # ---------------------------------------------------------------------------
 # Manifest I/O
 # ---------------------------------------------------------------------------

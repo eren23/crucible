@@ -1,21 +1,17 @@
 """Tests for the evaluators plugin family — Phase 3.3."""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import pytest
 
 from crucible.core.evaluators import (
     EvalResult,
-    EvalValidationResult,
     EvaluatorPlugin,
+    EvalValidationResult,
     discover_evaluator_plugins,
     instantiate_evaluator,
     list_evaluators,
     register_evaluator,
 )
-
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -227,9 +223,9 @@ class TestLMEvalHarnessEvaluate:
 
 
 def test_evaluator_list_via_mcp(monkeypatch):
-    from crucible.mcp.tools import TOOL_DISPATCH
     # Bypass _get_config so we don't need a real project.
     from crucible.core.errors import CrucibleError
+    from crucible.mcp.tools import TOOL_DISPATCH
     def boom():
         raise CrucibleError("no project")
     monkeypatch.setattr("crucible.mcp.tools._get_config", boom)
@@ -267,6 +263,7 @@ class TestDiscovery:
             encoding="utf-8",
         )
         import sys
+
         from crucible.core.evaluators import _EVALUATOR_REGISTRY
         try:
             loaded = discover_evaluator_plugins(project_root=tmp_path)

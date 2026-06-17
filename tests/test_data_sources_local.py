@@ -1,8 +1,6 @@
 """Tests for LocalFilesSource."""
-import pytest
-from pathlib import Path
-from crucible.data_sources.local_files import LocalFilesSource
 from crucible.core.data_sources import DataStatus
+from crucible.data_sources.local_files import LocalFilesSource
 
 
 def test_local_source_initialization(tmp_path):

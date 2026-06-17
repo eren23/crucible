@@ -1,5 +1,4 @@
 """Tests for ProjectSpec loading and listing."""
-from pathlib import Path
 
 import pytest
 import yaml
@@ -7,9 +6,8 @@ import yaml
 from crucible.core.config import (
     PodOverrides,
     ProjectMetrics,
-    ProjectSpec,
-    load_project_spec,
     list_project_specs,
+    load_project_spec,
 )
 
 

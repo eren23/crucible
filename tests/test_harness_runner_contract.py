@@ -15,7 +15,6 @@ import pytest
 
 from crucible.runner.output_parser import OutputParser
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNNER_PATH = REPO_ROOT / ".crucible" / "taps" / "meta-harness" / "launchers" / "harness_runner" / "harness_runner.py"
 

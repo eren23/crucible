@@ -81,7 +81,7 @@ def _cmd_sync(args: argparse.Namespace) -> None:
     """Sync hub state."""
     hub = _get_hub(args)
     summary = hub.sync()
-    print(f"Hub sync complete:")
+    print("Hub sync complete:")
     print(f"  Projects: {summary['projects']}")
     print(f"  Tracks:   {summary['tracks']}")
     active = summary.get("active_track")

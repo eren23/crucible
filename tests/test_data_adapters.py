@@ -6,13 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from crucible.training.data_adapters import (
+    DATA_ADAPTER_REGISTRY,
     DataAdapter,
     TokenDataAdapter,
-    DATA_ADAPTER_REGISTRY,
-    register_data_adapter,
     build_data_adapter,
+    register_data_adapter,
 )
-
 
 # ---------------------------------------------------------------------------
 # DataAdapter is abstract-like

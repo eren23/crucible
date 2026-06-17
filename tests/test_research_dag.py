@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from crucible.core.errors import ResearchDAGError
-from crucible.research_dag.bridge import ResearchDAGBridge, _CANVAS_TTL
+from crucible.research_dag.bridge import _CANVAS_TTL, ResearchDAGBridge
 from crucible.research_dag.dag_state import DAGState
 from crucible.research_dag.node_format import (
     crucible_node_type,
@@ -16,7 +16,6 @@ from crucible.research_dag.node_format import (
     format_finding_content,
     format_review_content,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

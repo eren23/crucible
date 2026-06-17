@@ -26,13 +26,11 @@ is bounded.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-
 
 PROJECT_YAML = """\
 name: phase1-phase2-e2e

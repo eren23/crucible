@@ -26,13 +26,13 @@ unit-tested against a tmp dir without booting the CLI.
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from crucible.core.errors import TapError
-from crucible.core.io import atomic_write_yaml
 
 
 def _yaml_str_double_quoted_representer(dumper, data):
@@ -327,7 +327,7 @@ def scaffold_tap(
     Returns a dict describing what was written. Raises :class:`TapError`
     if *target* is already a non-empty directory (we don't clobber).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     if not description:
         description = f"{name} — Crucible community tap"
@@ -345,7 +345,7 @@ def scaffold_tap(
         target.mkdir(parents=True)
 
     license_body = _LICENSE_BODIES.get(license_id, _LICENSE_MIT)
-    year = datetime.now(timezone.utc).year
+    year = datetime.now(UTC).year
     author_display = author or "the tap authors"
 
     files_written: list[str] = []
@@ -444,7 +444,7 @@ def scaffold_tap(
 def _next_steps(target: Path, name: str, *, init_git: bool) -> list[str]:
     steps = [
         f"cd {target}",
-        f"crucible tap lint . --warnings-as-errors  # confirms the scaffold is clean",
+        "crucible tap lint . --warnings-as-errors  # confirms the scaffold is clean",
     ]
     if init_git:
         steps += [

@@ -21,7 +21,6 @@ from crucible.core.errors import PlanError
 from crucible.core.io import atomic_write_json
 from crucible.core.log import utc_now_iso
 
-
 PlanStatus = Literal["pending", "in_progress", "completed"]
 _VALID_STATUSES: tuple[PlanStatus, ...] = ("pending", "in_progress", "completed")
 
@@ -38,7 +37,7 @@ class PlanItem:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "PlanItem":
+    def from_dict(cls, raw: dict[str, Any]) -> PlanItem:
         status = raw.get("status", "pending")
         if status not in _VALID_STATUSES:
             raise PlanError(f"Invalid plan item status: {status!r}")

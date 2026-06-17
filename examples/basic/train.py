@@ -4,10 +4,10 @@
 Reads config from env vars, prints stdout patterns that Crucible's OutputParser recognizes.
 No actual ML work — just simulates the output format for testing.
 """
-import os
-import time
-import random
 import math
+import os
+import random
+import time
 
 # Read config from environment
 iterations = int(os.environ.get("ITERATIONS", "100"))

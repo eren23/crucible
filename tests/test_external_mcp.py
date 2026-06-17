@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
 
 from crucible.researcher import external_mcp as ext
-
 
 # ---------------------------------------------------------------------------
 # Config reading

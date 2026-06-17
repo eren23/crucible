@@ -55,7 +55,7 @@ class HarnessOptimizer:
         *,
         tree_dir: Path | None = None,
         n_candidates: int = 3,
-        llm: "LLMClient | None" = None,
+        llm: LLMClient | None = None,
         dry_run: bool = False,
     ) -> None:
         self.config = config
@@ -102,7 +102,7 @@ class HarnessOptimizer:
     # ------------------------------------------------------------------
 
     @property
-    def llm(self) -> "LLMClient":
+    def llm(self) -> LLMClient:
         if self._llm is None:
             from crucible.researcher.llm_client import AnthropicClient
 

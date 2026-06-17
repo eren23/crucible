@@ -1,7 +1,6 @@
 """Tests for eval_watcher._backfill_local_checkpoints."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -113,8 +112,9 @@ def test_seen_runs_skips_failed_rows_too(isolated_project: Path):
     """A row with ok=False still marks the (sha, script) as seen — failed
     runs must not be retried automatically (the user should clear the row to
     rerun)."""
-    from crucible.runner.eval_watcher import _seen_runs
     import json as _json
+
+    from crucible.runner.eval_watcher import _seen_runs
 
     log = isolated_project / ".crucible" / "eval_watch.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -133,8 +133,9 @@ def test_seen_runs_caches_after_first_load(isolated_project: Path, monkeypatch: 
     not re-open the file. Critical for daemons that poll every 5 minutes
     against a 100MB+ JSONL.
     """
-    from crucible.runner import eval_watcher
     import json as _json
+
+    from crucible.runner import eval_watcher
 
     log = isolated_project / ".crucible" / "eval_watch.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -169,8 +170,9 @@ def test_seen_runs_does_not_age_out_old_entries(isolated_project: Path):
     old (sha, script) pairs once the log grew past 10k rows. Now _seen_runs
     reads the full log and old entries stay tracked.
     """
-    from crucible.runner.eval_watcher import _seen_runs
     import json as _json
+
+    from crucible.runner.eval_watcher import _seen_runs
 
     log = isolated_project / ".crucible" / "eval_watch.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)

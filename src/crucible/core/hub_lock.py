@@ -21,9 +21,9 @@ from __future__ import annotations
 import errno
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_LOCK_FILENAME = ".lock"

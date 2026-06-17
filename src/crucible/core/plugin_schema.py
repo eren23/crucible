@@ -310,7 +310,7 @@ def validate_tap_manifest_dict(data: dict[str, Any]) -> list[ValidationIssue]:
         val = data.get(field_name)
         if val is None:
             issues.append(ValidationIssue(
-                "warning", field_name, f"missing — recommended"
+                "warning", field_name, "missing — recommended"
             ))
         elif not isinstance(val, str):
             issues.append(ValidationIssue(

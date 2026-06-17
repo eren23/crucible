@@ -40,11 +40,10 @@ from crucible.core.errors import ResearcherError, StaleSubmitError
 from crucible.researcher.analysis import build_analysis
 from crucible.researcher.briefing import build_briefing
 from crucible.researcher.hypothesis import (
-    HYPOTHESIS_SYSTEM_PROMPT,
+    _validate_hypotheses,
     apply_hypotheses,
     build_hypothesis_prompt,
     parse_hypotheses,
-    _validate_hypotheses,
 )
 from crucible.researcher.reflection import (
     apply_reflection,
@@ -52,7 +51,6 @@ from crucible.researcher.reflection import (
     parse_reflection,
 )
 from crucible.researcher.state import ResearchState
-
 
 Stage = Literal["hypothesis", "reflection", "briefing"]
 _VALID_STAGES: tuple[Stage, ...] = ("hypothesis", "reflection", "briefing")

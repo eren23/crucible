@@ -1,6 +1,5 @@
 """Tests for non-LM data adapters: synthetic images, synthetic video, image folder."""
 import pytest
-import torch
 
 from crucible.training.data_adapters import (
     DATA_ADAPTER_REGISTRY,

@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +17,7 @@ _mod = importlib.util.module_from_spec(_spec)
 # Register in sys.modules BEFORE exec_module so that dataclasses with
 # `from __future__ import annotations` can resolve type hints.
 import sys as _sys
+
 _sys.modules["elastic_lewm"] = _mod
 _spec.loader.exec_module(_mod)
 

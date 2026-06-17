@@ -1,8 +1,6 @@
 """Tests for bootstrap_project from crucible.fleet.bootstrap."""
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, call
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 def _make_spec(**overrides):

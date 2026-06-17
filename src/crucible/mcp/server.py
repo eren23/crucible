@@ -27,6 +27,7 @@ from crucible.mcp.tools import TOOL_DISPATCH
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
     from crucible.mcp.tracer import SessionTracer
 
 # Load .env files so secrets (RUNPOD_API_KEY, WANDB_API_KEY) are available to tools
@@ -251,7 +252,7 @@ async def _run_with_keepalive(
                 await asyncio.wait_for(done.wait(), timeout=_KEEPALIVE_INTERVAL)
                 # done was set — exit cleanly
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             elapsed += _KEEPALIVE_INTERVAL
             try:

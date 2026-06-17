@@ -14,7 +14,6 @@ exercise the project-namespace fix:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -461,7 +460,6 @@ class TestProviderFactoryPlumbing:
     ):
         """``FleetManager`` constructed from ``ProjectConfig.name`` should
         produce a provider tagged with that name."""
-        from crucible.fleet import manager as mgr_module
         from crucible.fleet.manager import FleetManager
 
         # conftest's sample yaml uses provider.type=ssh, swap to runpod via

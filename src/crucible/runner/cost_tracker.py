@@ -26,7 +26,7 @@ when surfaced in session state.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +128,7 @@ def compute_session_spend(
             "active_pods": 0,
             "error": f"could not parse session_started_at={session_started_at!r}",
         }
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     hours = max(0.0, (current - started).total_seconds() / 3600.0)
 
     nodes = _load_nodes(config)

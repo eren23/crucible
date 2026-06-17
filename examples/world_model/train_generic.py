@@ -23,6 +23,7 @@ def main() -> None:
 
     from data_adapter import register as register_adapter
     from model import register as register_model
+
     from crucible.training.generic_backend import run_generic_training
 
     register_model()

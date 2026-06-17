@@ -27,7 +27,6 @@ Config env vars (all optional — reasonable defaults for a smoke test):
 """
 from __future__ import annotations
 
-import math
 import os
 import sys
 import time

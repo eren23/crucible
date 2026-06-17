@@ -5,9 +5,9 @@ at key points (start, mid-warmup, end-warmup, mid-decay, end).
 """
 from __future__ import annotations
 
-import math
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 torch = pytest.importorskip("torch")
 

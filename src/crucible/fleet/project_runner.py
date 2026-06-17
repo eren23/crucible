@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import shlex
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crucible.core.errors import RunnerError
-from crucible.core.io import append_jsonl, _json_ready
+from crucible.core.io import _json_ready, append_jsonl
 from crucible.core.log import log_info, log_step, log_success, log_warn
 from crucible.fleet.inventory import BAD_API_STATES
-from crucible.fleet.sync import remote_exec, rsync_base, _run
+from crucible.fleet.sync import _run, remote_exec, rsync_base
 
 if TYPE_CHECKING:
     from crucible.core.config import ProjectSpec
@@ -134,7 +134,7 @@ def launch_project(
         "node": name,
         "project": spec.name,
         "wandb_run_name": effective_overrides.get("WANDB_RUN_NAME", run_id),
-        "start_time": datetime.now(timezone.utc).isoformat(),
+        "start_time": datetime.now(UTC).isoformat(),
     }
 
 
@@ -326,17 +326,17 @@ def _wandb_is_live(wandb_info: dict[str, Any], stale_after_s: int = 180) -> bool
         # No heartbeat info but state=running — trust W&B (better than
         # mis-classifying as failed). The stale check is best-effort.
         return True
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
         if isinstance(heartbeat_at, (int, float)):
-            ts = datetime.fromtimestamp(float(heartbeat_at), tz=timezone.utc)
+            ts = datetime.fromtimestamp(float(heartbeat_at), tz=UTC)
         else:
             text = str(heartbeat_at).rstrip("Z")
-            ts = datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
+            ts = datetime.fromisoformat(text).replace(tzinfo=UTC)
     except (ValueError, TypeError, OverflowError):
         log_warn(f"W&B heartbeat unparseable ({heartbeat_at!r}) — treating as not-live.")
         return False
-    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    age = (datetime.now(UTC) - ts).total_seconds()
     return age <= stale_after_s
 
 
@@ -512,7 +512,7 @@ def collect_project_result(
         "id": run_id,
         "project": spec.name,
         "name": f"{spec.name}-{run_id}",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "node": name,
         "status": status,
         "failure_class": failure_class,
@@ -523,7 +523,7 @@ def collect_project_result(
         "execution_provider": node.get("provider", "runpod"),
         "remote_node": name,
         "remote_node_state": _node_state_label(node),
-        "last_observed_at": datetime.now(timezone.utc).isoformat(),
+        "last_observed_at": datetime.now(UTC).isoformat(),
         "contract_status": contract_status,
         "wandb": {
             "required": wandb_required,

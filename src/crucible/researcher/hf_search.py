@@ -13,11 +13,11 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Literal
+from collections.abc import Callable
+from typing import Any, Literal
 
 from crucible.core.log import log_warn
 from crucible.researcher.literature import multi_angle_dedup
-
 
 _HF_FAILURES = (
     urllib.error.URLError,

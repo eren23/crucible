@@ -60,8 +60,8 @@ class TestHarnessOptimizerDirectGate:
     def test_optimizer_run_iteration_raises_on_mis_separated_panel(
         self, tmp_path: Path,
     ):
-        import pytest
         import yaml
+
         from crucible.core.errors import ConfigError
         from crucible.researcher.harness_optimizer import HarnessOptimizer
 
@@ -96,6 +96,7 @@ class TestHarnessOptimizerDirectGate:
         self, tmp_path: Path,
     ):
         import yaml
+
         from crucible.researcher.harness_optimizer import HarnessOptimizer
 
         config = _make_proj(tmp_path, JudgePanel())  # empty

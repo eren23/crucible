@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from crucible.core.log import log_warn
 from crucible.core.types import ArgsNamespace, JsonDict, PluginFactory

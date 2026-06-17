@@ -20,7 +20,6 @@ from __future__ import annotations
 import math
 import random
 
-
 ACTIVATION = "relu"
 LEARNING_RATE = 0.5
 HIDDEN_DIM = 4

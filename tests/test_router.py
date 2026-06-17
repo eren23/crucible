@@ -7,7 +7,6 @@ helpers, so we don't need to spin up real fleet/queue/state files.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 

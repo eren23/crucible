@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-
 # Textual's test mode requires asyncio. pytest-asyncio is not in the
 # project's hard deps, so wrap each coroutine in asyncio.run() via a
 # small adapter — the tests stay synchronous from pytest's POV.
@@ -294,7 +293,6 @@ def test_r_key_refreshes_active_pane(project_dir):
     pressing it while a cockpit tab is active must call the right
     pane's ``refresh_data()``."""
     async def _body():
-        from textual.widgets import DataTable
 
         from crucible.tui.app import CrucibleApp
         from crucible.tui.panes import FleetPane

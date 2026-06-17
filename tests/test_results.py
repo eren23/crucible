@@ -5,15 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from crucible.core.config import ProjectConfig
 from crucible.analysis.results import (
+    completed_results,
     load_results,
     merged_results,
-    completed_results,
 )
-
+from crucible.core.config import ProjectConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

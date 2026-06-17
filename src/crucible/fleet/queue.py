@@ -11,7 +11,6 @@ from crucible.core.io import read_jsonl, write_jsonl
 from crucible.core.log import utc_now_iso, utc_stamp
 from crucible.core.types import ExperimentConfig, ExperimentResult, NodeRecord, QueueItem
 
-
 # ---------------------------------------------------------------------------
 # Run ID generation
 # ---------------------------------------------------------------------------

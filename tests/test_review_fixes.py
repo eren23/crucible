@@ -17,7 +17,6 @@ import pytest
 from crucible.core.errors import PluginError
 from crucible.core.plugin_registry import PluginRegistry
 
-
 # ===================================================================
 # C1 — fused=True must NOT be forwarded to non-Adam optimizers
 # ===================================================================
@@ -41,8 +40,9 @@ class TestC1_FusedKwargGuard:
         assert "kwargs" in params or "params" in params
 
     def test_rmsprop_factory_accepts_no_fused(self):
-        from crucible.training.optimizers import _rmsprop_factory
         import inspect
+
+        from crucible.training.optimizers import _rmsprop_factory
         sig = inspect.signature(_rmsprop_factory)
         params = sig.parameters
         assert "kwargs" in params or "params" in params
@@ -115,8 +115,8 @@ class TestC3_PluginAddUsesImportlib:
 
     def test_plugin_add_populates_sys_modules(self, tmp_path: Path, monkeypatch):
         """After _plugin_add_common, the module should be in sys.modules."""
-        from crucible.mcp.tools import _plugin_add_common
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import _plugin_add_common
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -157,7 +157,7 @@ class TestC4_SysModulesGuard:
         calls = []
 
         # Write a plugin that tracks how many times it's executed
-        plugin_code = textwrap.dedent(f"""\
+        plugin_code = textwrap.dedent("""\
             import sys
             _tracker = sys.modules.get("_test_c4_tracker")
             if _tracker:
@@ -279,7 +279,7 @@ class TestI3_JsonlLoggerLifecycle:
 
     def test_multi_logger_finish_fault_tolerance(self, tmp_path: Path):
         """MultiLogger.finish should finalize all loggers even if one raises."""
-        from crucible.runner.loggers import MultiLogger, ConsoleLogger, JsonlLogger
+        from crucible.runner.loggers import JsonlLogger, MultiLogger
 
         exploding_logger = MagicMock()
         exploding_logger.finish.side_effect = RuntimeError("boom")
@@ -318,6 +318,7 @@ class TestI4_NoDuplicateKwargs:
     def test_generic_backend_build_optimizer_call(self):
         """Verify the generic_backend code doesn't pass lr= and weight_decay= to build_optimizer."""
         import inspect
+
         import crucible.training.generic_backend as gb
         source = inspect.getsource(gb.run_generic_training)
 
@@ -588,17 +589,17 @@ class TestConsoleLogger:
 
 class TestBuildMultiLogger:
     def test_single_name_returns_single_logger(self):
-        from crucible.runner.loggers import build_multi_logger, ConsoleLogger
+        from crucible.runner.loggers import ConsoleLogger, build_multi_logger
         logger = build_multi_logger("console")
         assert isinstance(logger, ConsoleLogger)
 
     def test_multiple_names_returns_multi_logger(self, tmp_path: Path):
-        from crucible.runner.loggers import build_multi_logger, MultiLogger
+        from crucible.runner.loggers import MultiLogger, build_multi_logger
         logger = build_multi_logger("console,jsonl", run_id="multi_test", log_dir=str(tmp_path))
         assert isinstance(logger, MultiLogger)
         assert len(logger.loggers) == 2
 
     def test_empty_string_returns_console(self):
-        from crucible.runner.loggers import build_multi_logger, ConsoleLogger
+        from crucible.runner.loggers import ConsoleLogger, build_multi_logger
         logger = build_multi_logger("")
         assert isinstance(logger, ConsoleLogger)

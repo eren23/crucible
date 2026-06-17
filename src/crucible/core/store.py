@@ -27,7 +27,6 @@ from crucible.core.errors import StoreError
 from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_yaml
 from crucible.core.log import utc_now_iso
 
-
 # Map resource_type to subdirectory name
 _TYPE_DIRS: dict[str, str] = {
     "experiment_design": "designs",

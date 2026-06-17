@@ -22,15 +22,15 @@ import selectors
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from crucible.core.config import ProjectConfig, load_config
 from crucible.core.errors import RunnerError
+from crucible.core.experiment_contract import contract_metadata
 from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import log_warn
-from crucible.core.config import ProjectConfig, load_config
-from crucible.core.experiment_contract import contract_metadata
 from crucible.core.naming import normalize_project_name
 from crucible.core.types import ExperimentResult
 
@@ -68,13 +68,14 @@ def derive_wandb_run_name(
 from crucible.runner.output_parser import (
     OutputParser,
     classify_failure,
-    steps_seen as _steps_seen_default,
     tail,
+)
+from crucible.runner.output_parser import (
+    steps_seen as _steps_seen_default,
 )
 from crucible.runner.presets import get_preset
 from crucible.runner.tracker import RunTracker
 from crucible.runner.wandb_logger import WandbLogger
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -262,7 +263,7 @@ def run_experiment(
 
     # -- Resolve experiment identity --
     exp_id = experiment_id or f"exp_{int(time.time())}"
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     # -- Resolve script and python --
     script = _resolve_script(backend, project_config=project_config, project_root=root)

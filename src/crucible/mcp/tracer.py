@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,13 +16,13 @@ class SessionTracer:
     """Records MCP tool calls to a JSONL trace file with redacted secrets."""
 
     def __init__(self, trace_dir: Path, session_id: str | None = None):
-        self.session_id = session_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        self.session_id = session_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         self.trace_dir = trace_dir
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.trace_path = self.trace_dir / f"{self.session_id}.jsonl"
         self.meta_path = self.trace_dir / f"{self.session_id}.meta.yaml"
         self._seq = 0
-        self._started_at = datetime.now(timezone.utc).isoformat()
+        self._started_at = datetime.now(UTC).isoformat()
         self._tool_counts: dict[str, int] = {}
         self._identifiers: dict[str, set[str]] = {}
 
@@ -43,7 +43,7 @@ class SessionTracer:
         _accumulate_identifiers(self._identifiers, normalized_ids)
 
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "seq": self._seq,
             "tool": tool,
             "arguments": redact_secrets(arguments),
@@ -65,7 +65,7 @@ class SessionTracer:
             "session_id": self.session_id,
             "trace_version": 2,
             "started_at": self._started_at,
-            "ended_at": datetime.now(timezone.utc).isoformat(),
+            "ended_at": datetime.now(UTC).isoformat(),
             "tool_calls": self._seq,
             "tool_counts": dict(sorted(self._tool_counts.items(), key=lambda x: -x[1])),
             "trace_file": self.trace_path.name,

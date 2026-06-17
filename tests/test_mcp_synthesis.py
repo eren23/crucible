@@ -5,13 +5,12 @@ policy, and returns one orchestrator-shaped prompt bundle per pair.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
-from crucible.core.hub import HubStore
 from crucible.core.finding import new_finding
+from crucible.core.hub import HubStore
 
 
 @pytest.fixture
@@ -76,10 +75,9 @@ def hub_with_findings(tmp_path: Path, monkeypatch) -> HubStore:
 
 class TestDesignSynthesizeFromFindings:
     def test_returns_one_bundle_per_pair(self, hub_with_findings, monkeypatch):
-        from crucible.mcp.tools import design_synthesize_from_findings
-
         # Stub _get_config so the tool doesn't need a real project.
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
             lambda: ProjectConfig(name="x"),
@@ -104,8 +102,8 @@ class TestDesignSynthesizeFromFindings:
     def test_same_track_policy_returns_within_track_pairs(
         self, hub_with_findings, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -130,8 +128,8 @@ class TestDesignSynthesizeFromFindings:
     def test_cross_track_policy_yields_only_cross_track_pairs(
         self, hub_with_findings, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -151,8 +149,8 @@ class TestDesignSynthesizeFromFindings:
     def test_returns_error_when_pool_too_small(
         self, tmp_path: Path, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         hub_dir = tmp_path / "empty-hub"
         HubStore.init(hub_dir=hub_dir, name="empty")
@@ -169,8 +167,8 @@ class TestDesignSynthesizeFromFindings:
     def test_returns_error_when_hub_not_initialized(
         self, tmp_path: Path, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         # Point CRUCIBLE_HUB_DIR at a non-existent dir → not initialized.
         monkeypatch.setenv("CRUCIBLE_HUB_DIR", str(tmp_path / "no-hub"))
@@ -185,8 +183,8 @@ class TestDesignSynthesizeFromFindings:
     def test_rejects_project_scope_with_clear_message(
         self, hub_with_findings, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -201,8 +199,8 @@ class TestDesignSynthesizeFromFindings:
     def test_tag_filter_is_pair_level_or_match(
         self, tmp_path: Path, monkeypatch
     ):
-        from crucible.mcp.tools import design_synthesize_from_findings
         from crucible.core.config import ProjectConfig
+        from crucible.mcp.tools import design_synthesize_from_findings
 
         hub_dir = tmp_path / "hub"
         hub = HubStore.init(hub_dir=hub_dir, name="t")

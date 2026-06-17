@@ -1,16 +1,13 @@
 """Tests for crucible.researcher.literature."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from crucible.researcher.literature import (
     format_literature_context,
     search_papers,
     suggest_queries,
 )
-
 
 # ---------------------------------------------------------------------------
 # format_literature_context

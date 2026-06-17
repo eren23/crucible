@@ -242,7 +242,7 @@ def _detect_cycle(
     return None
 
 
-def detect_research_loop(state: "ResearchState", threshold: int = 3) -> str | None:
+def detect_research_loop(state: ResearchState, threshold: int = 3) -> str | None:
     """Researcher-specific detector operating on :class:`ResearchState`.
 
     Triggers when:

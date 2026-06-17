@@ -6,11 +6,11 @@ symbols so that ``from crucible.runner.fingerprint import ...``
 continues to resolve.
 """
 from crucible.core.fingerprint import (  # noqa: F401  -- re-export
+    _discover_files,
     build_run_manifest,
     code_fingerprint,
     ensure_clean_commit,
     safe_git_branch,
     safe_git_dirty,
     safe_git_sha,
-    _discover_files,
 )

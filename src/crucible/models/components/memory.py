@@ -5,8 +5,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from crucible.models.components.linear import CastedLinear
-from crucible.models.components.norm import RMSNorm
 from crucible.models.components.mlp import MLP
+from crucible.models.components.norm import RMSNorm
 
 
 class CausalPrefixMemory(nn.Module):

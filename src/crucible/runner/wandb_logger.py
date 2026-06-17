@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from collections.abc import Mapping
-from typing import Any, TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from crucible.core.io import _json_ready, read_jsonl
 from crucible.core.log import log_warn
@@ -57,11 +57,11 @@ class WandbLogger:
         run_id: str,
         config: JsonDict,
         backend: str,
-        tracker: "RunTracker | None" = None,
+        tracker: RunTracker | None = None,
         job_type: str | None = None,
         tags: list[str] | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> "WandbLogger":
+    ) -> WandbLogger:
         """Create a WandbLogger, initialising a W&B run if configured.
 
         Returns an inert logger if WANDB_PROJECT is unset or wandb is

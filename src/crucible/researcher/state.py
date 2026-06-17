@@ -14,13 +14,16 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from crucible.core.errors import StateLockTimeout
 from crucible.core.file_lock import (
     DEFAULT_TIMEOUT_SECONDS as DEFAULT_LOCK_TIMEOUT_SECONDS,
+)
+from crucible.core.file_lock import (
     file_lock,
 )
 from crucible.core.log import utc_now_iso
@@ -54,7 +57,7 @@ class ResearchState:
         *,
         timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
         poll_interval: float = 0.1,
-    ) -> Iterator["ResearchState"]:
+    ) -> Iterator[ResearchState]:
         """Acquire an exclusive advisory lock + reload from disk.
 
         Use for any read-modify-write sequence on the research state file:

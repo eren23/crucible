@@ -9,7 +9,6 @@ from crucible.core.types import NodeRecord
 from crucible.fleet.inventory import ready_state
 from crucible.fleet.sync import remote_exec
 
-
 # ---------------------------------------------------------------------------
 # Status probing
 # ---------------------------------------------------------------------------

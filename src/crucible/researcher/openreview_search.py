@@ -23,11 +23,11 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC
 from typing import Any
 
 from crucible.core.log import log_warn
 from crucible.researcher.literature import multi_angle_dedup
-
 
 _OR_FAILURES = (
     urllib.error.URLError,
@@ -211,8 +211,8 @@ def _ms_to_iso(ms: Any) -> str:
     """OpenReview timestamps are epoch milliseconds. Return ISO-8601 UTC."""
     if not isinstance(ms, (int, float)):
         return ""
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
-        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(ms / 1000.0, tz=UTC).isoformat()
     except (ValueError, OSError):
         return ""

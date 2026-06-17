@@ -1,8 +1,7 @@
 """Tests for HuggingFaceDataSource."""
-import pytest
-from pathlib import Path
-from crucible.data_sources.huggingface import HuggingFaceDataSource
 from crucible.core.data_sources import DataStatus
+from crucible.data_sources.huggingface import HuggingFaceDataSource
+
 
 def test_hf_source_initialization():
     source = HuggingFaceDataSource(

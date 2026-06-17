@@ -4,13 +4,11 @@ from __future__ import annotations
 import multiprocessing
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
 from crucible.core.errors import StateLockTimeout
 from crucible.researcher.state import ResearchState
-
 
 # ---------------------------------------------------------------------------
 # Empty state
@@ -305,6 +303,7 @@ class TestSnapshot:
 def _holder_process(state_path_str: str, hold_seconds: float, ready_marker_str: str) -> None:
     """Subprocess target: acquire the lock and hold it for *hold_seconds*."""
     from pathlib import Path as _Path
+
     from crucible.researcher.state import ResearchState as _State
 
     state = _State(_Path(state_path_str), budget_hours=10.0)
@@ -316,6 +315,7 @@ def _holder_process(state_path_str: str, hold_seconds: float, ready_marker_str: 
 def _writer_process(state_path_str: str, name: str) -> None:
     """Subprocess target: lock, add a hypothesis, save, release."""
     from pathlib import Path as _Path
+
     from crucible.researcher.state import ResearchState as _State
 
     state = _State(_Path(state_path_str), budget_hours=10.0)

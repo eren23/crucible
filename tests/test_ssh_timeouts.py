@@ -11,19 +11,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
 
 from crucible.core.config import (
     FleetConfig,
-    FleetSSHConfig,
-    FleetSSHInitialConnectConfig,
     load_config,
 )
 from crucible.core.errors import SshAuthError, SshNotReadyError, SshTimeoutError
-
 
 # ---------------------------------------------------------------------------
 # FleetSSHConfig parsing

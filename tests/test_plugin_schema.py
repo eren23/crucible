@@ -9,7 +9,6 @@ import yaml
 from crucible.core.errors import PluginError
 from crucible.core.plugin_schema import (
     KNOWN_PLUGIN_TYPES,
-    ValidationIssue,
     validate_manifest_dict,
     validate_manifest_file,
     validate_tap_directory,

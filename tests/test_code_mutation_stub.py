@@ -104,8 +104,8 @@ class TestH2RegistryMigration:
     so it gets 3-tier (builtin/global/local) auto-discovery."""
 
     def test_uses_plugin_registry_not_private_dict(self):
-        from crucible.researcher.code_mutation import _POLICY_REGISTRY
         from crucible.core.plugin_registry import PluginRegistry
+        from crucible.researcher.code_mutation import _POLICY_REGISTRY
         assert isinstance(_POLICY_REGISTRY, PluginRegistry)
 
     def test_describe_returns_source_metadata(self):

@@ -7,16 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from crucible.core.errors import PluginError
-
-
 # ===================================================================
 # Data Adapter Registry Migration
 # ===================================================================
 
 class TestDataAdapterMigration:
     def test_registry_dict_alias_is_same_object(self):
-        from crucible.training.data_adapters import DATA_ADAPTER_REGISTRY, _ADAPTER_REGISTRY
+        from crucible.training.data_adapters import _ADAPTER_REGISTRY, DATA_ADAPTER_REGISTRY
         assert DATA_ADAPTER_REGISTRY is _ADAPTER_REGISTRY._registry
 
     def test_builtins_in_dict(self):
@@ -52,7 +49,9 @@ class TestDataAdapterMigration:
 
     def test_register_with_source_kwarg(self):
         from crucible.training.data_adapters import (
-            register_data_adapter, _ADAPTER_REGISTRY, list_data_adapters_detailed
+            _ADAPTER_REGISTRY,
+            list_data_adapters_detailed,
+            register_data_adapter,
         )
 
         class FakeAdapter:
@@ -68,7 +67,7 @@ class TestDataAdapterMigration:
 
     def test_register_without_source_uses_builtin(self):
         """Plain register_data_adapter("name", cls) should default to builtin."""
-        from crucible.training.data_adapters import register_data_adapter, _ADAPTER_REGISTRY
+        from crucible.training.data_adapters import _ADAPTER_REGISTRY, register_data_adapter
 
         class FakeAdapter2:
             pass
@@ -94,7 +93,7 @@ class TestDataAdapterMigration:
 
 class TestObjectivesMigration:
     def test_registry_dict_alias_is_same_object(self):
-        from crucible.training.objectives import OBJECTIVE_REGISTRY, _OBJECTIVE_REGISTRY
+        from crucible.training.objectives import _OBJECTIVE_REGISTRY, OBJECTIVE_REGISTRY
         assert OBJECTIVE_REGISTRY is _OBJECTIVE_REGISTRY._registry
 
     def test_builtins_in_dict(self):
@@ -130,7 +129,7 @@ class TestObjectivesMigration:
         assert sources["cross_entropy"] == "builtin"
 
     def test_register_with_source_kwarg(self):
-        from crucible.training.objectives import register_objective, _OBJECTIVE_REGISTRY
+        from crucible.training.objectives import _OBJECTIVE_REGISTRY, register_objective
 
         class FakeObjective:
             pass

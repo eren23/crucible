@@ -5,10 +5,10 @@ from torch import Tensor, nn
 
 from crucible.core.types import ArgsNamespace
 from crucible.models.base import TiedEmbeddingLM
-from crucible.models.registry import register_model
 from crucible.models.components.attention import Block
 from crucible.models.components.conv import FeatureConvBottleneck
 from crucible.models.components.linear import CastedLinear
+from crucible.models.registry import register_model
 
 
 class ConvLoopedTransformerLM(TiedEmbeddingLM):

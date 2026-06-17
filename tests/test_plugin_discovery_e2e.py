@@ -9,11 +9,8 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-
-from crucible.core.plugin_registry import PluginRegistry
 from crucible.core.plugin_discovery import discover_all_plugins
-from crucible.core.errors import PluginError
+from crucible.core.plugin_registry import PluginRegistry
 
 
 class TestE2EOptimizerPlugin:

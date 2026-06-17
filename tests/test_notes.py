@@ -9,7 +9,6 @@ import pytest
 from crucible.core.errors import RunnerError
 from crucible.runner.notes import NoteStore, _parse_frontmatter, _render_note
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

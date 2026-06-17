@@ -1,20 +1,20 @@
 """Crucible analysis module: leaderboard, sensitivity, Pareto frontier, export."""
 from __future__ import annotations
 
-from crucible.analysis.results import (
-    load_results,
-    completed_results,
-    merged_results,
+from crucible.analysis.export import (
+    export_top_configs,
+    generate_summary,
+    print_rank,
 )
 from crucible.analysis.leaderboard import (
     leaderboard,
-    sensitivity_analysis,
     pareto_frontier,
+    sensitivity_analysis,
 )
-from crucible.analysis.export import (
-    export_top_configs,
-    print_rank,
-    generate_summary,
+from crucible.analysis.results import (
+    completed_results,
+    load_results,
+    merged_results,
 )
 
 __all__ = [

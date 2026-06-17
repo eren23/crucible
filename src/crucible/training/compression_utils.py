@@ -5,12 +5,11 @@ operate on ``nn.Module`` instances without assuming architecture details.
 """
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 
 import torch
 import torch.nn as nn
 from torch import Tensor
-
 
 # ---------------------------------------------------------------------------
 # Prunable layer iteration

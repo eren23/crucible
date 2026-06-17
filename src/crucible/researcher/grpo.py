@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import math
 
-
 _VALID_NORMALIZATIONS = ("z_score", "min_max")
 
 

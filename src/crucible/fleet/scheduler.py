@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 import shlex
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import RunnerError
@@ -170,7 +170,7 @@ def collect_from_node(
     results_file_rel: str = "experiments.jsonl",
 ) -> None:
     """Rsync logs and results from a remote node."""
-    from crucible.fleet.sync import rsync_base, _run
+    from crucible.fleet.sync import _run, rsync_base
 
     local_dir = fleet_runs_dir / node["name"]
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -231,7 +231,7 @@ def recover_running_leases(
             if last_hb:
                 try:
                     hb_time = datetime.fromisoformat(last_hb)
-                    stale_seconds = (datetime.now(timezone.utc) - hb_time).total_seconds()
+                    stale_seconds = (datetime.now(UTC) - hb_time).total_seconds()
                     if stale_seconds <= 600:
                         continue
                     health = "heartbeat_stale"
@@ -489,7 +489,7 @@ def refresh_and_save_nodes(
     refresh_fn: Callable[[list[NodeRecord]], list[NodeRecord]] | None = None,
 ) -> list[NodeRecord]:
     """Refresh node records from provider API, classify health, and save."""
-    from crucible.fleet.inventory import merge_node_snapshots, load_nodes_if_exists
+    from crucible.fleet.inventory import load_nodes_if_exists, merge_node_snapshots
 
     seed = load_nodes_snapshot(nodes_file) or nodes
     if refresh_fn is not None:

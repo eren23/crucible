@@ -1,15 +1,14 @@
 """Tests for fleet/project_runner.py — launch, check, collect."""
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from crucible.core.errors import RunnerError
 from crucible.fleet.project_runner import (
-    launch_project,
     check_project_running,
     collect_project_result,
+    launch_project,
 )
 
 

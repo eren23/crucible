@@ -8,12 +8,10 @@ import yaml
 
 from crucible.core.errors import CrucibleError
 from crucible.runner.autoresearch_adapter import (
-    AutoresearchSource,
     import_autoresearch,
     parse_autoresearch_source,
     sanitize_name,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

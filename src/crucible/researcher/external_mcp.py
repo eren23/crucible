@@ -35,7 +35,6 @@ import asyncio
 import atexit
 import os
 import shlex
-import sys
 import threading
 from contextlib import asynccontextmanager
 from typing import Any

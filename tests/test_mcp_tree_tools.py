@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared FakeConfig
 # ---------------------------------------------------------------------------
@@ -76,8 +75,8 @@ class TestTreeCreate:
         assert result["total_nodes"] == 2
 
     def test_duplicate_tree_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from crucible.mcp.tools import tree_create
         from crucible.core.errors import SearchTreeError
+        from crucible.mcp.tools import tree_create
 
         _patch_config(monkeypatch, tmp_path)
 
@@ -109,8 +108,8 @@ class TestTreeGet:
         assert "root" in result["ascii_tree"]
 
     def test_nonexistent_tree_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from crucible.mcp.tools import tree_get
         from crucible.core.errors import SearchTreeError
+        from crucible.mcp.tools import tree_get
 
         _patch_config(monkeypatch, tmp_path)
 
@@ -156,8 +155,8 @@ class TestTreeExpandNode:
         assert result["total_nodes"] == 3
 
     def test_expand_nonexistent_node_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from crucible.mcp.tools import tree_create, tree_expand_node
         from crucible.core.errors import SearchTreeError
+        from crucible.mcp.tools import tree_create, tree_expand_node
 
         _patch_config(monkeypatch, tmp_path)
         tree_create({"name": "err-tree"})
@@ -244,8 +243,8 @@ class TestTreePrune:
     def test_prune_unknown_mode_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        from crucible.mcp.tools import tree_create, tree_prune
         from crucible.core.errors import CrucibleError
+        from crucible.mcp.tools import tree_create, tree_prune
 
         _patch_config(monkeypatch, tmp_path)
         tree_create({"name": "bad-mode"})
@@ -460,7 +459,7 @@ class TestTreeEnqueuePending:
         assert len(result["items"]) == 2
 
     def test_no_pending_returns_zero(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        from crucible.mcp.tools import tree_create, tree_prune, tree_enqueue_pending
+        from crucible.mcp.tools import tree_create, tree_enqueue_pending, tree_prune
 
         _patch_config(monkeypatch, tmp_path)
         self._patch_queue_contract(monkeypatch)
@@ -733,8 +732,8 @@ class TestTreeAutoExpandSubmit:
 
     def test_submit_rejects_stale_tree_snapshot(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """If the tree advanced between request_prompt and submit, raise."""
-        from crucible.mcp.tools import tree_auto_expand
         from crucible.core.errors import StaleSubmitError
+        from crucible.mcp.tools import tree_auto_expand
         from crucible.researcher.search_tree import SearchTree
 
         _patch_config(monkeypatch, tmp_path)

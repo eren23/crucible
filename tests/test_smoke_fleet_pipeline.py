@@ -5,15 +5,12 @@ No GPU or network access required.
 """
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -193,6 +190,7 @@ class TestSSHSmoke:
 
     def test_checked_remote_exec_long_timeout(self):
         import inspect
+
         from crucible.fleet.sync import checked_remote_exec
         sig = inspect.signature(checked_remote_exec)
         assert sig.parameters["timeout"].default == 600
@@ -287,7 +285,7 @@ class TestPluginRegistries:
 
 class TestPresets:
     def test_all_presets_load(self):
-        from crucible.runner.presets import list_presets, get_preset
+        from crucible.runner.presets import get_preset, list_presets
         presets = list_presets()
         for name in ["smoke", "screen", "proxy", "medium", "promotion"]:
             assert name in presets

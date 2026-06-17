@@ -5,11 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from crucible.core.config import MetricsConfig, ProjectConfig
 from crucible.analysis.leaderboard import leaderboard
-
+from crucible.core.config import MetricsConfig, ProjectConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

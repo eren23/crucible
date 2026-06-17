@@ -14,7 +14,6 @@ from typing import Any
 from crucible.core.log import log_error, log_info, log_step, log_success, log_warn
 from crucible.core.types import NodeRecord
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 """Tests for write_remote_env from crucible.fleet.sync."""
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from crucible.fleet.sync import write_remote_env, ENV_FORWARD_DENYLIST
+from crucible.fleet.sync import ENV_FORWARD_DENYLIST, write_remote_env
 
 
 class TestDenylist:

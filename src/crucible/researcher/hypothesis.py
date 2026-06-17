@@ -141,7 +141,7 @@ _parse_hypotheses = parse_hypotheses
 # ---------------------------------------------------------------------------
 
 
-def _build_tree_context(tree: "SearchTree", node_id: str) -> str:
+def _build_tree_context(tree: SearchTree, node_id: str) -> str:
     """Build LLM context from a node's position in the search tree.
 
     Includes: the node's own result, ancestry path, sibling results,
@@ -251,7 +251,7 @@ def _parse_tree_children(text: str, parent_name: str) -> list[dict[str, Any]]:
 
 
 def generate_tree_hypotheses(
-    tree: "SearchTree",
+    tree: SearchTree,
     node_id: str,
     llm: LLMClient,
     n_children: int = 3,

@@ -16,8 +16,8 @@ that drove the run) are also reachable directly (``model_dim``,
 from __future__ import annotations
 
 import ast
-import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError

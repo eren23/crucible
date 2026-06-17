@@ -12,7 +12,6 @@ from typing import Any
 from crucible.core.log import log_warn, utc_now_iso
 from crucible.core.types import Finding
 
-
 # Valid finding statuses
 FINDING_STATUSES = {"active", "superseded", "archived", "promoted"}
 

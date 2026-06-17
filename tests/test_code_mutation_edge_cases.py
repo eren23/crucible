@@ -5,7 +5,6 @@ import gc
 import json
 import os
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -20,7 +19,6 @@ from crucible.researcher.code_mutation import (
     ScorerConfig,
     apply_unified_diff,
     check_workspace_confinement,
-    execute_mutation,
     llm_diff_request_prompt,
     parse_diff_targets,
     validate_scorer_cmd,

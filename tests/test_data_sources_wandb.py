@@ -1,7 +1,6 @@
 """Tests for WandBArtifactSource."""
-import pytest
-from crucible.data_sources.wandb_artifact import WandBArtifactSource
 from crucible.core.data_sources import DataStatus
+from crucible.data_sources.wandb_artifact import WandBArtifactSource
 
 
 def test_wandb_source_initialization():

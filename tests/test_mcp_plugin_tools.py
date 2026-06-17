@@ -7,7 +7,6 @@ from __future__ import annotations
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -214,8 +213,8 @@ class TestPluginAdd:
             sys.modules.pop("_crucible_plugin_loggers_local_mcp_test_null", None)
 
     def test_provider_add_success(self, mcp_config):
-        from crucible.mcp.tools import plugin_add
         from crucible.fleet.provider_registry import PROVIDER_REGISTRY
+        from crucible.mcp.tools import plugin_add
 
         code = textwrap.dedent("""\
             from crucible.fleet.provider_registry import register_provider

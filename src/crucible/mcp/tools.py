@@ -6,8 +6,8 @@ import os
 import re
 import subprocess
 import time
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -369,8 +369,8 @@ def get_queue_status(args: dict[str, Any]) -> dict[str, Any]:
 def enqueue_experiment(args: dict[str, Any]) -> dict[str, Any]:
     """Add an experiment configuration to the fleet queue."""
     config = _get_config()
-    from crucible.fleet.queue import enqueue_experiments
     from crucible.core.fingerprint import build_run_manifest
+    from crucible.fleet.queue import enqueue_experiments
 
     contract = _queue_contract_fields(config)
     manifest = build_run_manifest(config.project_root)
@@ -813,7 +813,7 @@ def collect_results(args: dict[str, Any]) -> dict[str, Any]:
             return {"error": "No fleet nodes found. Run provision_nodes + fleet_refresh first.", "collected": False, "total_results": 0, "completed": 0}
 
         from crucible.analysis.results import merged_results
-        from crucible.fleet.queue import load_queue, save_queue, reconcile_queue_with_results
+        from crucible.fleet.queue import load_queue, reconcile_queue_with_results, save_queue
 
         fm = _get_fleet_manager(config)
         fm.collect()
@@ -1069,8 +1069,8 @@ def design_enqueue_batch(args: dict[str, Any]) -> dict[str, Any]:
     """Enqueue a batch of experiment configs to the fleet queue."""
     config = _get_config()
     try:
-        from crucible.fleet.queue import enqueue_experiments
         from crucible.core.fingerprint import build_run_manifest
+        from crucible.fleet.queue import enqueue_experiments
 
         contract = _queue_contract_fields(config)
         manifest = build_run_manifest(config.project_root)
@@ -1421,9 +1421,9 @@ def version_run_design(args: dict[str, Any]) -> dict[str, Any]:
     """Execute a versioned design by converting it to an ExperimentConfig and enqueuing."""
     config = _get_config()
     try:
+        from crucible.core.fingerprint import build_run_manifest
         from crucible.fleet.queue import enqueue_experiments
         from crucible.runner.design import design_to_experiment_config
-        from crucible.core.fingerprint import build_run_manifest
 
         contract = _queue_contract_fields(config)
         manifest = build_run_manifest(config.project_root)
@@ -2004,8 +2004,8 @@ def code_mutation_apply(args: dict[str, Any]) -> dict[str, Any]:
         from crucible.researcher.code_mutation import (
             CodeMutationError,
             MutationProposal,
-            ScorerConfig,
             SandboxConfig,
+            ScorerConfig,
             build_code_mutation_policy,
             llm_diff_parse_response,
         )
@@ -2524,8 +2524,8 @@ def research_peer_sync(args: dict[str, Any]) -> dict[str, Any]:
           reference them in research_request_prompt(stage='hypothesis').
     """
     try:
-        from crucible.researcher.peer_sync import sync_peer_finding
         from crucible.core.log import utc_now_iso
+        from crucible.researcher.peer_sync import sync_peer_finding
 
         challenge_id = args.get("challenge_id", "").strip()
         if not challenge_id:
@@ -4213,8 +4213,9 @@ def model_preview_spec(args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "spec must be a non-empty dict"}
 
     try:
-        from crucible.models.composer import ArchitectureSpec, SpecResolver, ComposedArchitecture
         import types
+
+        from crucible.models.composer import ArchitectureSpec, ComposedArchitecture, SpecResolver
 
         parsed = ArchitectureSpec.from_dict(spec)
 
@@ -4391,8 +4392,8 @@ def cancel_experiment(args: dict[str, Any]) -> dict[str, Any]:
 
 def clear_stale_queue(args: dict[str, Any]) -> dict[str, Any]:
     """Mark experiments as failed if assigned to nodes that no longer exist."""
-    from crucible.fleet.queue import load_queue, save_queue
     from crucible.fleet.inventory import load_nodes
+    from crucible.fleet.queue import load_queue, save_queue
 
     config = _get_config()
     queue_path = config.project_root / "fleet_queue.jsonl"
@@ -5490,7 +5491,7 @@ def _save_project_run(run_id: str, data: dict[str, Any]) -> None:
     """Persist a project run record to JSONL."""
     runs_path = _project_runs_path()
     runs_path.parent.mkdir(parents=True, exist_ok=True)
-    from crucible.core.io import append_jsonl, _json_ready
+    from crucible.core.io import _json_ready, append_jsonl
     payload = {"run_id": run_id, "updated_at": utc_now_iso(), **_json_ready(data)}
     record = payload
     append_jsonl(runs_path, record)
@@ -5541,7 +5542,7 @@ def _append_project_run_event(run_id: str, event: str, **fields: Any) -> None:
         "event": event,
         **fields,
     }
-    from crucible.core.io import append_jsonl, _json_ready
+    from crucible.core.io import _json_ready, append_jsonl
     append_jsonl(path, _json_ready(payload))
 
 
@@ -5835,9 +5836,9 @@ def run_project(args: dict[str, Any]) -> dict[str, Any]:
     try:
         from crucible.core.config import load_project_spec
         from crucible.core.hub import HubStore
-        from crucible.fleet.project_runner import launch_project
-        from crucible.fleet.project_launchers import launcher_runtime_entry, resolve_launcher_bundle
         from crucible.fleet.inventory import load_nodes_if_exists
+        from crucible.fleet.project_launchers import launcher_runtime_entry, resolve_launcher_bundle
+        from crucible.fleet.project_runner import launch_project
 
         project_name = args["project_name"]
         spec = load_project_spec(project_name, config.project_root)
@@ -6324,6 +6325,7 @@ def recipe_save(args: dict[str, Any]) -> dict[str, Any]:
     NEXT: recipe_list to see all recipes, recipe_get to retrieve one.
     """
     import yaml
+
     from crucible.core.errors import RecipeError
 
     config = _get_config()
@@ -6445,6 +6447,7 @@ def recipe_get(args: dict[str, Any]) -> dict[str, Any]:
     NEXT: Follow the steps to reproduce.
     """
     import yaml
+
     from crucible.core.errors import RecipeError
 
     config = _get_config()
@@ -7350,7 +7353,7 @@ def trace_get(args: dict[str, Any]) -> dict[str, Any]:
 
 def data_list(args: dict[str, Any]) -> dict[str, Any]:
     """List registered data sources."""
-    from crucible.core.data_sources import list_data_sources, describe_data_source
+    from crucible.core.data_sources import describe_data_source, list_data_sources
 
     sources = []
     for name in list_data_sources():

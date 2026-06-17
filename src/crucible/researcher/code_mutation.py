@@ -60,7 +60,6 @@ from typing import Any
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
 
-
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------

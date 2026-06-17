@@ -45,8 +45,8 @@ def main():
     parser.add_argument("--output-json", default=None)
     args = parser.parse_args()
 
-    import torch
     import stable_worldmodel as swm
+    import torch
 
     device = args.device if torch.cuda.is_available() else "cpu"
 

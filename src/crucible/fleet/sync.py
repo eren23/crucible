@@ -8,7 +8,6 @@ from pathlib import Path
 from crucible.core.log import log_warn
 from crucible.core.types import NodeRecord
 
-
 # ---------------------------------------------------------------------------
 # Subprocess wrapper
 # ---------------------------------------------------------------------------

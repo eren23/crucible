@@ -8,7 +8,6 @@ import pytest
 
 from crucible.core.store import VersionStore
 
-
 SAMPLE_DESIGN = {
     "name": "looped_wider",
     "description": "Test wider hidden dims",

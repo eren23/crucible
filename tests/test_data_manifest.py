@@ -15,7 +15,6 @@ from crucible.data.manifest import (
     tokenizer_artifact_paths,
 )
 
-
 SAMPLE_MANIFEST = {
     "datasets": [
         {

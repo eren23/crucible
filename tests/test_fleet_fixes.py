@@ -5,11 +5,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 import yaml
 
-from crucible.fleet.sync import scp_to_node
 from crucible.core.config import ProjectSpec, load_project_spec
+from crucible.fleet.sync import scp_to_node
 
 
 def _make_node(**overrides: Any) -> dict[str, Any]:

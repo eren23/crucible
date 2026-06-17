@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -23,7 +22,7 @@ def _count_params(model: torch.nn.Module) -> int:
     return sum(p.numel() for p in model.parameters())
 
 
-def _make_default_model() -> "LeWMModel":
+def _make_default_model() -> LeWMModel:
     """Build a LE-WM with default config (ViT-Tiny scale)."""
     return LeWMModel(
         image_size=224,
@@ -43,7 +42,7 @@ def _make_default_model() -> "LeWMModel":
     )
 
 
-def _make_slim_model() -> "LeWMModel":
+def _make_slim_model() -> LeWMModel:
     """Build a smaller LE-WM for faster tests."""
     return LeWMModel(
         image_size=56,

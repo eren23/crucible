@@ -13,14 +13,12 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from crucible.models.composer import (
-    BLOCK_TYPE_REGISTRY,
-    BLOCK_TYPES,
     AUGMENTATION_REGISTRY,
     AUGMENTATIONS,
+    BLOCK_TYPE_REGISTRY,
+    BLOCK_TYPES,
     STACK_PATTERN_REGISTRY,
     STACK_PATTERNS,
-    _ensure_block_types,
-    _ensure_augmentations,
 )
 
 

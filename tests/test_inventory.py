@@ -2,27 +2,23 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from crucible.fleet.inventory import (
+    classify_health,
+    count_bootstrapped_ready,
     load_nodes,
     load_nodes_if_exists,
-    save_nodes,
-    ready_state,
-    summarize_nodes,
     merge_node_record,
     merge_node_snapshots,
-    upsert_node_record,
-    count_bootstrapped_ready,
     next_node_index,
-    classify_health,
-    BAD_API_STATES,
-    PAUSED_STATES,
+    ready_state,
+    save_nodes,
+    summarize_nodes,
+    upsert_node_record,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -3,13 +3,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from crucible.analysis.leaderboard import leaderboard, sensitivity_analysis
+from crucible.analysis.results import completed_results
 from crucible.core.config import ProjectConfig
 from crucible.core.io import atomic_write_json
 from crucible.core.log import log_step, log_warn
 from crucible.core.types import ExperimentResult
-
-from crucible.analysis.results import completed_results
-from crucible.analysis.leaderboard import leaderboard, sensitivity_analysis
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -232,7 +231,7 @@ def generate_summary(
     # -- Sensitivity --
     sens = sensitivity_analysis(metric=metric, cfg=cfg)
     if sens:
-        lines.append(f"\n### Sensitivity Analysis\n")
+        lines.append("\n### Sensitivity Analysis\n")
         for key, pairs in sorted(sens.items()):
             distinct = {v for v, _ in pairs}
             if len(distinct) < 2:

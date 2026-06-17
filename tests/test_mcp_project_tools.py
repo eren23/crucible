@@ -1,8 +1,6 @@
 """Tests for MCP external project tools."""
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from crucible.mcp.tools import (
@@ -90,7 +88,7 @@ class TestProjectRunStatus:
         (tmp_path / ".crucible" / "projects").mkdir(parents=True, exist_ok=True)
 
         with patch("crucible.mcp.tools._get_config", return_value=cfg):
-            from crucible.mcp.tools import _save_project_run, _append_project_run_event
+            from crucible.mcp.tools import _append_project_run_event, _save_project_run
 
             _save_project_run("run_123", {"project": "demo", "node_name": "node-1", "pid": 42, "status": "launched"})
             _append_project_run_event("run_123", "launch_requested")
@@ -204,7 +202,7 @@ class TestRunPersistence:
         (tmp_path / ".crucible" / "projects").mkdir(parents=True, exist_ok=True)
 
         with patch("crucible.mcp.tools._get_config", return_value=cfg):
-            from crucible.mcp.tools import _save_project_run, _load_project_run
+            from crucible.mcp.tools import _load_project_run, _save_project_run
 
             _save_project_run("run_abc", {
                 "node_name": "node-01",
@@ -225,7 +223,7 @@ class TestRunPersistence:
         (tmp_path / ".crucible" / "projects").mkdir(parents=True, exist_ok=True)
 
         with patch("crucible.mcp.tools._get_config", return_value=cfg):
-            from crucible.mcp.tools import _save_project_run, _load_project_run
+            from crucible.mcp.tools import _load_project_run, _save_project_run
 
             _save_project_run("run_latest", {"status": "launched", "pid": 111})
             _save_project_run("run_latest", {"status": "completed", "pid": 222})

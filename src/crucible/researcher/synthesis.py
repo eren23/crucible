@@ -22,7 +22,6 @@ from crucible.core.redact import redact_secrets
 from crucible.researcher.hypothesis import _validate_hypotheses
 from crucible.researcher.llm_client import parse_json_from_text
 
-
 Pair = tuple[dict[str, Any], dict[str, Any]]
 
 

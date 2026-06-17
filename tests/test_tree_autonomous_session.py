@@ -4,7 +4,6 @@ from __future__ import annotations
 import multiprocessing
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,6 @@ from crucible.researcher.tree_autonomous_session import (
     TreeAutonomousSessionError,
     TreeDoomLoopDetected,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

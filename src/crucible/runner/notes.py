@@ -17,7 +17,6 @@ from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import utc_now_iso, utc_stamp
 from crucible.core.types import ExperimentNote
 
-
 # ---------------------------------------------------------------------------
 # Frontmatter helpers
 # ---------------------------------------------------------------------------

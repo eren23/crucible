@@ -2,7 +2,6 @@
 import sys
 from pathlib import Path
 
-import pytest
 import torch
 
 # Add repo root to path so examples/ is importable
@@ -56,8 +55,8 @@ class TestDDPMModel:
         assert result["loss"].shape == ()
 
     def test_factory_registration(self):
-        from examples.diffusion.model import register
         from crucible.models.registry import _REGISTRY as MODEL_REGISTRY
+        from examples.diffusion.model import register
 
         try:
             register()

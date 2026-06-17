@@ -10,12 +10,12 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from crucible.core.errors import CrucibleError
 from crucible.api.models import (
     FindingCreate,
     NoteCreate,
 )
 from crucible.core.config import ProjectConfig, load_config
+from crucible.core.errors import CrucibleError
 from crucible.runner.notes import NoteStore
 
 router = APIRouter()

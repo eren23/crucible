@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -77,7 +77,7 @@ class TestComputeSpend:
     def test_zero_hours_zero_spend(self, project_with_nodes):
         config = load_config(project_with_nodes / "crucible.yaml")
         _write_nodes(project_with_nodes, [{"name": "p", "state": "ready", "cost_per_hr": 1.0}])
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         out = compute_session_spend(
             config, session_started_at=now.isoformat(), now=now,
         )
@@ -87,10 +87,10 @@ class TestComputeSpend:
     def test_spend_grows_with_wall_clock(self, project_with_nodes):
         config = load_config(project_with_nodes / "crucible.yaml")
         _write_nodes(project_with_nodes, [{"name": "p", "state": "ready", "cost_per_hr": 2.0}])
-        started = datetime.now(timezone.utc) - timedelta(hours=1.5)
+        started = datetime.now(UTC) - timedelta(hours=1.5)
         out = compute_session_spend(
             config, session_started_at=started.isoformat(),
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
         # 1.5h × $2.0/hr ≈ $3.00 (allow small jitter)
         assert out["spend_usd"] == pytest.approx(3.0, abs=0.05)
@@ -107,10 +107,10 @@ class TestComputeSpend:
         _write_nodes(project_with_nodes, [
             {"name": "p", "state": "destroyed", "cost_per_hr": 5.0},
         ])
-        started = datetime.now(timezone.utc) - timedelta(hours=10)
+        started = datetime.now(UTC) - timedelta(hours=10)
         out = compute_session_spend(
             config, session_started_at=started.isoformat(),
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
         assert out["spend_usd"] == 0.0
         assert out["active_pods"] == 0

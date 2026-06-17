@@ -2,12 +2,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
-import pytest
-
-from crucible.core.env import load_env_files, _parse_env_line
-
+from crucible.core.env import _parse_env_line, load_env_files
 
 # ---------------------------------------------------------------------------
 # _parse_env_line (internal helper)

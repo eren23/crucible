@@ -8,8 +8,8 @@ from crucible.core.log import log_warn
 # --- Builtins (source="builtin") ---
 _reg._CURRENT_REGISTER_SOURCE = "builtin"
 import crucible.models.architectures.baseline  # noqa: F401
-import crucible.models.architectures.looped  # noqa: F401
 import crucible.models.architectures.convloop  # noqa: F401
+import crucible.models.architectures.looped  # noqa: F401
 import crucible.models.architectures.prefix_memory  # noqa: F401
 
 # --- Builtin YAML specs (source="builtin", opt-in via config) ---

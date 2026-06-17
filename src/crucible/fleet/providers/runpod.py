@@ -18,10 +18,9 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 from crucible.core.errors import FleetError
-from crucible.core.types import JsonDict, JsonValue
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
 from crucible.core.naming import normalize_project_name
-from crucible.core.types import NodeRecord
+from crucible.core.types import JsonDict, JsonValue, NodeRecord
 from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import ssh_ok
 

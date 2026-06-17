@@ -1,13 +1,9 @@
 """Tests for crucible.researcher.arxiv_search — Phase 3.1."""
 from __future__ import annotations
 
-from io import BytesIO
-from typing import Any
-
 import pytest
 
 from crucible.researcher import arxiv_search
-
 
 # ---------------------------------------------------------------------------
 # Atom fixtures

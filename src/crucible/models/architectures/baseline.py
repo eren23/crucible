@@ -5,13 +5,13 @@ import math
 import torch
 from torch import Tensor, nn
 
-from crucible.models.base import TiedEmbeddingLM
-from crucible.models.registry import register_model, register_schema
 from crucible.core.types import ArgsNamespace
+from crucible.models.base import TiedEmbeddingLM
 from crucible.models.components.attention import Block, _parse_block_pattern
 from crucible.models.components.gate import SmearGate
 from crucible.models.components.hash_embed import BigramHash, TrigramHash
 from crucible.models.components.merge import TokenMerger
+from crucible.models.registry import register_model, register_schema
 
 
 class BaselineGPT(TiedEmbeddingLM):

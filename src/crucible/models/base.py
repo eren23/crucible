@@ -7,8 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from crucible.models.components.norm import RMSNorm
 from crucible.models.components.linear import CastedLinear
+from crucible.models.components.norm import RMSNorm
 
 
 class CrucibleModel(nn.Module, ABC):

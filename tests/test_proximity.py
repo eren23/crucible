@@ -4,7 +4,6 @@ from __future__ import annotations
 import pytest
 
 from crucible.researcher.proximity import (
-    Cluster,
     cluster,
     jaccard,
     suggest_keepers,
@@ -141,6 +140,7 @@ class TestThresholdSemantics:
         is caught at module-load. (sklearn not available; testing the
         runtime behavior would require it.)"""
         import inspect
+
         from crucible.researcher import proximity
         src = inspect.getsource(proximity._cluster_kmeans)
         # The correct formula multiplies by `threshold`, not `(1 - threshold)`.

@@ -2,33 +2,27 @@
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
 
 import pytest
 
 from crucible.researcher.code_mutation import (
     AstLocalEditPolicy,
     AstSafetyChecker,
-    AstSafetyReport,
     CodeMutationError,
     DiffApplyError,
     LlmDiffPolicy,
     MutationProposal,
-    MutationResult,
     SandboxConfig,
     SandboxRunner,
     ScorerConfig,
     apply_unified_diff,
     build_code_mutation_policy,
     check_scope,
-    execute_mutation,
     llm_diff_parse_response,
     llm_diff_request_prompt,
     parse_diff_targets,
     score_stdout,
 )
-
 
 # ---------------------------------------------------------------------------
 # Diff helpers
@@ -714,8 +708,6 @@ class TestScorerCmdAllowlist:
 
     def test_env_basename_rejected(self, tmp_path):
         from crucible.researcher.code_mutation import (
-            SandboxRunner,
-            ScorerConfig,
             validate_scorer_cmd,
         )
         problem = validate_scorer_cmd(["env"], tmp_path)
@@ -767,7 +759,10 @@ class TestNonPyMutationGate:
     def test_makefile_rejected_by_default(self, tiny_project, tmp_path):
         (tiny_project / "Makefile").write_text("all:\n\techo hi\n")
         from crucible.researcher.code_mutation import (
-            LlmDiffPolicy, MutationProposal, SandboxConfig, SandboxRunner, ScorerConfig,
+            LlmDiffPolicy,
+            MutationProposal,
+            SandboxRunner,
+            ScorerConfig,
         )
         policy = LlmDiffPolicy(
             project_root=tiny_project,
@@ -786,7 +781,10 @@ class TestNonPyMutationGate:
     def test_makefile_allowed_with_opt_in(self, tiny_project, tmp_path):
         (tiny_project / "Makefile").write_text("all:\n\techo hi\n")
         from crucible.researcher.code_mutation import (
-            LlmDiffPolicy, MutationProposal, SandboxConfig, SandboxRunner, ScorerConfig,
+            LlmDiffPolicy,
+            MutationProposal,
+            SandboxRunner,
+            ScorerConfig,
         )
         policy = LlmDiffPolicy(
             project_root=tiny_project,
@@ -810,7 +808,11 @@ class TestSandboxAssertNotInvokedOnSafetyReject:
 
     def test_no_returncode_on_safety_reject(self, tiny_project, tmp_path):
         from crucible.researcher.code_mutation import (
-            LlmDiffPolicy, MutationProposal, SandboxConfig, SandboxRunner, ScorerConfig,
+            LlmDiffPolicy,
+            MutationProposal,
+            SandboxConfig,
+            SandboxRunner,
+            ScorerConfig,
         )
         policy = LlmDiffPolicy(
             project_root=tiny_project,

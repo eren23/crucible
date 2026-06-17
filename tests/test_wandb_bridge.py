@@ -4,13 +4,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from crucible.runner.wandb_logger import WandbLogger, _resolve_wandb_url, wandb_annotate_finished_run
-
 
 # ---------------------------------------------------------------------------
 # WandbLogger — inert mode (no wandb)

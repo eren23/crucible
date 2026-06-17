@@ -19,7 +19,6 @@ from crucible.core.errors import (
 )
 from crucible.fleet.providers.ssh import SSHProvider
 
-
 # ---------------------------------------------------------------------------
 # Construction + constants
 # ---------------------------------------------------------------------------

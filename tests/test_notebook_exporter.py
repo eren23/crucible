@@ -18,7 +18,6 @@ from crucible.notebook import export_project
 from crucible.notebook.exporter import NotebookExportError
 from crucible.notebook.runtimes import get_runtime, list_runtimes
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

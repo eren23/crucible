@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 import ast
-import importlib
-import sys
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -254,7 +250,7 @@ def test_schema_registry():
 
 def test_registry_source_tracking():
     """Verify that register_model populates _REGISTRY_META with source info."""
-    from crucible.models.registry import _REGISTRY, _REGISTRY_META, register_model
+    from crucible.models.registry import _REGISTRY, _REGISTRY_META
 
     # Builtins should have been registered by the autouse fixture
     assert "baseline" in _REGISTRY

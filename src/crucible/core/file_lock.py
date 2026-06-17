@@ -38,9 +38,9 @@ from __future__ import annotations
 import errno
 import os
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator
 
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn

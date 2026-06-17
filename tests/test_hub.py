@@ -5,14 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from crucible.core.hub import HubStore
 from crucible.core.errors import HubError
 from crucible.core.finding import (
     can_promote,
     make_finding_id,
     validate_finding,
 )
-
+from crucible.core.hub import HubStore
 
 # ---------------------------------------------------------------------------
 # Fixtures

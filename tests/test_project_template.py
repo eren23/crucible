@@ -12,7 +12,6 @@ from crucible.core.errors import ProjectTemplateError
 from crucible.core.project_template import (
     TemplateInfo,
     _merge_dicts,
-    _resolve_extends_text,
     _templates_dir,
     extract_vars,
     find_template,
@@ -24,7 +23,6 @@ from crucible.core.project_template import (
     validate_spec,
     write_project_spec,
 )
-
 
 # ---------------------------------------------------------------------------
 # substitute

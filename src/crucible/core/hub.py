@@ -36,15 +36,14 @@ from pathlib import Path
 from typing import Any
 
 from crucible.core.errors import HubError
-from crucible.core.hub_lock import hub_lock
 from crucible.core.finding import (
     can_promote,
     make_finding_id,
     validate_finding,
 )
+from crucible.core.hub_lock import hub_lock
 from crucible.core.io import append_jsonl, read_jsonl, read_yaml, write_jsonl, write_yaml
 from crucible.core.log import log_warn, utc_now_iso
-
 
 _DEFAULT_HUB_DIR = Path.home() / ".crucible-hub"
 _HUB_VERSION = "1"
@@ -201,7 +200,7 @@ class HubStore:
         return None
 
     @staticmethod
-    def init(hub_dir: Path | None = None, name: str = "") -> "HubStore":
+    def init(hub_dir: Path | None = None, name: str = "") -> HubStore:
         """Create hub directory, git init, write hub.yaml."""
         if hub_dir is None:
             env = os.environ.get("CRUCIBLE_HUB_DIR")

@@ -2,20 +2,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from crucible.core.fingerprint import (
+    _discover_files,
     build_run_manifest,
     code_fingerprint,
     ensure_clean_commit,
-    safe_git_sha,
-    safe_git_dirty,
     safe_git_branch,
-    _discover_files,
+    safe_git_dirty,
+    safe_git_sha,
 )
-
 
 # ---------------------------------------------------------------------------
 # code_fingerprint
@@ -254,8 +253,8 @@ class TestRunnerFingerprintShim:
     """Verify that the old import path still works."""
 
     def test_shim_reexports_all_public_symbols(self):
-        from crucible.runner import fingerprint as shim
         from crucible.core import fingerprint as canonical
+        from crucible.runner import fingerprint as shim
 
         for name in (
             "safe_git_sha",

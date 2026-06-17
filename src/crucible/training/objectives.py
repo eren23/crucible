@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import torch
+    pass
 
 # Dicts passed to/from objectives contain torch.Tensor values.  We use
 # ``dict[str, Any]`` because some entries may be non-tensor metadata or
@@ -215,10 +215,10 @@ class JEPAObjective(TrainingObjective):
 from crucible.core.plugin_registry import PluginRegistry
 
 _OBJECTIVE_REGISTRY = PluginRegistry[type["TrainingObjective"]]("objective")
-OBJECTIVE_REGISTRY: dict[str, type["TrainingObjective"]] = _OBJECTIVE_REGISTRY._registry  # convenience alias
+OBJECTIVE_REGISTRY: dict[str, type[TrainingObjective]] = _OBJECTIVE_REGISTRY._registry  # convenience alias
 
 
-def register_objective(name: str, cls: type["TrainingObjective"], *, source: str = "builtin") -> None:
+def register_objective(name: str, cls: type[TrainingObjective], *, source: str = "builtin") -> None:
     """Register an objective class under *name*.
 
     Supports 3-tier precedence (builtin < global < local) via *source*.

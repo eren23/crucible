@@ -3,13 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from crucible.training.callbacks import (
     TrainingCallback,
     build_callbacks,
-    register_callback,
-    CALLBACK_REGISTRY,
 )
 
 

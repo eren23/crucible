@@ -5,10 +5,8 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from crucible.mcp.tracer import SessionTracer, load_trace, load_trace_meta
-
 
 # ---------------------------------------------------------------------------
 # SessionTracer.record
@@ -277,8 +275,9 @@ class TestTraceCliList:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_list
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_list
 
         _cmd_list(argparse.Namespace())
         out = capsys.readouterr().out
@@ -295,8 +294,9 @@ class TestTraceCliList:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_list
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_list
 
         _cmd_list(argparse.Namespace())
         out = capsys.readouterr().out
@@ -308,8 +308,9 @@ class TestTraceCliList:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_list
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_list
 
         _cmd_list(argparse.Namespace())
         out = capsys.readouterr().out
@@ -326,8 +327,9 @@ class TestTraceCliShow:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_show
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_show
 
         _cmd_show(argparse.Namespace(session_id="show-test"))
         out = capsys.readouterr().out
@@ -346,8 +348,9 @@ class TestTraceCliShow:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_show
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_show
 
         with pytest.raises(SystemExit):
             _cmd_show(argparse.Namespace(session_id="nonexistent"))
@@ -363,8 +366,9 @@ class TestTraceCliExport:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_export
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_export
 
         _cmd_export(argparse.Namespace(session_id="export-test", output=None))
         out = capsys.readouterr().out
@@ -388,8 +392,9 @@ class TestTraceCliExport:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_export
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_export
 
         out_file = tmp_path / "export.md"
         _cmd_export(argparse.Namespace(session_id="file-export", output=str(out_file)))
@@ -413,8 +418,9 @@ class TestTraceCliExport:
             lambda: type("C", (), {"project_root": tmp_path})(),
         )
 
-        from crucible.cli.trace_commands import _cmd_export
         import argparse
+
+        from crucible.cli.trace_commands import _cmd_export
 
         _cmd_export(argparse.Namespace(session_id="no-meta", output=None))
         out = capsys.readouterr().out

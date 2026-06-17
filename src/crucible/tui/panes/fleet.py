@@ -11,12 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from textual.containers import Vertical
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable, Label
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
-
 
 _COLUMNS = ["Node", "State", "GPU", "SSH", "Env", "Data", "Runs"]
 

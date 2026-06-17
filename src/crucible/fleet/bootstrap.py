@@ -9,8 +9,8 @@ import subprocess
 import threading
 import time
 import traceback
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -34,17 +34,17 @@ from crucible.fleet.inventory import (
 )
 from crucible.fleet.project_launchers import launcher_runtime_dir, resolve_launcher_bundle
 from crucible.fleet.sync import (
+    _run,
     checked_remote_exec,
     local_git_sha,
     remote_exec,
     rsync_base,
     scp_to_node,
     ssh_ok,
-    write_remote_env,
-    _run,
     sync_env_file,
     sync_repo,
     sync_taps,
+    write_remote_env,
 )
 
 BOOTSTRAP_ATTEMPTS = 3

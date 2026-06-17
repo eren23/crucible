@@ -1,8 +1,7 @@
 """Tests for crucible.core.redact — secret redaction."""
 from __future__ import annotations
 
-from crucible.core.redact import redact_secrets, _is_secret_key, _redact_string
-
+from crucible.core.redact import _is_secret_key, _redact_string, redact_secrets
 
 # ---------------------------------------------------------------------------
 # _is_secret_key

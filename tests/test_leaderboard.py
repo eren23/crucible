@@ -4,18 +4,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
-from crucible.core.config import ProjectConfig, load_config
 from crucible.analysis.leaderboard import (
-    leaderboard,
-    sensitivity_analysis,
-    pareto_frontier,
     _metric_value,
+    leaderboard,
+    pareto_frontier,
+    sensitivity_analysis,
 )
-
+from crucible.core.config import ProjectConfig
 
 # ---------------------------------------------------------------------------
 # Helpers

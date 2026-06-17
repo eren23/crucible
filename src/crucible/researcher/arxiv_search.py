@@ -25,7 +25,6 @@ from typing import Any
 from crucible.core.log import log_warn
 from crucible.researcher.literature import multi_angle_dedup
 
-
 # Prefer defusedxml when available to neutralize billion-laughs / external-
 # entity expansion on the parse path. Falls back to stdlib ElementTree
 # when defusedxml isn't installed — the failure mode is DoS (loop hangs

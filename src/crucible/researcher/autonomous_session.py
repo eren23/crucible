@@ -28,12 +28,8 @@ iterations trip :func:`detect_doom_loop` and the session aborts.
 """
 from __future__ import annotations
 
-import os
 import uuid
-from pathlib import Path
 from typing import Any
-
-import yaml
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitError
@@ -42,6 +38,8 @@ from crucible.researcher import orchestrator_api as oa
 from crucible.researcher.session_base import (
     BudgetExceeded,
     SessionBase,
+)
+from crucible.researcher.session_base import (
     fingerprint_prompt as _fingerprint,
 )
 from crucible.researcher.state import ResearchState
@@ -93,7 +91,7 @@ class AutonomousSession(SessionBase):
     STAGE_REFLECTION = "reflection"
 
     @classmethod
-    def find_active(cls, config: ProjectConfig) -> "AutonomousSession | None":
+    def find_active(cls, config: ProjectConfig) -> AutonomousSession | None:
         """Return the most recent non-terminal session for this project."""
         candidates = cls._find_active_yamls(config)
         if not candidates:
@@ -112,7 +110,7 @@ class AutonomousSession(SessionBase):
         budget_usd: float | None = None,
         with_literature: bool = False,
         literature_k: int = 5,
-    ) -> "AutonomousSession":
+    ) -> AutonomousSession:
         # Lock around find_active + write to prevent two concurrent
         # action_start calls from each creating distinct sessions.
         with cls._file_lock(cls._create_lock_path(config)):

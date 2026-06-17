@@ -205,7 +205,7 @@ class JudgePanel:
         warnings.warn(message, UserWarning, stacklevel=2)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "JudgePanel":
+    def from_dict(cls, raw: dict[str, Any]) -> JudgePanel:
         def _judge(d: dict[str, Any] | None) -> JudgeConfig:
             d = d or {}
             return JudgeConfig(
@@ -778,10 +778,10 @@ def find_config() -> Path | None:
 
 def generate_default_config() -> str:
     """Return a default crucible.yaml template as a string."""
-    return """\
+    return f"""\
 # Crucible project configuration
 name: my-project
-version: "{version}"
+version: "{CRUCIBLE_VERSION}"
 
 # Compute provider
 provider:
@@ -857,4 +857,4 @@ sync_excludes:
 # Output paths
 results_file: experiments.jsonl
 logs_dir: logs
-""".format(version=CRUCIBLE_VERSION)
+"""

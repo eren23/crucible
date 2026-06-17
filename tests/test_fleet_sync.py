@@ -1,12 +1,9 @@
 """Tests for crucible.fleet.sync — SSH/rsync helpers."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from crucible.fleet.sync import (
     rsync_base,

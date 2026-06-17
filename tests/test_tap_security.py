@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 from crucible.core.errors import TapError
-from crucible.core.tap import TapManager, _validate_name, _SAFE_NAME_RE
+from crucible.core.tap import TapManager, _validate_name
 
 
 # Reuse the fixture helper from test_tap.py
@@ -239,7 +239,6 @@ class TestNameCollision:
 class TestSubmitPrArgs:
     def test_body_without_title_still_passed_to_gh(self, tap_manager: TapManager, tmp_path: Path):
         """When title is empty but body is set, body should still be in gh_args."""
-        import crucible.core.tap as tap_module
 
         tap = _create_local_tap(tmp_path)
         tap_manager.add_tap(str(tap), name="pr-body-test")

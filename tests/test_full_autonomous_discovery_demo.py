@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 DEMO_DIR = Path(__file__).parent.parent / "examples" / "full_autonomous_discovery"
 
 

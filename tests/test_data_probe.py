@@ -8,9 +8,7 @@ no-op data bootstrap.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
-import pytest
 import yaml
 
 from crucible.core.config import (
@@ -23,7 +21,6 @@ from crucible.fleet.bootstrap import (
     _build_data_probe_command,
     _generate_paths_probe,
 )
-
 
 # ---------------------------------------------------------------------------
 # DataProbeConfig parsing

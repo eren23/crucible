@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from crucible.runner.tagger import merge_auto_tags, tag_design, tag_recipe
 
-
 # ---------------------------------------------------------------------------
 # tag_recipe
 # ---------------------------------------------------------------------------

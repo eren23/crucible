@@ -41,7 +41,6 @@ from typing import Any
 from crucible.core.errors import CrucibleError
 from crucible.core.redact import redact_secrets
 
-
 # Required + optional sections. Order is also the order they appear
 # in the rendered markdown.
 _REQUIRED_SECTIONS = (
@@ -200,7 +199,7 @@ def build_paper_draft_prompt(context: dict[str, Any]) -> dict[str, Any]:
             )
 
     if hypotheses:
-        user_parts.append(f"\n## Hypotheses (active + recent)")
+        user_parts.append("\n## Hypotheses (active + recent)")
         for h in hypotheses[:10]:
             user_parts.append(
                 f"- [{h.get('status', '?')}] {h.get('name', '?')}: "
@@ -208,7 +207,7 @@ def build_paper_draft_prompt(context: dict[str, Any]) -> dict[str, Any]:
             )
 
     if notes:
-        user_parts.append(f"\n## Recent notes")
+        user_parts.append("\n## Recent notes")
         for n in notes[:10]:
             stage = n.get("stage") or "?"
             preview = (n.get("body") or n.get("body_preview") or "").strip().replace("\n", " ")

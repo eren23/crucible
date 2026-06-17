@@ -1,12 +1,9 @@
 """Tests for crucible.researcher.peer_sync — Phase 4.3."""
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from crucible.researcher import peer_sync as ps
-
 
 # ---------------------------------------------------------------------------
 # Title + post rendering

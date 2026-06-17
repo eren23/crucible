@@ -5,8 +5,8 @@ from torch import Tensor, nn
 
 from crucible.core.types import ArgsNamespace
 from crucible.models.base import TiedEmbeddingLM
-from crucible.models.registry import register_model
 from crucible.models.components.memory import PrefixMemoryBlock
+from crucible.models.registry import register_model
 
 
 class PrefixMemoryLM(TiedEmbeddingLM):

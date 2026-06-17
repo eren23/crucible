@@ -16,7 +16,6 @@ from crucible.core.errors import ComposerError
 from crucible.core.types import ArgsNamespace, JsonValue, PluginFactory
 
 if TYPE_CHECKING:
-    import torch
     from torch import Tensor, nn
 
 
@@ -409,6 +408,7 @@ def _build_blocks(
     and ``CrucibleModel`` composers can share it.
     """
     from torch import nn
+
     from crucible.models.components.attention import _parse_block_pattern
 
     block_cfg = resolved_spec.block
@@ -505,6 +505,7 @@ def _build_stack_extras(
 def _build_composed_model(resolved: ResolvedSpec, args: ArgsNamespace) -> nn.Module:
     """Build a composed model from a resolved spec + args namespace."""
     import math
+
     import torch
     from torch import nn
 

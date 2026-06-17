@@ -1,8 +1,6 @@
 """Tests for crucible.researcher.paper_writer — Phase 4.1."""
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from crucible.researcher.paper_writer import (
@@ -11,7 +9,6 @@ from crucible.researcher.paper_writer import (
     gather_track_context,
     parse_paper_draft_response,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

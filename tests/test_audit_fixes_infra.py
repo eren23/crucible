@@ -4,15 +4,12 @@ All tests are non-torch and run without GPU.
 """
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # 3.1 — loggers.py atexit registration
@@ -100,6 +97,7 @@ class TestSyncTimeout:
     def test_remote_exec_default_timeout(self):
         """remote_exec should have a default timeout of 120."""
         import inspect
+
         from crucible.fleet.sync import remote_exec
         sig = inspect.signature(remote_exec)
         assert sig.parameters["timeout"].default == 120

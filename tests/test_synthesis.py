@@ -6,6 +6,8 @@ internal LLM call, returns ``{system, user, schema, parent_finding_ids}``.
 """
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from crucible.core.errors import ResearcherError
@@ -256,8 +258,8 @@ class TestMemoryFilter:
         project: str = "p1",
         tags: list[str] | None = None,
     ) -> dict:
-        from datetime import datetime, timedelta, timezone
-        created = datetime(2026, 5, 16, 12, 0, 0, tzinfo=timezone.utc) - timedelta(days=days_old)
+        from datetime import datetime, timedelta
+        created = datetime(2026, 5, 16, 12, 0, 0, tzinfo=UTC) - timedelta(days=days_old)
         return {
             "id": fid,
             "title": fid,

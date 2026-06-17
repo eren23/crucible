@@ -13,11 +13,9 @@ import torch
 import torch.distributed as dist
 from torch import Tensor, nn
 
-from crucible.training.data_loader import load_data_shard
-
 # BatchedTTTLoRA lives in crucible.models.components.lora
 from crucible.models.components.lora import BatchedTTTLoRA
-
+from crucible.training.data_loader import load_data_shard
 
 BOS_ID = 1
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -15,7 +14,6 @@ from crucible.researcher.harness_autonomous_session import (
     HarnessAutonomousSession,
     HarnessAutonomousSessionError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

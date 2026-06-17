@@ -19,6 +19,7 @@ class _CustomTimeout(CrucibleError):
 def _hold_lock_worker(lock_path_str: str, hold_seconds: float, ready_marker_str: str) -> None:
     """Subprocess target: acquire the lock and hold it."""
     from pathlib import Path as _Path
+
     from crucible.core.file_lock import file_lock as _fl
 
     lock_path = _Path(lock_path_str)

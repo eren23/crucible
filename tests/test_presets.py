@@ -5,13 +5,12 @@ import pytest
 
 from crucible.core.config import ProjectConfig
 from crucible.runner.presets import (
-    PRESET_DEFAULTS,
     CLI_TIMEOUT_DEFAULTS,
+    PRESET_DEFAULTS,
     get_preset,
-    list_presets,
     get_timeout_hint,
+    list_presets,
 )
-
 
 # ---------------------------------------------------------------------------
 # get_preset

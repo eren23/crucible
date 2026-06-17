@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -38,8 +37,8 @@ class TestBuildProvider:
 
     def test_unknown_type_raises_plugin_error(self, fleet_config: ProjectConfig):
         """Unrecognized provider type raises PluginError."""
-        from crucible.fleet.manager import FleetManager
         from crucible.core.errors import PluginError
+        from crucible.fleet.manager import FleetManager
 
         fleet_config.provider.type = "kubernetes"
         with pytest.raises(PluginError, match="Unknown fleet provider"):

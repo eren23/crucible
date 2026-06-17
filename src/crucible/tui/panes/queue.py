@@ -15,7 +15,6 @@ from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError
 from crucible.core.log import log_warn
 
-
 _COLUMNS = ["Run ID", "Name", "Tier", "Lease", "Node", "Updated"]
 
 

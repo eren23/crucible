@@ -5,9 +5,9 @@ import argparse
 
 import pytest
 
+from crucible.cli.run_commands import _handle_run
 from crucible.core.config import ProjectConfig, ProviderConfig, WandbConfig
 from crucible.core.errors import ConfigError
-from crucible.cli.run_commands import _handle_run
 
 
 def test_run_experiment_cli_rejects_local_execution(monkeypatch):

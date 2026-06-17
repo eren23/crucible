@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import random
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +132,7 @@ class Tournament:
         initial_rating: float = _DEFAULT_INITIAL_RATING,
         k_factor: float = _DEFAULT_K,
         seed: int | None = None,
-    ) -> "Tournament":
+    ) -> Tournament:
         """Create a new tournament with the given hypotheses.
 
         Each hypothesis dict must have an ``id`` (string). If absent, one

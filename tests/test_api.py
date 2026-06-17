@@ -15,6 +15,7 @@ fastapi = pytest.importorskip("fastapi")
 def client(tmp_path: Path):
     """Create a test client with a temp NoteStore."""
     from fastapi.testclient import TestClient
+
     from crucible.api.server import create_app
 
     store = NoteStore(tmp_path / ".crucible")

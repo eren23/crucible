@@ -24,17 +24,16 @@ mis-separated judge panels fail before any pod time is consumed.
 """
 from __future__ import annotations
 
-import os
 import uuid
-from pathlib import Path
 from typing import Any
 
 from crucible.core.config import ProjectConfig
 from crucible.core.errors import CrucibleError, ResearcherError
 from crucible.core.log import utc_now_iso
 from crucible.researcher.session_base import (
-    BudgetExceeded,
     SessionBase,
+)
+from crucible.researcher.session_base import (
     fingerprint_prompt as _fingerprint,
 )
 
@@ -86,7 +85,7 @@ class HarnessAutonomousSession(SessionBase):
     @classmethod
     def find_active(
         cls, config: ProjectConfig, tree_name: str
-    ) -> "HarnessAutonomousSession | None":
+    ) -> HarnessAutonomousSession | None:
         for _ts, sid, data in cls._find_active_yamls(config):
             if data.get("tree_name") == tree_name:
                 return cls(config, sid).load()
@@ -103,7 +102,7 @@ class HarnessAutonomousSession(SessionBase):
         n_candidates: int = 3,
         dry_run: bool = False,
         budget_usd: float | None = None,
-    ) -> "HarnessAutonomousSession":
+    ) -> HarnessAutonomousSession:
         with cls._file_lock(cls._create_lock_path(config)):
             existing = cls.find_active(config, tree_name)
             if existing is not None:

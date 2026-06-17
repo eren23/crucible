@@ -23,11 +23,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from crucible.core.errors import CrucibleError, HfError
+from crucible.core.errors import HfError
 from crucible.core.log import log_warn
 from crucible.core.redact import redact_secrets
 from crucible.researcher.hf_discussions import list_discussions, post_discussion
-
 
 _DISCUSSION_TITLE_PREFIX = "crucible-peer-sync:"
 
@@ -229,6 +228,7 @@ def _post_comment_or_new_discussion(
     """
     try:
         from huggingface_hub import HfApi  # type: ignore
+
         from crucible.core.hf_writer import resolve_token
 
         api = HfApi(token=resolve_token(token))
@@ -271,6 +271,7 @@ def _fetch_peer_findings(
         return []
     try:
         from huggingface_hub import HfApi  # type: ignore
+
         from crucible.core.hf_writer import resolve_token
 
         api = HfApi(token=resolve_token(token))

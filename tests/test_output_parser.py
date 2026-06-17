@@ -6,21 +6,20 @@ import signal
 import pytest
 
 from crucible.runner.output_parser import (
+    FINAL_RE,
+    MODEL_BYTES_RE,
+    STEP_RE,
+    STOPPING_RE,
+    TRAIN_LOSS_RE,
+    TRAIN_TIME_RE,
+    VAL_RE,
+    WARMUP_RE,
     OutputParser,
+    classify_failure,
     parse_output,
     steps_seen,
-    classify_failure,
     tail,
-    FINAL_RE,
-    STEP_RE,
-    TRAIN_LOSS_RE,
-    VAL_RE,
-    MODEL_BYTES_RE,
-    STOPPING_RE,
-    WARMUP_RE,
-    TRAIN_TIME_RE,
 )
-
 
 # ---------------------------------------------------------------------------
 # Regex pattern tests

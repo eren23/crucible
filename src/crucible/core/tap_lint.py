@@ -26,9 +26,9 @@ from __future__ import annotations
 import ast
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import yaml
 
@@ -214,7 +214,7 @@ class L004_MissingPerPluginReadme(LintCheck):
         for _, plugin_dir in _walk_plugin_dirs(tap_root):
             if not (plugin_dir / "README.md").is_file():
                 issues.append(self._issue(
-                    f"plugin folder missing README.md",
+                    "plugin folder missing README.md",
                     plugin_dir / "README.md",
                     fix_hint=f"add a one-paragraph README inside {plugin_dir}",
                 ))

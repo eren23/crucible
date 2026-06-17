@@ -7,9 +7,6 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
-from crucible.core.errors import SearchTreeError
 from crucible.researcher.hypothesis import (
     _build_tree_context,
     _parse_tree_children,
@@ -17,7 +14,6 @@ from crucible.researcher.hypothesis import (
 )
 from crucible.researcher.search_tree import SearchTree
 from crucible.researcher.tree_loop import TreeSearchResearcher
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -290,7 +286,7 @@ class TestStatusAndConfigs:
         assert len(configs) == 1
         assert configs[0]["name"] == "exp_a"
         assert configs[0]["config"]["LR"] == "3e-4"
-        assert f"tree:configs-tree" in configs[0]["tags"]
+        assert "tree:configs-tree" in configs[0]["tags"]
 
 
 # ---------------------------------------------------------------------------

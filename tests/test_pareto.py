@@ -12,7 +12,6 @@ from crucible.analysis.leaderboard import (
 )
 from crucible.researcher.search_tree import SearchTree
 
-
 # ---------------------------------------------------------------------------
 # Pure utility tests
 # ---------------------------------------------------------------------------

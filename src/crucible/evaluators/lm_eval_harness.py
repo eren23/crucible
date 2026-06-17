@@ -30,8 +30,8 @@ from typing import Any
 
 from crucible.core.evaluators import (
     EvalResult,
-    EvalValidationResult,
     EvaluatorPlugin,
+    EvalValidationResult,
     register_evaluator,
 )
 

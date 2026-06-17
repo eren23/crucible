@@ -21,7 +21,6 @@ import signal
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Default regex patterns
 # ---------------------------------------------------------------------------
@@ -94,7 +93,7 @@ class OutputParser:
     generic_metric_re: re.Pattern[str] = field(default_factory=lambda: GENERIC_METRIC_RE)
 
     @classmethod
-    def from_config(cls, patterns: dict[str, str] | None = None) -> "OutputParser":
+    def from_config(cls, patterns: dict[str, str] | None = None) -> OutputParser:
         """Build a parser, optionally overriding regex strings from config."""
         if not patterns:
             return cls()

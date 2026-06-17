@@ -2,7 +2,6 @@
 import sys
 from pathlib import Path
 
-import pytest
 import torch
 
 # Add repo root to path so examples/ is importable
@@ -104,8 +103,8 @@ class TestJEPAWorldModel:
         assert JEPAWorldModel.modality() == "world_model"
 
     def test_factory_registration(self):
-        from examples.world_model.model import register
         from crucible.models.registry import _REGISTRY as MODEL_REGISTRY
+        from examples.world_model.model import register
 
         try:
             register()

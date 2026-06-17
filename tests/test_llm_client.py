@@ -1,10 +1,7 @@
 """Tests for crucible.researcher.llm_client."""
 from __future__ import annotations
 
-import pytest
-
 from crucible.researcher.llm_client import parse_json_from_text
-
 
 # ---------------------------------------------------------------------------
 # parse_json_from_text

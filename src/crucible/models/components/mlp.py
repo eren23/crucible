@@ -6,7 +6,6 @@ from torch import Tensor, nn
 
 from crucible.models.components.linear import CastedLinear
 
-
 # ---------------------------------------------------------------------------
 # Activation function registry
 # ---------------------------------------------------------------------------

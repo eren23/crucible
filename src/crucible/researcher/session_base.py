@@ -188,7 +188,7 @@ class SessionBase:
     # Persistence
     # ------------------------------------------------------------------
 
-    def load(self) -> "SessionBase":
+    def load(self) -> SessionBase:
         if not self.yaml_path.exists():
             raise self.NOT_FOUND_EXC(
                 f"Session {self.session_id!r} not found at {self.yaml_path}"

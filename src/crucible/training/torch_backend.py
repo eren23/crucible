@@ -28,30 +28,31 @@ import torch.distributed as dist
 from torch import Tensor, nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-# Crucible training modules (siblings)
-from crucible.training.hyperparams import Hyperparameters
-from crucible.training.muon import zeropower_via_newtonschulz5
-from crucible.training.data_loader import DistributedTokenLoader
-from crucible.training.validation import validate_model, build_sentencepiece_luts, load_validation_tokens
-from crucible.training.quantization import (
-    CONTROL_TENSOR_NAME_PATTERNS,
-    quantize_state_dict,
-    dequantize_state_dict,
-    compress_blob,
-    decompress_blob,
-    fake_int6_quant,
-)
-from crucible.training.ttt_eval import ttt_lora_evaluate
+from crucible.core.fingerprint import code_fingerprint
+from crucible.core.io import collect_public_attrs
+from crucible.models.components.linear import CastedLinear
 
 # Crucible model layer
 from crucible.models.registry import build_model
-from crucible.models.components.linear import CastedLinear
 
 # Crucible runner utilities
 from crucible.runner.tracker import RunTracker
 from crucible.runner.wandb_logger import WandbLogger
-from crucible.core.fingerprint import code_fingerprint
-from crucible.core.io import collect_public_attrs
+from crucible.training.data_loader import DistributedTokenLoader
+
+# Crucible training modules (siblings)
+from crucible.training.hyperparams import Hyperparameters
+from crucible.training.muon import zeropower_via_newtonschulz5
+from crucible.training.quantization import (
+    CONTROL_TENSOR_NAME_PATTERNS,
+    compress_blob,
+    decompress_blob,
+    dequantize_state_dict,
+    fake_int6_quant,
+    quantize_state_dict,
+)
+from crucible.training.ttt_eval import ttt_lora_evaluate
+from crucible.training.validation import build_sentencepiece_luts, load_validation_tokens, validate_model
 
 try:
     import zstandard as zstd

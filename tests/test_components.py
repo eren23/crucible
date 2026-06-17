@@ -5,13 +5,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from crucible.models.components.norm import RMSNorm
-from crucible.models.components.linear import CastedLinear
-from crucible.models.components.mlp import MLP, ACTIVATIONS
-from crucible.models.components.moe import MoELayer
 from crucible.models.components.conv import DepthwiseConv1D
 from crucible.models.components.gate import SmearGate
-
+from crucible.models.components.linear import CastedLinear
+from crucible.models.components.mlp import ACTIVATIONS, MLP
+from crucible.models.components.moe import MoELayer
+from crucible.models.components.norm import RMSNorm
 
 DIM = 64
 BATCH = 2

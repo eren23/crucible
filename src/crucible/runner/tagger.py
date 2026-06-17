@@ -15,8 +15,9 @@ namespaces remain discoverable in ``recipe_list`` queries.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 # Recognized presets — keep aligned with crucible.core.config preset list.
 _KNOWN_PRESETS = frozenset({"smoke", "screen", "proxy", "medium", "promotion", "overnight"})

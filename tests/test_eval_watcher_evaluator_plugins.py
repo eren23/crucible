@@ -7,11 +7,6 @@ through the Phase 3.3 registry instead of shelling out to a script.
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
-import pytest
-
 
 def test_eval_spec_dataclass_supports_evaluator_field():
     from crucible.runner.eval_watcher import EvalSpec
@@ -126,8 +121,10 @@ def test_run_one_eval_failed_evaluator_returns_failure_row(tmp_path):
 
 def test_run_one_eval_discovers_local_evaluator_plugin(tmp_path, monkeypatch):
     import sys
+
     from crucible.core import evaluators as _evals
-    from crucible.runner.eval_watcher import EvalSpec, _run_one_eval as run_one
+    from crucible.runner.eval_watcher import EvalSpec
+    from crucible.runner.eval_watcher import _run_one_eval as run_one
 
     plugin_dir = tmp_path / ".crucible" / "plugins" / "evaluators"
     plugin_dir.mkdir(parents=True)
@@ -164,7 +161,8 @@ def test_run_one_eval_discovers_local_evaluator_plugin(tmp_path, monkeypatch):
 
 def test_run_one_eval_logs_when_discovery_fails(tmp_path, monkeypatch):
     from crucible.core import evaluators as _evals
-    from crucible.runner.eval_watcher import EvalSpec, _run_one_eval as run_one
+    from crucible.runner.eval_watcher import EvalSpec
+    from crucible.runner.eval_watcher import _run_one_eval as run_one
 
     class _Stub(_evals.EvaluatorPlugin):
         def validate(self):

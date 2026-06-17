@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import pytest
 
 
@@ -12,7 +11,9 @@ class TestEpochsParam:
     def test_epochs_default_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("EPOCHS", raising=False)
         # Must re-import to pick up the patched env
-        import importlib, crucible.training.hyperparams as hp_mod
+        import importlib
+
+        import crucible.training.hyperparams as hp_mod
         importlib.reload(hp_mod)
         from crucible.training.hyperparams import Hyperparameters
         h = Hyperparameters()
@@ -20,7 +21,9 @@ class TestEpochsParam:
 
     def test_epochs_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPOCHS", "3")
-        import importlib, crucible.training.hyperparams as hp_mod
+        import importlib
+
+        import crucible.training.hyperparams as hp_mod
         importlib.reload(hp_mod)
         from crucible.training.hyperparams import Hyperparameters
         h = Hyperparameters()
@@ -28,7 +31,9 @@ class TestEpochsParam:
 
     def test_epochs_invalid_uses_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("EPOCHS", "notanumber")
-        import importlib, crucible.training.hyperparams as hp_mod
+        import importlib
+
+        import crucible.training.hyperparams as hp_mod
         importlib.reload(hp_mod)
         from crucible.training.hyperparams import Hyperparameters
         h = Hyperparameters()

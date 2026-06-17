@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from crucible.core.io import atomic_write_json, _json_ready
+from crucible.core.io import _json_ready, atomic_write_json
 from crucible.core.log import utc_now_iso, utc_stamp
 from crucible.core.types import ExperimentResult, JsonDict, JsonValue, NodeRecord, QueueItem
 
@@ -76,8 +76,8 @@ def record_day_progress(
     wave_name: str | None = None,
 ) -> None:
     """Update the day summary with the latest fleet progress."""
-    from crucible.fleet.inventory import summarize_nodes, count_bootstrapped_ready
-    from crucible.fleet.queue import summarize_queue, summarize_idle_capacity
+    from crucible.fleet.inventory import count_bootstrapped_ready, summarize_nodes
+    from crucible.fleet.queue import summarize_idle_capacity, summarize_queue
 
     updates: dict[str, Any] = {}
     if phase is not None:

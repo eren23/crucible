@@ -21,7 +21,6 @@ from crucible.analysis.export import (
     print_rank,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fake config + results — sidesteps the full ProjectConfig loader.
 # ---------------------------------------------------------------------------

@@ -26,7 +26,6 @@ from typing import Any
 from crucible.core.config import ProjectConfig
 from crucible.core.log import log_warn
 
-
 # Reasons map to action-rationale tuples. Strings are user-visible.
 _R_NO_PODS = (
     "provision_nodes",

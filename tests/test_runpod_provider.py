@@ -1,8 +1,7 @@
 """Tests for RunPod provider payload validation, stop/start, and inventory record state machine."""
 from __future__ import annotations
 
-from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

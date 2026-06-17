@@ -4,13 +4,11 @@ from __future__ import annotations
 import multiprocessing
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
 from crucible.core.errors import SearchTreeError
 from crucible.researcher.search_tree import SearchTree
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -513,6 +511,7 @@ class TestRenderAscii:
 def _expand_worker(tree_dir_str: str, root_id: str, name: str) -> None:
     """Subprocess target: acquire write_lock, expand a child, release."""
     from pathlib import Path as _Path
+
     from crucible.researcher.search_tree import SearchTree as _Tree
 
     tree = _Tree.load(_Path(tree_dir_str))

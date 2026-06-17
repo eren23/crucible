@@ -1,13 +1,13 @@
 """Tests for the generic PluginRegistry and plugin discovery."""
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 
-from crucible.core.errors import PluginError
-from crucible.core.plugin_registry import PluginRegistry
-from crucible.core.plugin_discovery import discover_all_plugins
+import pytest
 
+from crucible.core.errors import PluginError
+from crucible.core.plugin_discovery import discover_all_plugins
+from crucible.core.plugin_registry import PluginRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures

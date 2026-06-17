@@ -31,8 +31,9 @@ from crucible.core.errors import CrucibleError, ResearcherError, StaleSubmitErro
 from crucible.core.log import utc_now_iso
 from crucible.researcher.search_tree import SearchTree
 from crucible.researcher.session_base import (
-    BudgetExceeded,
     SessionBase,
+)
+from crucible.researcher.session_base import (
     fingerprint_prompt as _fingerprint,
 )
 
@@ -66,7 +67,7 @@ class TreeAutonomousSession(SessionBase):
     @classmethod
     def find_active(
         cls, config: ProjectConfig, tree_name: str
-    ) -> "TreeAutonomousSession | None":
+    ) -> TreeAutonomousSession | None:
         """Return the most recent non-terminal session for this tree, if any."""
         for _ts, sid, data in cls._find_active_yamls(config):
             if data.get("tree_name") == tree_name:
@@ -82,7 +83,7 @@ class TreeAutonomousSession(SessionBase):
         iterations: int,
         n_children: int = 3,
         budget_usd: float | None = None,
-    ) -> "TreeAutonomousSession":
+    ) -> TreeAutonomousSession:
         """Create a session (or return the existing one for this tree)."""
         with cls._file_lock(cls._create_lock_path(config)):
             existing = cls.find_active(config, tree_name)

@@ -20,7 +20,6 @@ import pytest
 from crucible.core.config import HfCollabConfig, ProjectConfig
 from crucible.core.errors import HfError
 
-
 # ---------------------------------------------------------------------------
 # Fake huggingface_hub for Phase 2: separate from Phase 1 module so the
 # read-side surface (discussions, paper-style fetches) is exercised.

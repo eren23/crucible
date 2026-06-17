@@ -13,7 +13,6 @@ import yaml
 from crucible.core.hub import HubStore
 from crucible.runner.notes import NoteStore
 
-
 # ---------------------------------------------------------------------------
 # NoteStore tests (backing CLI note commands)
 # ---------------------------------------------------------------------------

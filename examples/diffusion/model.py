@@ -27,7 +27,6 @@ from torch import Tensor, nn
 from crucible.models.base import CrucibleModel
 from crucible.models.registry import register_model
 
-
 # ---------------------------------------------------------------------------
 # Diffusion schedule helpers
 # ---------------------------------------------------------------------------
@@ -54,7 +53,7 @@ class DiffusionSchedule:
         self.register["sqrt_alphas_cumprod"] = torch.sqrt(alphas_cumprod)
         self.register["sqrt_one_minus_alphas_cumprod"] = torch.sqrt(1.0 - alphas_cumprod)
 
-    def to(self, device: torch.device) -> "DiffusionSchedule":
+    def to(self, device: torch.device) -> DiffusionSchedule:
         for k, v in self.register.items():
             self.register[k] = v.to(device)
         return self

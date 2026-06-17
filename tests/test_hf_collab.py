@@ -21,7 +21,6 @@ import yaml
 from crucible.core.config import HfCollabConfig, ProjectConfig, load_config
 from crucible.core.errors import HfError, HubError
 
-
 # ---------------------------------------------------------------------------
 # Config + error
 # ---------------------------------------------------------------------------

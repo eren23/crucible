@@ -17,11 +17,10 @@ import math
 import random
 import re
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
-
-import yaml
+from typing import Any
 
 from crucible.core.errors import SearchTreeError
 from crucible.core.file_lock import DEFAULT_TIMEOUT_SECONDS, file_lock
@@ -64,7 +63,7 @@ class SearchTree:
         max_expansions_per_node: int = 5,
         metrics: list[dict[str, str]] | None = None,
         candidate_store_dir: str | None = None,
-    ) -> "SearchTree":
+    ) -> SearchTree:
         """Create a new search tree on disk.
 
         ``metrics`` enables multi-metric Pareto-frontier tracking. When unset,
@@ -142,7 +141,7 @@ class SearchTree:
         return tree
 
     @classmethod
-    def load(cls, tree_dir: Path) -> "SearchTree":
+    def load(cls, tree_dir: Path) -> SearchTree:
         """Load an existing search tree from disk."""
         tree_dir = Path(tree_dir)
         tree = cls(tree_dir)
@@ -1052,7 +1051,7 @@ class SearchTree:
         *,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         poll_interval: float = 0.1,
-    ) -> Iterator["SearchTree"]:
+    ) -> Iterator[SearchTree]:
         """Acquire an exclusive advisory lock + reload from disk.
 
         Use for any read-modify-write sequence on the tree (snapshot check

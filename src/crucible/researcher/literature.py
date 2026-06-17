@@ -21,7 +21,6 @@ from typing import Any
 
 from crucible.core.log import log_info, log_warn
 
-
 # Literature search failures are best-effort — network/parse/data-shape errors
 # return empty results rather than blocking the research loop.
 _LITERATURE_FAILURES = (

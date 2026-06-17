@@ -15,12 +15,11 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Any
 
-from crucible.core.io import atomic_write_json, _json_ready
+from crucible.core.fingerprint import code_fingerprint, safe_git_dirty, safe_git_sha
+from crucible.core.io import _json_ready, atomic_write_json
 from crucible.core.log import log_warn, utc_now_iso
 from crucible.core.types import JsonDict, JsonValue
-from crucible.core.fingerprint import code_fingerprint, safe_git_sha, safe_git_dirty
 
 
 class RunTracker:

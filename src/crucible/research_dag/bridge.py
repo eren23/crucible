@@ -431,9 +431,9 @@ class ResearchDAGBridge:
 
     def _http_request(self, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
         """Make HTTP request to Spider Chat backend. Raises on failure."""
+        import urllib.error
         import urllib.parse
         import urllib.request
-        import urllib.error
 
         # Validate URL is well-formed to prevent injection
         parsed = urllib.parse.urlparse(self.spiderchat_url)

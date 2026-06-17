@@ -4,11 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from crucible.researcher.batch_design import design_batch, DEFAULT_TIER_COSTS
+from crucible.researcher.batch_design import DEFAULT_TIER_COSTS, design_batch
 from crucible.researcher.state import ResearchState
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -5,16 +5,13 @@ All tests use local git repos in tmp_path — no network access needed.
 from __future__ import annotations
 
 import subprocess
-import textwrap
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
 
 from crucible.core.errors import CrucibleError, TapError
-from crucible.core.tap import TapManager, VALID_PLUGIN_TYPES
-
+from crucible.core.tap import VALID_PLUGIN_TYPES, TapManager
 
 # ---------------------------------------------------------------------------
 # Fixtures

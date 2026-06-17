@@ -1,18 +1,16 @@
 """Tests for crucible.core.data_sources module."""
 
 import pytest
+
 import crucible.data_sources  # noqa: F401 — register builtins
 from crucible.core.config import DataConfig
 from crucible.core.data_sources import (
-    DataStatus,
-    DataSourcePlugin,
-    DataPipeline,
     DEFAULT_PARAMETER_GOLF_HF_REPO,
+    DataPipeline,
+    DataSourcePlugin,
+    DataStatus,
     bootstrap_data_source_spec_from_data_config,
     describe_data_source,
-    register_data_source,
-    list_data_sources,
-    build_data_source,
 )
 
 

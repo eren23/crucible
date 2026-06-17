@@ -4,20 +4,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from crucible.core.io import (
     _json_ready,
+    append_jsonl,
     atomic_write_json,
     atomic_write_yaml,
+    collect_public_attrs,
     read_jsonl,
     read_yaml,
     write_jsonl,
     write_yaml,
-    append_jsonl,
-    collect_public_attrs,
 )
-
 
 # ---------------------------------------------------------------------------
 # _json_ready

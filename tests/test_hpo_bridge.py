@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Config validation (no Optuna needed for these — they fail before import)
@@ -149,7 +147,7 @@ class TestAskTellRoundtrip:
         assert all(t["status"] == "complete" for t in data["trials"])
 
     def test_tell_unknown_trial_raises(self, tmp_path):
-        from crucible.training.hpo_bridge import HPOStudy, HPOStateError
+        from crucible.training.hpo_bridge import HPOStateError, HPOStudy
         study = HPOStudy(
             name="bad-tell",
             params={"LR": {"type": "float", "low": 0, "high": 1}},
@@ -160,7 +158,7 @@ class TestAskTellRoundtrip:
             study.tell(9999, 0.5)
 
     def test_tell_double_raises(self, tmp_path):
-        from crucible.training.hpo_bridge import HPOStudy, HPOStateError
+        from crucible.training.hpo_bridge import HPOStateError, HPOStudy
         study = HPOStudy(
             name="dup-tell",
             params={"LR": {"type": "float", "low": 0, "high": 1}},
@@ -242,7 +240,7 @@ class TestAskTellRoundtrip:
         assert reloaded.best()["score"] == 0.1
 
     def test_load_missing_file_raises(self, tmp_path):
-        from crucible.training.hpo_bridge import HPOStudy, HPOConfigError
+        from crucible.training.hpo_bridge import HPOConfigError, HPOStudy
         with pytest.raises(HPOConfigError, match="No persisted HPO study"):
             HPOStudy.load(name="nonexistent", storage_dir=tmp_path)
 
@@ -276,7 +274,7 @@ class TestMCPLayerFixes:
         return _C()
 
     def test_hpo_create_study_idempotency_guard(self, tmp_path, monkeypatch):
-        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        from crucible.mcp.tools import _HPO_STUDY_CACHE, TOOL_DISPATCH
         _HPO_STUDY_CACHE.clear()
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -302,7 +300,7 @@ class TestMCPLayerFixes:
     def test_hpo_tell_result_missing_trial_id_is_clean_error(
         self, tmp_path, monkeypatch
     ):
-        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        from crucible.mcp.tools import _HPO_STUDY_CACHE, TOOL_DISPATCH
         _HPO_STUDY_CACHE.clear()
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -322,7 +320,7 @@ class TestMCPLayerFixes:
     def test_hpo_tell_result_non_numeric_score_is_clean_error(
         self, tmp_path, monkeypatch
     ):
-        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        from crucible.mcp.tools import _HPO_STUDY_CACHE, TOOL_DISPATCH
         _HPO_STUDY_CACHE.clear()
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -348,7 +346,8 @@ class TestMCPLayerFixes:
         ask returns a distinct trial_id and no in-memory state is
         lost."""
         import threading
-        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+
+        from crucible.mcp.tools import _HPO_STUDY_CACHE, TOOL_DISPATCH
         _HPO_STUDY_CACHE.clear()
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -388,7 +387,7 @@ class TestMCPLayerFixes:
     def test_hpo_cross_process_resume_via_mcp(self, tmp_path, monkeypatch):
         """End-to-end: create + 3 trials + clear cache + tell continues
         without 'Unknown trial_id'."""
-        from crucible.mcp.tools import TOOL_DISPATCH, _HPO_STUDY_CACHE
+        from crucible.mcp.tools import _HPO_STUDY_CACHE, TOOL_DISPATCH
         _HPO_STUDY_CACHE.clear()
         monkeypatch.setattr(
             "crucible.mcp.tools._get_config",
@@ -432,9 +431,9 @@ def test_code_mutation_policy_default_name():
     callers can use get_code_mutation_policy() (no args) to reach it.
     """
     from crucible.researcher.code_mutation import (
+        StubCodeMutationPolicy,
         get_code_mutation_policy,
         list_code_mutation_policies,
-        StubCodeMutationPolicy,
     )
     assert "code_mutation" in list_code_mutation_policies()
     # Legacy alias still works.

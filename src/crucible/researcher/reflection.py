@@ -4,7 +4,6 @@ from __future__ import annotations
 from crucible.researcher.llm_client import LLMClient, parse_json_from_text
 from crucible.researcher.state import ResearchState
 
-
 REFLECTION_SYSTEM_PROMPT = (
     "You are reflecting on experiment results for an ML research project. "
     "Given the results and predictions, provide:\n"

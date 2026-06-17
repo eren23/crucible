@@ -27,7 +27,6 @@ from torch import Tensor, nn
 from crucible.models.base import CrucibleModel
 from crucible.models.registry import register_model
 
-
 # ---------------------------------------------------------------------------
 # Encoder
 # ---------------------------------------------------------------------------

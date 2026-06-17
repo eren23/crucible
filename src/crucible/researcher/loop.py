@@ -89,7 +89,7 @@ class AutonomousResearcher:
                     log_warn(f"doom-loop detector failed (non-fatal): {dl_exc}")
                     correction = None
                 if correction:
-                    print(f"  ⚠ Doom-loop detected — injecting corrective prompt")
+                    print("  ⚠ Doom-loop detected — injecting corrective prompt")
                     analysis = f"{analysis}\n\n### Corrective guidance\n{correction}"
 
                 # Literature awareness (best-effort, never blocks the loop)

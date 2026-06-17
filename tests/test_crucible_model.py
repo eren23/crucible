@@ -7,7 +7,6 @@ from torch import Tensor, nn
 
 from crucible.models.base import CrucibleModel, TiedEmbeddingLM
 
-
 # ---------------------------------------------------------------------------
 # CrucibleModel is ABC
 # ---------------------------------------------------------------------------

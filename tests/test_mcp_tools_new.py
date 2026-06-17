@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # get_run_logs
@@ -395,7 +393,7 @@ class TestFleetStatusMetrics:
 
     def test_with_metrics_mocked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """When include_metrics=true with mocked SSH, metrics are returned."""
-        from crucible.mcp.tools import get_fleet_status, _probe_node_metrics
+        from crucible.mcp.tools import get_fleet_status
 
         nodes_file = tmp_path / "nodes.json"
         nodes_file.write_text(json.dumps([
@@ -506,8 +504,8 @@ class TestPreconditionChecks:
 class TestConfigGetModalities:
     def test_returns_training_backends(self, monkeypatch: pytest.MonkeyPatch):
         """config_get_modalities returns training backends with modality tags."""
-        from crucible.mcp.tools import config_get_modalities
         from crucible.core.config import TrainingConfig
+        from crucible.mcp.tools import config_get_modalities
 
         class FakeConfig:
             training = [
@@ -526,8 +524,8 @@ class TestConfigGetModalities:
 
     def test_returns_data_adapters(self, monkeypatch: pytest.MonkeyPatch):
         """config_get_modalities lists registered data adapters."""
-        from crucible.mcp.tools import config_get_modalities
         from crucible.core.config import TrainingConfig
+        from crucible.mcp.tools import config_get_modalities
 
         class FakeConfig:
             training = [TrainingConfig(backend="torch", script="train.py")]
@@ -540,8 +538,8 @@ class TestConfigGetModalities:
 
     def test_returns_objectives(self, monkeypatch: pytest.MonkeyPatch):
         """config_get_modalities lists registered training objectives."""
-        from crucible.mcp.tools import config_get_modalities
         from crucible.core.config import TrainingConfig
+        from crucible.mcp.tools import config_get_modalities
 
         class FakeConfig:
             training = [TrainingConfig(backend="torch", script="train.py")]

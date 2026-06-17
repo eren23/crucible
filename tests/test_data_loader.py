@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import numpy as np
-import pytest
 from pathlib import Path
+
+import numpy as np
 
 from crucible.training.data_loader import count_shard_tokens
 

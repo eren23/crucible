@@ -24,7 +24,6 @@ from typing import Any
 from crucible.core.errors import ResearcherError
 from crucible.core.log import log_warn
 
-
 _GITHUB_API = "https://api.github.com"
 
 

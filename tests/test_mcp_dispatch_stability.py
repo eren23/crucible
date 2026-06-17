@@ -30,7 +30,6 @@ import pytest
 from crucible.core.errors import CrucibleError
 from crucible.mcp.tools import TOOL_DISPATCH
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

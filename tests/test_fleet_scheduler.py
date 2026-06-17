@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -10,10 +9,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from crucible.fleet.scheduler import (
+    _interpolate_baseline,
     dispatch,
     merge_results,
-    launch_experiment,
-    _interpolate_baseline,
 )
 
 

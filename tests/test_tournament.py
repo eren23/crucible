@@ -4,15 +4,13 @@ from __future__ import annotations
 import pytest
 
 from crucible.researcher.tournament import (
-    Hypothesis,
+    _DEFAULT_INITIAL_RATING,
     Tournament,
     TournamentError,
-    _DEFAULT_INITIAL_RATING,
     _expected_score,
     _update_elo,
     judge_request_prompt,
 )
-
 
 # ---------------------------------------------------------------------------
 # Elo math

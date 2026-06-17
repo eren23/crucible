@@ -1,26 +1,21 @@
 """Tests for crucible.fleet.queue."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-import pytest
-
 from crucible.fleet.queue import (
-    make_run_id,
-    load_queue,
-    save_queue,
-    reset_queue,
-    purge_finished,
     enqueue_experiments,
+    load_queue,
+    make_run_id,
+    purge_finished,
     reconcile_queue_with_results,
-    summarize_queue,
-    wave_rows,
-    wave_result_rows,
+    reset_queue,
     results_by_id,
+    save_queue,
+    summarize_queue,
+    wave_result_rows,
+    wave_rows,
 )
-
 
 # ---------------------------------------------------------------------------
 # make_run_id

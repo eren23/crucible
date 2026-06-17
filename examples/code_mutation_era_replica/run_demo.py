@@ -30,7 +30,6 @@ from crucible.researcher.code_mutation import (
     score_stdout,
 )
 
-
 _HERE = Path(__file__).resolve().parent
 _PROJECT_ROOT = _HERE  # the example dir IS the sandboxed project for this demo
 
