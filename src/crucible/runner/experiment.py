@@ -31,8 +31,8 @@ from crucible.core.io import append_jsonl, read_jsonl
 from crucible.core.log import log_warn
 from crucible.core.config import ProjectConfig, load_config
 from crucible.core.experiment_contract import contract_metadata
+from crucible.core.naming import normalize_project_name
 from crucible.core.types import ExperimentResult
-from crucible.fleet.providers.runpod import normalize_project_name
 
 
 def derive_wandb_run_name(

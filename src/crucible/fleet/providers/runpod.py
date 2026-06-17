@@ -20,6 +20,7 @@ from urllib import request as urlrequest
 from crucible.core.errors import FleetError
 from crucible.core.types import JsonDict, JsonValue
 from crucible.core.log import log_info, log_success, log_warn, utc_now_iso
+from crucible.core.naming import normalize_project_name
 from crucible.core.types import NodeRecord
 from crucible.fleet.provider import FleetProvider
 from crucible.fleet.sync import ssh_ok
@@ -68,25 +69,6 @@ def runpod_api_key() -> str:
 # existing pre-tag pods keep working.
 
 PROJECT_TAG_SEPARATOR = "__"
-
-
-def normalize_project_name(name: str) -> str:
-    """Coerce a project name into a RunPod-safe identifier.
-
-    Replaces any character outside ``[A-Za-z0-9_-]`` with ``-``. Collapses
-    runs of ``_`` so ``__`` (the project/prefix separator) can never appear
-    inside the normalized name itself — without that, project ``foo`` would
-    falsely claim pods belonging to project ``foo__bar``. Empty / all-junk
-    input returns ``""`` so callers can branch on the legacy un-tagged path.
-    """
-    if not name:
-        return ""
-    cleaned = "".join(c if (c.isalnum() or c in "-_") else "-" for c in name)
-    cleaned = cleaned.strip("-_")
-    # Collapse `_+` runs to a single `_` so the separator is unambiguous.
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned or ""
 
 
 def validate_name_prefix(name_prefix: str) -> None:
