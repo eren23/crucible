@@ -25,8 +25,8 @@ from crucible.researcher.code_mutation import (
     AstLocalEditPolicy,
     MutationProposal,
     SandboxConfig,
-    SandboxRunner,
     ScorerConfig,
+    make_sandbox,
     score_stdout,
 )
 
@@ -85,7 +85,7 @@ def main() -> int:
         score_pattern=r"val_bpb:([0-9]+\.?[0-9]*)",
         direction="minimize",
     )
-    sandbox = SandboxRunner(
+    sandbox = make_sandbox(  # CRUCIBLE_SANDBOX=ax runs each mutation in AX
         _PROJECT_ROOT, sandbox_root=Path("/tmp") / "code_mutation_era_replica_sandbox"
     )
     policy = AstLocalEditPolicy(

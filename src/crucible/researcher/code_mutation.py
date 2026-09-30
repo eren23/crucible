@@ -47,6 +47,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -689,6 +690,88 @@ class SandboxRunner:
         }
 
 
+# Host-specific keys that must not reach the AX sandbox: its PATH and
+# Python differ from the host, and the workspace root is set inside it.
+_AX_HOST_ONLY_ENV_KEYS = frozenset({"PATH", "PYTHONPATH", "CRUCIBLE_PROJECT_ROOT", "HOME", "TMPDIR"})
+_AX_EXIT_RE = re.compile(r"finished, exit code (\d+)")
+
+
+class AxSandboxRunner(SandboxRunner):
+    """Run the scorer in an AX (google/ax) gVisor sandbox through ``ax-run``.
+
+    Optional: needs ``ax-run`` from https://github.com/eren23/ax-lab on
+    PATH (or ``ax_run=``) and a running lab. Crucible does not import or
+    require ax-lab; the constructor raises ``SandboxError`` if it is absent. Only ``run`` moves into the sandbox:
+    the rsync clone, diff apply and AST check stay local, because they
+    execute no mutated code. Unless ``config.allow_network`` is set, the
+    task has no network at all (Substrate denies egress), which replaces
+    the best-effort proxy variables of :class:`SandboxRunner`. Each run
+    creates and deletes one AX task, so it adds tens of seconds.
+    """
+
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        ax_run: str = "ax-run",
+        sandbox_root: Path | None = None,
+        # ax-run refuses credential files; keys go through inherit_env_keys.
+        rsync_excludes: tuple[str, ...] = (*_DEFAULT_RSYNC_EXCLUDES, ".env", ".env.*"),
+    ) -> None:
+        # ax-lab is optional: fail at construction, never fall back to an unsandboxed run.
+        if shutil.which(ax_run) is None:
+            raise SandboxError(
+                f"{ax_run!r} not found. Install ax-lab (https://github.com/eren23/ax-lab) "
+                "or unset CRUCIBLE_SANDBOX to use the local SandboxRunner."
+            )
+        super().__init__(project_root, sandbox_root=sandbox_root, rsync_excludes=rsync_excludes)
+        self.ax_run = ax_run
+
+    def run(
+        self, workspace: Path, cmd: list[str], config: SandboxConfig
+    ) -> dict[str, Any]:
+        """Run ``cmd`` in an AX task built from a snapshot of ``workspace``."""
+        # ax-run snapshots a Git worktree; the rsync clone has no .git.
+        subprocess.run(["git", "init", "-q"], cwd=str(workspace), check=True, capture_output=True)
+        subdir = shlex.quote(config.cwd_subdir)
+        script = f"export CRUCIBLE_PROJECT_ROOT=/workspace/repo && cd {subdir} && exec {shlex.join(cmd)}"
+        args = [self.ax_run, str(workspace), script, "--exec"]
+        if not config.allow_network:
+            args.append("--no-egress")
+        for key in config.inherit_env_keys:
+            if key not in _AX_HOST_ONLY_ENV_KEYS and key in os.environ:
+                args += ["--env", key]
+        with tempfile.TemporaryDirectory(prefix="ax_out_") as out:
+            env = {**os.environ, "AX_RUN_OUT": out, "AX_RUN_TIMEOUT": str(config.timeout_seconds)}
+            try:
+                # ponytail: fixed 600 s allowance for task create, upload and cleanup.
+                result = subprocess.run(
+                    args, env=env, capture_output=True, text=True,
+                    timeout=config.timeout_seconds + 600,
+                )
+            except subprocess.TimeoutExpired:
+                return {"ok": False, "returncode": -1, "stdout": "",
+                        "stderr": f"ax-run timeout after {config.timeout_seconds}s + 600s"}
+            logs = sorted(Path(out).glob("*.log"))
+            stdout = logs[0].read_text(errors="replace") if logs else ""
+        match = _AX_EXIT_RE.search(result.stdout)
+        returncode = int(match.group(1)) if match else -1
+        # run.log has the command's stdout and stderr; stderr here is ax-run's own output.
+        return {
+            "ok": returncode == 0,
+            "returncode": returncode,
+            "stdout": stdout,
+            "stderr": (result.stdout + result.stderr).strip(),
+        }
+
+
+def make_sandbox(project_root: Path, **kwargs: Any) -> SandboxRunner:
+    """Return :class:`AxSandboxRunner` if ``CRUCIBLE_SANDBOX=ax``, else :class:`SandboxRunner`."""
+    if os.environ.get("CRUCIBLE_SANDBOX") == "ax":
+        return AxSandboxRunner(project_root, **kwargs)
+    return SandboxRunner(project_root, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Execution helper — diff → sandbox → score → MutationResult
 # ---------------------------------------------------------------------------
@@ -890,7 +973,7 @@ class AstLocalEditPolicy(CodeMutationPolicy):
             raise CodeMutationError(
                 "AstLocalEditPolicy needs project_root to construct a SandboxRunner"
             )
-        self._sandbox = SandboxRunner(self.project_root)
+        self._sandbox = make_sandbox(self.project_root)
         return self._sandbox
 
     def validate(self, proposal: MutationProposal) -> list[str]:
@@ -1223,7 +1306,7 @@ class LlmDiffPolicy(CodeMutationPolicy):
             raise CodeMutationError(
                 "LlmDiffPolicy needs project_root to construct a SandboxRunner"
             )
-        self._sandbox = SandboxRunner(self.project_root)
+        self._sandbox = make_sandbox(self.project_root)
         return self._sandbox
 
     def validate(self, proposal: MutationProposal) -> list[str]:
