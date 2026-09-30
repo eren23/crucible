@@ -37,9 +37,10 @@ PYTHONPATH=src python3 examples/code_mutation_era_replica/run_demo.py
 ```
 
 You'll see a baseline score, three mutation results, and a leaderboard
-sorted by val_bpb. Expected outcome: `hidden_dim_16` wins by the
-biggest margin; `lr_0p2` improves moderately; `gelu_activation` may or
-may not improve depending on seed.
+sorted by val_bpb. Expected outcome with the fixed seed: `hidden_dim_16`
+wins by a large margin (0.0076 against a 0.149 baseline). `lr_0p2` (0.355)
+and `gelu_activation` (0.431) score worse than the baseline on this tiny
+net. A mutation that loses is still a valid result for the search.
 
 ## Plugging in an LLM (real ERA loop)
 

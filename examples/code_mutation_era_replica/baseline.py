@@ -28,10 +28,12 @@ N_POINTS = 256
 
 
 def _activate(x: float, kind: str) -> float:
-    if kind == "relu":
-        return max(0.0, x)
+    # gelu is checked before relu on purpose: the demo's swap_literal "relu" -> "gelu"
+    # also rewrites the relu check below, which must then stay unreachable.
     if kind == "gelu":
         return 0.5 * x * (1.0 + math.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * x ** 3)))
+    if kind == "relu":
+        return max(0.0, x)
     if kind == "tanh":
         return math.tanh(x)
     if kind == "sigmoid":
