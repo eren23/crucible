@@ -699,8 +699,9 @@ _AX_EXIT_RE = re.compile(r"finished, exit code (\d+)")
 class AxSandboxRunner(SandboxRunner):
     """Run the scorer in an AX (google/ax) gVisor sandbox through ``ax-run``.
 
-    Needs ``ax-run`` from https://github.com/eren23/ax-lab on PATH (or
-    ``ax_run=``) and a running lab. Only ``run`` moves into the sandbox:
+    Optional: needs ``ax-run`` from https://github.com/eren23/ax-lab on
+    PATH (or ``ax_run=``) and a running lab. Crucible does not import or
+    require ax-lab; the constructor raises ``SandboxError`` if it is absent. Only ``run`` moves into the sandbox:
     the rsync clone, diff apply and AST check stay local, because they
     execute no mutated code. Unless ``config.allow_network`` is set, the
     task has no network at all (Substrate denies egress), which replaces
@@ -717,6 +718,12 @@ class AxSandboxRunner(SandboxRunner):
         # ax-run refuses credential files; keys go through inherit_env_keys.
         rsync_excludes: tuple[str, ...] = (*_DEFAULT_RSYNC_EXCLUDES, ".env", ".env.*"),
     ) -> None:
+        # ax-lab is optional: fail at construction, never fall back to an unsandboxed run.
+        if shutil.which(ax_run) is None:
+            raise SandboxError(
+                f"{ax_run!r} not found. Install ax-lab (https://github.com/eren23/ax-lab) "
+                "or unset CRUCIBLE_SANDBOX to use the local SandboxRunner."
+            )
         super().__init__(project_root, sandbox_root=sandbox_root, rsync_excludes=rsync_excludes)
         self.ax_run = ax_run
 

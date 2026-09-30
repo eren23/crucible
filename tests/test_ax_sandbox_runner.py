@@ -5,9 +5,12 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from crucible.researcher.code_mutation import (
     AxSandboxRunner,
     SandboxConfig,
+    SandboxError,
     SandboxRunner,
     make_sandbox,
 )
@@ -71,6 +74,13 @@ def test_make_sandbox_selects_by_env(tmp_path, monkeypatch):
     monkeypatch.delenv("CRUCIBLE_SANDBOX", raising=False)
     assert type(make_sandbox(tmp_path)) is SandboxRunner
     monkeypatch.setenv("CRUCIBLE_SANDBOX", "ax")
-    runner = make_sandbox(tmp_path)
+    fake, _ = _runner(tmp_path)
+    runner = make_sandbox(tmp_path, ax_run=fake.ax_run)
     assert isinstance(runner, AxSandboxRunner)
     assert ".env" in runner.rsync_excludes
+
+
+def test_missing_ax_run_fails_loudly_without_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("CRUCIBLE_SANDBOX", "ax")
+    with pytest.raises(SandboxError, match="Install ax-lab"):
+        make_sandbox(tmp_path, ax_run=str(tmp_path / "no-such-ax-run"))
