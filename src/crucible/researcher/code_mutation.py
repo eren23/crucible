@@ -942,6 +942,8 @@ class AstLocalEditPolicy(CodeMutationPolicy):
       Replaces every ``ast.Name`` AND ``ast.Attribute`` whose name matches ``old``.
     - ``swap_literal`` — ``{"kind": "swap_literal", "old": 0.1, "new": 0.2}``
       Replaces every ``ast.Constant`` whose value equals ``old``.
+      This includes comparisons such as ``kind == "relu"``, which can turn
+      the mutation into a no-op. Use a literal that is unique in the file.
     - ``swap_attribute`` — ``{"kind": "swap_attribute", "old": "GELU", "new": "SiLU"}``
       Like swap_identifier but only matches attributes (e.g. ``nn.GELU`` → ``nn.SiLU``).
 
